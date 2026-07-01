@@ -160,6 +160,7 @@ textarea {
 }
 
 .trade-row .time,
+.trade-row .trade-meta,
 .trade-row .tags {
   color: #8b949e;
   font-size: 12px;
@@ -167,6 +168,7 @@ textarea {
 
 .trade-row .profit,
 .trade-row .loss,
+.trade-row .trade-meta,
 .trade-row .tags {
   grid-column: span 3;
 }
@@ -298,7 +300,19 @@ p {
 
 .drawing-shape {
   pointer-events: stroke;
-  cursor: pointer;
+  cursor: grab;
+}
+
+.drawing-shape:active {
+  cursor: grabbing;
+}
+
+.drawing-handle {
+  fill: #facc15;
+  stroke: #101318;
+  stroke-width: 2;
+  pointer-events: all;
+  cursor: move;
 }
 
 .chart-status,

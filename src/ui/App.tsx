@@ -2,7 +2,7 @@ import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, Crossha
 import { ChevronDown, ChevronUp, Eraser, Minus, Search, Slash } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Candlestick } from '../domain/candlestick';
-import type { ChartDrawing, ChartDrawingKind, ChartPoint } from '../domain/drawing';
+import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
@@ -23,6 +23,14 @@ const sortLabels: Record<SortField, string> = {
   returnRate: '收益率',
   profit: '收益',
   holdingMinutes: '持仓',
+};
+
+type DrawingDragTarget = 'body' | 'start' | 'end';
+
+type DrawingDrag = {
+  drawing: ChartDrawing;
+  target: DrawingDragTarget;
+  startPoint: ChartPoint;
 };
 
 export function App() {
@@ -104,6 +112,7 @@ export function App() {
               <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
               <strong>{trade.instrument}</strong>
               <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
+              <span className="trade-meta">{formatLeverage(trade.leverage)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
               <span className={trade.profit >= 0 ? 'profit' : 'loss'}>{formatPercent(trade.returnRate)} / {trade.profit.toFixed(2)}</span>
               <span className="tags">{trade.review?.tags.join(' · ') || '未标记'}</span>
             </button>
@@ -157,6 +166,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const activeKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
+  const dragRef = useRef<DrawingDrag | null>(null);
   const [status, setStatus] = useState('加载 K 线');
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
@@ -338,7 +348,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     }
   }
 
-  async function saveDrawing(input: Omit<ChartDrawing, 'id' | 'createdAt' | 'updatedAt'>) {
+  async function saveDrawing(input: SaveChartDrawingInput) {
     const saved = (await fetch('/api/drawings', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -371,6 +381,40 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     setDraftPoint(null);
   }
 
+  function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
+    if (drawing.id === 'draft') return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDrawingTool(null);
+    setSelectedDrawingId(drawing.id);
+    dragRef.current = { drawing, target, startPoint: point };
+    overlayRef.current?.setPointerCapture(event.pointerId);
+  }
+
+  function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    if (!point) return;
+    event.preventDefault();
+    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
+    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
+  }
+
+  function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    dragRef.current = null;
+    overlayRef.current?.releasePointerCapture(event.pointerId);
+    if (!point) return;
+    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
+    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
+    void saveDrawing(updated);
+  }
+
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; }}>
       <div className="drawing-toolbar">
@@ -379,15 +423,15 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
       </div>
       <div ref={chartRef} className="chart" />
-      <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick}>
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} />
+      <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
+        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
     </div>
   );
 }
 
-function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series, timeframe, candles, version, onSelect }: {
+function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
   drawings: ChartDrawing[];
   selectedDrawingId: string;
   draftPoint: ChartPoint | null;
@@ -397,38 +441,74 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series
   candles: Candlestick[];
   version: number;
   onSelect: (id: string) => void;
+  onPointerDown: (event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) => void;
 }) {
   void version;
   if (!chart || !series) return null;
   return (
     <>
-      {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} />)}
-      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: 'segment', points: [draftPoint, draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} />}
+      {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} onPointerDown={onPointerDown} />)}
+      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: 'segment', points: [draftPoint, draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
     </>
   );
 }
 
-function DrawingShape({ drawing, selected, chart, series, timeframe, candles, onSelect }: { drawing: ChartDrawing; selected: boolean; chart: IChartApi; series: ISeriesApi<'Candlestick'>; timeframe: ReviewTimeframe; candles: Candlestick[]; onSelect: (id: string) => void }) {
+function DrawingShape({ drawing, selected, chart, series, timeframe, candles, onSelect, onPointerDown }: { drawing: ChartDrawing; selected: boolean; chart: IChartApi; series: ISeriesApi<'Candlestick'>; timeframe: ReviewTimeframe; candles: Candlestick[]; onSelect: (id: string) => void; onPointerDown: (event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) => void }) {
   const points = drawing.points.map((point) => pointToScreen(drawing.kind === 'horizontal' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
   if (points.some((point) => !point)) return null;
   const color = selected ? '#FACC15' : '#38BDF8';
   const width = selected ? 3 : 2;
   if (drawing.kind === 'horizontal') {
     const y = points[0]!.y;
-    return <line x1="0" x2="100%" y1={y} y2={y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} />;
+    return (
+      <g>
+        <line x1="0" x2="100%" y1={y} y2={y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
+        {selected && <circle cx="24" cy={y} r="5" className="drawing-handle" onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />}
+      </g>
+    );
   }
-  return <line x1={points[0]!.x} y1={points[0]!.y} x2={points[1]!.x} y2={points[1]!.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} />;
+  return (
+    <g>
+      <line x1={points[0]!.x} y1={points[0]!.y} x2={points[1]!.x} y2={points[1]!.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
+      {selected && <circle cx={points[0]!.x} cy={points[0]!.y} r="5" className="drawing-handle" onPointerDown={(event) => onPointerDown(event, drawing, 'start')} />}
+      {selected && <circle cx={points[1]!.x} cy={points[1]!.y} r="5" className="drawing-handle" onPointerDown={(event) => onPointerDown(event, drawing, 'end')} />}
+    </g>
+  );
 }
 
 function pointFromMouse(event: React.MouseEvent<SVGSVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
+  return pointFromClient(event.clientX, event.clientY, chart, series, overlay);
+}
+
+function pointFromPointer(event: React.PointerEvent<SVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
+  return pointFromClient(event.clientX, event.clientY, chart, series, overlay);
+}
+
+function pointFromClient(clientX: number, clientY: number, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
   if (!chart || !series || !overlay) return null;
   const rect = overlay.getBoundingClientRect();
-  const x = event.clientX - rect.left;
-  const y = event.clientY - rect.top;
+  const x = clientX - rect.left;
+  const y = clientY - rect.top;
   const time = chart.timeScale().coordinateToTime(x);
   const price = series.coordinateToPrice(y);
   if (typeof time !== 'number' || price == null) return null;
   return { time, price };
+}
+
+function moveDrawing(drawing: ChartDrawing, target: DrawingDragTarget, startPoint: ChartPoint, currentPoint: ChartPoint): ChartDrawing {
+  const priceDelta = currentPoint.price - startPoint.price;
+  const timeDelta = currentPoint.time - startPoint.time;
+  const points = drawing.points.map((point, index) => {
+    if (drawing.kind === 'horizontal') {
+      return { ...point, price: point.price + priceDelta };
+    }
+    if (target === 'body') {
+      return { time: point.time + timeDelta, price: point.price + priceDelta };
+    }
+    const shouldMove = (target === 'start' && index === 0) || (target === 'end' && index === 1);
+    return shouldMove ? { time: currentPoint.time, price: currentPoint.price } : point;
+  });
+  return { ...drawing, points };
 }
 
 function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'Candlestick'>): { x: number; y: number } | null {
@@ -489,4 +569,8 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatLeverage(value: number): string {
+  return `${Number.isInteger(value) ? value.toString() : value.toFixed(2)}x`;
 }
