@@ -88,6 +88,46 @@ _Avoid_: profit-ranked list as the default view
 A condition that narrows the **Review Queue**. The first version supports filters by instrument, direction, time range, profit/loss result, review tag, and whether a review note exists.
 _Avoid_: permanent grouping, saved screen
 
+**Free Replay**:
+A review mode for studying market movement from a reviewer-chosen **Instrument** and start time without requiring a **Trade**. A **Free Replay** reveals **Candlesticks** progressively from that start time in the active **Review Timeframe**.
+_Avoid_: trade review, backtest, simulator
+
+**Free Replay Instrument List**:
+The selectable **Instruments** for **Free Replay**, loaded from OKX public SWAP instruments instead of only from the **Source Workbook**. The first version limits free replay selection to swap instruments so the instrument language stays consistent with `BTC-USDT-SWAP` style futures review.
+_Avoid_: source workbook instruments only, futures expiry list, spot pair list
+
+**Trade Review**:
+A review mode for studying a completed **Trade** with its entry, exit, review tags, review note, and chart drawings. Trade review uses the **Review Queue** to choose which trade is active.
+_Avoid_: free replay, generic chart browsing
+
+**Free Replay Cursor**:
+The rightmost revealed **Candlestick** in a **Free Replay**. When the reviewer chooses a start time, the **Free Replay Cursor** belongs to the **Candlestick** whose time range contains the chosen time; when the reviewer switches **Review Timeframes**, it belongs to the candlestick whose time range contains the previous cursor candlestick's open time.
+_Avoid_: chart center, mouse cursor, selected trade time
+
+**Free Replay Reveal**:
+The act of adding the next **Candlestick** to a **Free Replay** without removing previously revealed candlesticks. Revealing a candlestick advances the **Free Replay Cursor** but does not automatically move the visible chart range; future candlestick data may be prefetched but remains hidden until revealed.
+_Avoid_: auto-play, scrolling the chart, replacing the visible window
+
+**Free Replay Rewind**:
+The act of hiding the latest revealed **Candlestick** in a **Free Replay** and moving the **Free Replay Cursor** back to the previous revealed candlestick. Rewind cannot move before the first candlestick selected by the replay start time.
+_Avoid_: chart undo, browser back, deleting candlestick data
+
+**Free Replay History**:
+The candlesticks before the **Free Replay Cursor** that give the reviewer market context at the replay start. Free replay history loads on demand like the normal **Review Window**, while future candlesticks remain hidden until **Free Replay Reveal** exposes them.
+_Avoid_: hidden past, replay future, fixed preload
+
+**Free Replay Chart Context**:
+The chart content shown during a **Free Replay**: candlesticks and instrument-level **Chart Drawings**, but not **Trade** entry or exit markers. Trade markers belong to **Trade Review** because free replay should not reveal the reviewer's past trade decisions.
+_Avoid_: trade hints, entry marker, exit marker
+
+**Free Replay Session**:
+The temporary in-page state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, and **Free Replay Cursor**. The first version does not save free replay sessions between page visits.
+_Avoid_: saved replay, review note, journal entry
+
+**Free Replay Start Time**:
+The reviewer-chosen local date and minute where a **Free Replay** begins. The start time is placed on the containing **Candlestick** in the active **Review Timeframe**.
+_Avoid_: second-level timestamp, exchange server time, exact tick
+
 ## Example Dialogue
 
 Reviewer: Show me the BTC-USDT-SWAP trade from 2022-05-24 on the candlestick chart.
@@ -127,3 +167,47 @@ Reviewer: This is a local review tool for my own replay work, not a shared team 
 Developer: The review queue starts from the earliest trade and moves forward through time.
 
 Reviewer: I can filter the queue by instrument, direction, date, result, tag, or missing review note.
+
+Reviewer: I also want to choose BTC-USDT-SWAP and start from a specific time, then reveal candlesticks one by one.
+
+Developer: That is a free replay, because it studies the instrument's candlesticks directly instead of starting from a trade.
+
+Reviewer: I want to switch between reviewing my completed trades and replaying any instrument from any time.
+
+Developer: Trade review and free replay are separate review modes, because one starts from the review queue and the other starts from an instrument and replay start time.
+
+Reviewer: Free replay should let me choose instruments even if I did not trade them before.
+
+Developer: The free replay instrument list comes from OKX swap instruments, not only from the source workbook.
+
+Reviewer: If I start at 10:07 on the 15-minute chart, which candlestick appears first?
+
+Developer: The free replay cursor is the 10:00 candlestick, because that candlestick contains 10:07.
+
+Reviewer: If I have revealed up to the 10:35 candlestick on the five-minute chart and switch to fifteen minutes, where does replay land?
+
+Developer: It lands on the 10:30 candlestick, because the previous cursor candlestick's open time belongs to that fifteen-minute candlestick.
+
+Reviewer: When I press the right arrow, show the next candlestick, but do not move my chart view.
+
+Developer: A free replay reveal appends the next candlestick and advances the cursor, while leaving the visible chart range under the reviewer's control.
+
+Reviewer: I still want to see the market structure before my chosen start time.
+
+Developer: Free replay history shows and expands earlier candlesticks on demand, while later candlesticks remain controlled by reveal and rewind.
+
+Reviewer: If I press the left arrow, hide the latest candlestick and go back one step.
+
+Developer: Free replay rewind removes only the latest revealed candlestick from view and cannot rewind before the starting candlestick.
+
+Reviewer: If I close the page, the free replay progress does not need to come back.
+
+Developer: Free replay session state is temporary; only chart drawings remain saved across sessions.
+
+Reviewer: I want to choose the free replay start time from a picker.
+
+Developer: The free replay start time is selected as a local date and minute, then mapped to the containing candlestick.
+
+Reviewer: Do not show my historical trade entry and exit markers during free replay.
+
+Developer: Free replay chart context excludes trade markers so the reviewer can judge the market without seeing past trade decisions.
