@@ -1,4 +1,4 @@
-import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type Time, type UTCTimestamp } from 'lightweight-charts';
+import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { ChevronDown, ChevronUp, Eraser, Minus, Search, Slash } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Candlestick } from '../domain/candlestick';
@@ -7,9 +7,13 @@ import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
-import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
-import { entryVisibleRange, formatChartTime, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { visibleRangeForAnchor, visibleRangeForLatestAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
+import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { candlestickAtTime, formatCandlestickPrice } from './candlestick-readout';
+import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
+import { nextFreeReplayCursor, previousFreeReplayCursor, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import { ReviewEditor } from './ReviewEditor';
+import { firstUnreviewedTrade, reviewProgress } from './review-progress';
 import { tradeMarkers } from './trade-markers';
 
 type TradeResponse = {
@@ -26,6 +30,7 @@ const sortLabels: Record<SortField, string> = {
 };
 
 type DrawingDragTarget = 'body' | 'start' | 'end';
+type ReviewMode = 'trade' | 'freeReplay';
 
 type DrawingDrag = {
   drawing: ChartDrawing;
@@ -37,8 +42,14 @@ export function App() {
   const [filters, setFilters] = useState<ReviewQueueOptions>({ sortField: 'entryTime', sortDirection: 'asc' });
   const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [] });
   const [selectedId, setSelectedId] = useState<string>('');
+  const selectedTradeRowRef = useRef<HTMLButtonElement | null>(null);
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
+  const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
+  const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
+  const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
   const selectedTrade = data.trades.find((trade) => trade.id === selectedId) ?? data.trades[0] ?? null;
+  const progress = reviewProgress(data.trades, selectedTrade?.id ?? '');
+  const nextUnreviewedTrade = firstUnreviewedTrade(data.trades);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -61,9 +72,54 @@ export function App() {
     }));
   }
 
+  function revealNextFreeReplayCandle() {
+    setFreeReplay((current) => current ? { ...current, cursorTime: nextFreeReplayCursor(freeReplayCandles, current.cursorTime) } : current);
+  }
+
+  function rewindFreeReplayCandle() {
+    setFreeReplay((current) => current ? { ...current, cursorTime: previousFreeReplayCursor(freeReplayCandles, current.cursorTime, current.startCursorTime) } : current);
+  }
+
+  function switchFreeReplayTimeframe(nextTimeframe: ReviewTimeframe) {
+    setTimeframe(nextTimeframe);
+    setFreeReplay((current) => current ? {
+      ...current,
+      startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe),
+      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.cursorTime, nextTimeframe),
+    } : current);
+  }
+
+  useEffect(() => {
+    if (reviewMode !== 'freeReplay') return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        revealNextFreeReplayCandle();
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        rewindFreeReplayCandle();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [reviewMode, freeReplayCandles]);
+
+  useEffect(() => {
+    selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
+  }, [selectedId]);
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
+        <div className="mode-switch">
+          <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>Trade Review</button>
+          <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>Free Replay</button>
+        </div>
+        {reviewMode === 'trade' ? (
+          <>
         <div className="toolbar">
           <div className="search-block">
             <Search size={16} />
@@ -105,10 +161,22 @@ export function App() {
             </button>
           </div>
         </div>
-        <div className="trade-count">{data.trades.length.toLocaleString()} 笔</div>
+        <div className="review-progress" aria-label="Review progress">
+          <div>
+            <span>当前</span>
+            <strong>{progress.current ? progress.current.toLocaleString() : '-'} / {progress.total.toLocaleString()}</strong>
+          </div>
+          <div>
+            <span>已复盘</span>
+            <strong>{progress.reviewed.toLocaleString()} / {progress.total.toLocaleString()}</strong>
+          </div>
+          <button className="continue-review" disabled={!nextUnreviewedTrade} onClick={() => nextUnreviewedTrade && setSelectedId(nextUnreviewedTrade.id)}>
+            {nextUnreviewedTrade ? '继续复盘' : '已完成'}
+          </button>
+        </div>
         <div className="trade-list">
           {data.trades.map((trade) => (
-            <button key={trade.id} className={`trade-row ${trade.id === selectedTrade?.id ? 'active' : ''}`} onClick={() => setSelectedId(trade.id)}>
+            <button key={trade.id} ref={trade.id === selectedTrade?.id ? selectedTradeRowRef : null} className={`trade-row ${trade.id === selectedTrade?.id ? 'active' : ''}`} onClick={() => setSelectedId(trade.id)}>
               <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
               <strong>{trade.instrument}</strong>
               <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
@@ -118,9 +186,26 @@ export function App() {
             </button>
           ))}
         </div>
+          </>
+        ) : <FreeReplayPanel timeframe={timeframe} onStart={(next) => { setFreeReplay(next); setFreeReplayCandles([]); }} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} />}
       </aside>
       <section className="workspace">
-        {selectedTrade ? (
+        {reviewMode === 'freeReplay' ? freeReplay ? (
+          <>
+            <header className="detail-header">
+              <div>
+                <h1>{freeReplay.instrument}</h1>
+                <p>Free Replay from {freeReplay.startTime}</p>
+              </div>
+              <div className="timeframes">
+                {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => switchFreeReplayTimeframe(item)}>{item}</button>)}
+              </div>
+            </header>
+            <FreeReplayChart replay={freeReplay} timeframe={timeframe} onCandlesLoaded={setFreeReplayCandles} />
+          </>
+        ) : (
+          <div className="empty-state">Choose an instrument and start time to begin Free Replay</div>
+        ) : selectedTrade ? (
           <>
             <header className="detail-header">
               <div>
@@ -150,6 +235,337 @@ export function App() {
   );
 }
 
+function FreeReplayChart({ replay, timeframe, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; onCandlesLoaded: (candles: Candlestick[]) => void }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<SVGSVGElement>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const chartApiRef = useRef<IChartApi | null>(null);
+  const loadingFutureRef = useRef(false);
+  const lastFutureLoadAnchorRef = useRef<number | null>(null);
+  const loadingEarlierRef = useRef(false);
+  const lastLoadEarlierRangeRef = useRef<VisibleTimeRange | null>(null);
+  const initializedRangeKeyRef = useRef('');
+  const suppressAutoLoadRef = useRef(false);
+  const pointerRef = useRef<{ inside: boolean; x: number }>({ inside: false, x: 0 });
+  const pendingRenderRef = useRef(false);
+  const idleTimerRef = useRef<number | null>(null);
+  const latestAnchorRef = useRef<NavigationAnchor | null>(null);
+  const loadedCandlesRef = useRef<Candlestick[]>([]);
+  const dragRef = useRef<DrawingDrag | null>(null);
+  const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
+  const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
+  const [status, setStatus] = useState('Loading candlesticks');
+  const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
+  const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
+  const [selectedDrawingId, setSelectedDrawingId] = useState('');
+  const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
+  const [overlayVersion, setOverlayVersion] = useState(0);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const chart = createChart(chartRef.current, {
+      layout: { background: { type: ColorType.Solid, color: '#101318' }, textColor: '#C9D1D9' },
+      grid: { vertLines: { color: '#222832' }, horzLines: { color: '#222832' } },
+      rightPriceScale: { borderColor: '#2D333B' },
+      crosshair: { mode: CrosshairMode.Normal },
+      localization: {
+        locale: 'zh-CN',
+        timeFormatter: (time: Time) => formatChartTime(time, timeframe),
+      },
+      timeScale: {
+        borderColor: '#2D333B',
+        tickMarkFormatter: (time: Time) => formatChartTime(time, timeframe),
+      },
+      autoSize: true,
+    });
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: '#16A34A',
+      downColor: '#DC2626',
+      borderVisible: false,
+      wickUpColor: '#16A34A',
+      wickDownColor: '#DC2626',
+    });
+    chartApiRef.current = chart;
+    seriesRef.current = series;
+    const refreshOverlay = () => setOverlayVersion((version) => version + 1);
+    chart.timeScale().subscribeVisibleTimeRangeChange(refreshOverlay);
+    return () => chart.remove();
+  }, []);
+
+  useEffect(() => {
+    setSelectedDrawingId('');
+    setDraftPoint(null);
+    fetch(`/api/drawings?${new URLSearchParams({ instrument: replay.instrument })}`)
+      .then((response) => response.json())
+      .then(({ drawings: next }: { drawings?: ChartDrawing[] }) => setDrawings(next ?? []));
+  }, [replay.instrument]);
+
+  useEffect(() => {
+    setStatus('Loading candlesticks');
+    lastFutureLoadAnchorRef.current = null;
+    lastLoadEarlierRangeRef.current = null;
+    initializedRangeKeyRef.current = '';
+    pendingRenderRef.current = false;
+    latestAnchorRef.current = null;
+    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.startTime, mode: 'initial' });
+    fetch(`/api/candles?${params}`)
+      .then((response) => response.json())
+      .then(({ candles }: { candles: Candlestick[] }) => {
+        const merged = mergeCandles(candles);
+        updateLoadedCandles(merged);
+        setRenderedCandles(merged);
+        setStatus(merged.length ? '' : 'No candlesticks');
+      })
+      .catch(() => setStatus('Candlestick loading failed'));
+  }, [replay.instrument, replay.startTime, timeframe]);
+
+  useEffect(() => {
+    const series = seriesRef.current;
+    const chart = chartApiRef.current;
+    if (!series || !chart) return;
+    const visibleCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime);
+    const range = entryVisibleRange(replay.startTime, timeframe);
+    const rangeTo = Math.floor(replay.cursorTime + timeframeMs(timeframe) * 10 / 1000) as UTCTimestamp;
+    series.setData(chartDataWithWhitespace(visibleCandles, [Number(range.from) * 1000, Number(rangeTo) * 1000]));
+    const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
+    if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey) {
+      initializedRangeKeyRef.current = rangeKey;
+      suppressAutoLoadRef.current = true;
+      chart.timeScale().setVisibleRange({ from: range.from, to: rangeTo });
+      window.setTimeout(() => {
+        suppressAutoLoadRef.current = false;
+      }, 0);
+    }
+  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
+
+  useEffect(() => {
+    if (!loadedCandlesRef.current.length) return;
+    setRenderedCandles(loadedCandlesRef.current);
+  }, [replay.cursorTime]);
+
+  useEffect(() => {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    const handler = (_range: LogicalRange | null) => {
+      if (suppressAutoLoadRef.current) return;
+      const visible = chart.timeScale().getVisibleRange();
+      if (!visible || loadedCandles.length < 2) return;
+      latestAnchorRef.current = captureFreeReplayNavigationAnchor(chart) ?? latestAnchorRef.current;
+      const visibleRange = { from: Number(visible.from), to: Number(visible.to) };
+      if (!Number.isFinite(visibleRange.from) || !Number.isFinite(visibleRange.to)) return;
+      const first = loadedCandles[0].timestamp / 1000;
+      const last = loadedCandles[loadedCandles.length - 1].timestamp / 1000;
+      const span = visibleRange.to - visibleRange.from;
+      const threshold = Math.max(span * 0.35, inferCandleStep(loadedCandles) / 1000 * 20);
+      if (shouldLoadEarlier(visibleRange, { first, last }, threshold) && !isSameVisibleRange(lastLoadEarlierRangeRef.current, visibleRange)) {
+        lastLoadEarlierRangeRef.current = visibleRange;
+        void loadEarlierFreeReplayCandles();
+      }
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
+    return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
+  }, [loadedCandles, replay.instrument, replay.startTime, timeframe]);
+
+  useEffect(() => {
+    const last = loadedCandles[loadedCandles.length - 1];
+    if (!last || loadingFutureRef.current || lastFutureLoadAnchorRef.current === last.timestamp) return;
+    if (!shouldPrefetchFutureCandles(loadedCandles, replay.cursorTime, 20)) return;
+    loadingFutureRef.current = true;
+    lastFutureLoadAnchorRef.current = last.timestamp;
+    const params = new URLSearchParams({
+      instrument: replay.instrument,
+      timeframe,
+      entryTime: replay.startTime,
+      mode: 'later',
+      anchor: String(last.timestamp),
+    });
+    fetch(`/api/candles?${params}`)
+      .then((response) => response.json())
+      .then(({ candles }: { candles: Candlestick[] }) => {
+        if (!candles.length) return;
+        const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
+        loadedCandlesRef.current = merged;
+        onCandlesLoaded(merged);
+      })
+      .catch(() => {
+        setStatus('Future candlestick loading failed');
+      })
+      .finally(() => {
+        loadingFutureRef.current = false;
+      });
+  }, [loadedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
+
+  async function loadEarlierFreeReplayCandles() {
+    const chart = chartApiRef.current;
+    if (loadingEarlierRef.current || !chart || !loadedCandles.length) return;
+    loadingEarlierRef.current = true;
+    setStatus('Loading earlier candlesticks');
+    const anchor = loadedCandles[0].timestamp;
+    const params = new URLSearchParams({
+      instrument: replay.instrument,
+      timeframe,
+      entryTime: replay.startTime,
+      mode: 'earlier',
+      anchor: String(anchor),
+    });
+    try {
+      const { candles } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };
+      if (candles.length) {
+        setLoadedCandles((current) => {
+          const merged = mergeCandles([...current, ...candles]);
+          loadedCandlesRef.current = merged;
+          onCandlesLoaded(merged);
+          return merged;
+        });
+        pendingRenderRef.current = true;
+        scheduleFreeReplayPendingRender();
+      }
+      setStatus('');
+    } catch {
+      setStatus('Earlier candlestick loading failed');
+    } finally {
+      loadingEarlierRef.current = false;
+    }
+  }
+
+  function updateLoadedCandles(candles: Candlestick[]) {
+    loadedCandlesRef.current = candles;
+    setLoadedCandles(candles);
+    onCandlesLoaded(candles);
+  }
+
+  function scheduleFreeReplayPendingRender() {
+    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      applyFreeReplayPendingCandles();
+    }, 250);
+  }
+
+  function applyFreeReplayPendingCandles() {
+    if (!pendingRenderRef.current) return;
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    const visible = currentFreeReplayVisibleRange(chart);
+    if (!visible) return;
+    const anchor = latestAnchorRef.current ?? captureFreeReplayNavigationAnchor(chart);
+    pendingRenderRef.current = false;
+    suppressAutoLoadRef.current = true;
+    setRenderedCandles(loadedCandlesRef.current);
+    if (anchor) {
+      chart.timeScale().setVisibleRange(visibleRangeForLatestAnchor(visible, anchor) as { from: UTCTimestamp; to: UTCTimestamp });
+    } else {
+      chart.timeScale().setVisibleRange(visible as { from: UTCTimestamp; to: UTCTimestamp });
+    }
+    window.setTimeout(() => {
+      suppressAutoLoadRef.current = false;
+    }, 0);
+  }
+
+  function captureFreeReplayNavigationAnchor(chart: IChartApi): NavigationAnchor | null {
+    const visible = currentFreeReplayVisibleRange(chart);
+    if (!visible) return null;
+    const rect = chartRef.current?.getBoundingClientRect();
+    if (pointerRef.current.inside && rect && rect.width > 0) {
+      const x = Math.min(Math.max(pointerRef.current.x - rect.left, 0), rect.width);
+      const time = chart.timeScale().coordinateToTime(x);
+      if (typeof time === 'number') return { time, ratio: x / rect.width };
+    }
+    return { time: (visible.from + visible.to) / 2, ratio: 0.5 };
+  }
+
+  function currentFreeReplayVisibleRange(chart: IChartApi): NumericVisibleRange | null {
+    const visible = chart.timeScale().getVisibleRange();
+    if (!visible) return null;
+    const from = Number(visible.from);
+    const to = Number(visible.to);
+    return Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null;
+  }
+
+  async function saveDrawing(input: SaveChartDrawingInput) {
+    const saved = (await fetch('/api/drawings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    }).then((response) => response.json())) as ChartDrawing;
+    setDrawings((current) => [...current.filter((drawing) => drawing.id !== saved.id), saved]);
+    setSelectedDrawingId(saved.id);
+  }
+
+  async function deleteSelectedDrawing() {
+    if (!selectedDrawingId) return;
+    await fetch(`/api/drawings?${new URLSearchParams({ id: selectedDrawingId })}`, { method: 'DELETE' });
+    setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawingId));
+    setSelectedDrawingId('');
+  }
+
+  function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
+    if (!drawingTool) return;
+    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    if (!point) return;
+    if (drawingTool === 'horizontal') {
+      void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: 'horizontal', points: [point] });
+      return;
+    }
+    if (!draftPoint) {
+      setDraftPoint(point);
+      return;
+    }
+    void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: 'segment', points: [draftPoint, point] });
+    setDraftPoint(null);
+  }
+
+  function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
+    if (drawing.id === 'draft') return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDrawingTool(null);
+    setSelectedDrawingId(drawing.id);
+    dragRef.current = { drawing, target, startPoint: point };
+    overlayRef.current?.setPointerCapture(event.pointerId);
+  }
+
+  function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    if (!point) return;
+    event.preventDefault();
+    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
+    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
+  }
+
+  function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    dragRef.current = null;
+    overlayRef.current?.releasePointerCapture(event.pointerId);
+    if (!point) return;
+    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
+    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
+    void saveDrawing(updated);
+  }
+
+  return (
+    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; }}>
+      <div className="drawing-toolbar">
+        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="Horizontal line" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
+        <button className={drawingTool === 'segment' ? 'selected' : ''} title="Segment" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
+        <button title="Delete selected drawing" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
+      </div>
+      <div ref={chartRef} className="chart" />
+      <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
+        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
+      </svg>
+      {status && <div className="chart-status">{status}</div>}
+    </div>
+  );
+}
+
 function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: ReviewTimeframe }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<SVGSVGElement>(null);
@@ -172,6 +588,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string>('');
   const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
+  const [activeCandle, setActiveCandle] = useState<Candlestick | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
 
   useEffect(() => {
@@ -202,7 +619,11 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
     const refreshOverlay = () => setOverlayVersion((version) => version + 1);
+    const updateActiveCandle = (param: MouseEventParams) => {
+      setActiveCandle(candlestickAtTime(renderedCandlesRef.current, param.time));
+    };
     chart.timeScale().subscribeVisibleTimeRangeChange(refreshOverlay);
+    chart.subscribeCrosshairMove(updateActiveCandle);
     return () => chart.remove();
   }, []);
 
@@ -220,6 +641,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     activeKeyRef.current = key;
     candlesRef.current = [];
     renderedCandlesRef.current = [];
+    setActiveCandle(null);
     loadingRef.current = { earlier: false, later: false };
     lastLoadRangeRef.current = { earlier: null, later: null };
     pendingRenderRef.current = false;
@@ -416,17 +838,34 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   }
 
   return (
-    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; }}>
+    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; setActiveCandle(null); }}>
       <div className="drawing-toolbar">
         <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
         <button className={drawingTool === 'segment' ? 'selected' : ''} title="线段" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
       </div>
+      <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
+    </div>
+  );
+}
+
+function CandlestickReadout({ candle, timeframe }: { candle: Candlestick | null; timeframe: ReviewTimeframe }) {
+  if (!candle) return null;
+  const fields = [
+    ['开', candle.open],
+    ['高', candle.high],
+    ['低', candle.low],
+    ['收', candle.close],
+  ] as const;
+  return (
+    <div className="candlestick-readout">
+      <span className="readout-time">{formatChartTime(Math.floor(candle.timestamp / 1000) as UTCTimestamp, timeframe)}</span>
+      {fields.map(([label, value]) => <span key={label}><span>{label}</span>{formatCandlestickPrice(value)}</span>)}
     </div>
   );
 }
@@ -454,12 +893,11 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series
 }
 
 function DrawingShape({ drawing, selected, chart, series, timeframe, candles, onSelect, onPointerDown }: { drawing: ChartDrawing; selected: boolean; chart: IChartApi; series: ISeriesApi<'Candlestick'>; timeframe: ReviewTimeframe; candles: Candlestick[]; onSelect: (id: string) => void; onPointerDown: (event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) => void }) {
-  const points = drawing.points.map((point) => pointToScreen(drawing.kind === 'horizontal' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
-  if (points.some((point) => !point)) return null;
   const color = selected ? '#FACC15' : '#38BDF8';
   const width = selected ? 3 : 2;
   if (drawing.kind === 'horizontal') {
-    const y = points[0]!.y;
+    const y = series.priceToCoordinate(drawing.points[0]?.price ?? NaN);
+    if (y == null) return null;
     return (
       <g>
         <line x1="0" x2="100%" y1={y} y2={y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
@@ -467,6 +905,8 @@ function DrawingShape({ drawing, selected, chart, series, timeframe, candles, on
       </g>
     );
   }
+  const points = drawing.points.map((point) => pointToScreen({ ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
+  if (points.some((point) => !point)) return null;
   return (
     <g>
       <line x1={points[0]!.x} y1={points[0]!.y} x2={points[1]!.x} y2={points[1]!.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
@@ -548,7 +988,8 @@ function chartDataWithWhitespace(candles: Candlestick[], extraTimestamps: number
     .map((timestamp) => Math.floor(timestamp / 1000) as UTCTimestamp)
     .filter((time) => !occupied.has(time))
     .map((time) => ({ time }));
-  return [...left, ...real, ...right, ...extraWhitespace].sort((a, b) => Number(a.time) - Number(b.time));
+  const sorted = [...left, ...real, ...right, ...extraWhitespace].sort((a, b) => Number(a.time) - Number(b.time));
+  return [...new Map(sorted.map((item) => [Number(item.time), item])).values()];
 }
 
 function inferCandleStep(candles: Candlestick[]): number {

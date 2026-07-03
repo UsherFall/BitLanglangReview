@@ -9,7 +9,7 @@ export type ChartPoint = {
 
 export type ChartDrawing = {
   id: string;
-  tradeId: string;
+  tradeId: string | null;
   instrument: string;
   timeframe: ReviewTimeframe;
   kind: ChartDrawingKind;

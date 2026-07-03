@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
-import { formatChartTime, markerTimeForEvent, timeframeTimeForPoint } from '../src/ui/chart-time';
+import { formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, markerTimeForEvent, timeframeTimeForPoint } from '../src/ui/chart-time';
 
 describe('Chart Time', () => {
   it('places a trade point on the review timeframe candlestick that contains it', () => {
@@ -43,6 +43,18 @@ describe('Chart Time', () => {
     ];
 
     expect(timeframeTimeForPoint(Date.parse('2024-05-21T01:17:00.000+08:00') / 1000, '4H', candles)).toBe(Date.parse('2024-05-21T00:00:00+08:00') / 1000);
+  });
+
+  it('places a free replay start minute on the containing review timeframe candlestick', () => {
+    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:00+08:00', '15m')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:00+08:00', '1H')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
+  });
+
+  it('places the free replay cursor on the containing candlestick when switching review timeframes', () => {
+    const previousCursor = Date.parse('2024-05-21T10:35:00+08:00') / 1000;
+
+    expect(freeReplayCursorTimeForTimeframeSwitch(previousCursor, '15m')).toBe(Date.parse('2024-05-21T10:30:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForTimeframeSwitch(previousCursor, '1H')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
   });
 });
 

@@ -5,7 +5,7 @@ import type { ReviewTimeframe } from '../domain/trade';
 
 type DrawingRow = {
   id: string;
-  trade_id: string;
+  trade_id: string | null;
   instrument: string;
   timeframe: ReviewTimeframe;
   kind: ChartDrawing['kind'];
@@ -23,7 +23,7 @@ export class DrawingStore {
     this.db.exec(`
       create table if not exists chart_drawings (
         id text primary key,
-        trade_id text not null,
+        trade_id text,
         instrument text not null,
         timeframe text not null,
         kind text not null,
@@ -33,6 +33,7 @@ export class DrawingStore {
       );
       create index if not exists idx_chart_drawings_instrument on chart_drawings (instrument);
     `);
+    this.allowNullableTradeId();
   }
 
   saveDrawing(input: SaveChartDrawingInput): ChartDrawing {
@@ -92,6 +93,33 @@ export class DrawingStore {
     const row = this.db.prepare('select * from chart_drawings where id = ?').get(id) as DrawingRow | undefined;
     return row ? toDrawing(row) : null;
   }
+
+  private allowNullableTradeId(): void {
+    if (columnAllowsNull(this.db, 'chart_drawings', 'trade_id')) return;
+    this.db.exec(`
+      alter table chart_drawings rename to chart_drawings_old;
+      create table chart_drawings (
+        id text primary key,
+        trade_id text,
+        instrument text not null,
+        timeframe text not null,
+        kind text not null,
+        points_json text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+      insert into chart_drawings (id, trade_id, instrument, timeframe, kind, points_json, created_at, updated_at)
+        select id, trade_id, instrument, timeframe, kind, points_json, created_at, updated_at
+        from chart_drawings_old;
+      drop table chart_drawings_old;
+      create index if not exists idx_chart_drawings_instrument on chart_drawings (instrument);
+    `);
+  }
+}
+
+function columnAllowsNull(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string; notnull: number }>;
+  return rows.find((row) => row.name === column)?.notnull === 0;
 }
 
 function toDrawing(row: DrawingRow): ChartDrawing {

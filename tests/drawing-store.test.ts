@@ -37,4 +37,19 @@ describe('Drawing Store', () => {
 
     expect(store.listDrawings({ instrument: 'BTC-USDT-SWAP' }).map((drawing) => drawing.kind)).toEqual(['segment']);
   });
+
+  it('saves chart drawings without a trade for Free Replay', () => {
+    const store = new DrawingStore(':memory:');
+
+    const drawing = store.saveDrawing({
+      tradeId: null,
+      instrument: 'BTC-USDT-SWAP',
+      timeframe: '5m',
+      kind: 'horizontal',
+      points: [{ time: 1653381000, price: 29300 }],
+    });
+
+    expect(drawing.tradeId).toBeNull();
+    expect(store.listDrawings({ instrument: 'BTC-USDT-SWAP' })[0]?.tradeId).toBeNull();
+  });
 });

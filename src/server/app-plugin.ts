@@ -7,6 +7,8 @@ import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { CandlestickService } from './candlestick-service';
 import { CandlestickStore } from './candlestick-store';
 import { DrawingStore } from './drawing-store';
+import { freeReplayInstrumentPayload } from './free-replay-instruments';
+import { OkxInstrumentService } from './okx-instrument-service';
 import { ReviewStore } from './review-store';
 import { loadTradesFromWorkbook } from './trade-import';
 
@@ -22,6 +24,7 @@ export function tradingReviewApiPlugin(): Plugin {
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
       const candleService = new CandlestickService(candleStore);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
+      const instrumentService = new OkxInstrumentService();
 
       server.middlewares.use('/api/trades', async (req, res) => {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
@@ -40,6 +43,15 @@ export function tradingReviewApiPlugin(): Plugin {
         const parsed = JSON.parse(body || '{}') as { tradeId?: string; tags?: string[]; note?: string };
         if (!parsed.tradeId) return send(res, 400, { error: 'tradeId is required' });
         send(res, 200, reviewStore.saveReview({ tradeId: parsed.tradeId, tags: parsed.tags ?? [], note: parsed.note ?? '' }));
+      });
+
+      server.middlewares.use('/api/free-replay/instruments', async (req, res) => {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        try {
+          send(res, 200, await freeReplayInstrumentPayload(instrumentService));
+        } catch (error) {
+          send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load instruments' });
+        }
       });
 
       server.middlewares.use('/api/candles', async (req, res) => {

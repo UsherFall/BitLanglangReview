@@ -13,6 +13,16 @@ export function timeframeTimeForPoint(pointTime: number, timeframe: ReviewTimefr
   return timeframeTimeForTimestamp(pointTime * 1000, timeframe, candles);
 }
 
+export function freeReplayCursorTimeForStart(startTime: string, timeframe: ReviewTimeframe): UTCTimestamp {
+  const timestamp = Date.parse(startTime);
+  if (!Number.isFinite(timestamp)) return 0 as UTCTimestamp;
+  return Math.floor(floorTimestamp(timestamp, timeframe) / 1000) as UTCTimestamp;
+}
+
+export function freeReplayCursorTimeForTimeframeSwitch(previousCursorTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
+  return Math.floor(floorTimestamp(previousCursorTime * 1000, timeframe) / 1000) as UTCTimestamp;
+}
+
 function timeframeTimeForTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[]): UTCTimestamp {
   const containing = containingCandleTimestamp(timestamp, timeframe, candles);
   if (containing !== null) return Math.floor(containing / 1000) as UTCTimestamp;

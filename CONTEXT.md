@@ -84,6 +84,10 @@ _Avoid_: trade-only drawing, timeframe-only drawing, temporary sketch, private d
 The ordered list of **Trades** shown for review. The default review queue is sorted by entry time from earliest to latest; optional sorting fields are entry time, return rate, profit, and holding duration, each in ascending or descending order.
 _Avoid_: profit-ranked list as the default view
 
+**Review Progress**:
+The reviewer's progress through the current **Review Queue**. A **Trade** counts as reviewed when it has at least one **Review Tag**; **Review Notes** alone do not mark a **Trade** as reviewed. Review progress shows both the selected **Trade's** position in the current **Review Queue** and how many **Trades** in that queue have been reviewed.
+_Avoid_: note-only progress, global progress ignoring active filters, completed trade state
+
 **Review Filter**:
 A condition that narrows the **Review Queue**. The first version supports filters by instrument, direction, time range, profit/loss result, review tag, and whether a review note exists.
 _Avoid_: permanent grouping, saved screen

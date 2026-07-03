@@ -55,6 +55,66 @@ textarea {
   border-bottom: 1px solid #2d333b;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 12px;
+  border-bottom: 1px solid #2d333b;
+}
+
+.mode-switch button {
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #d6dee7;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.mode-switch button:hover,
+.mode-switch button.selected {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.free-replay-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.replay-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.free-replay-panel .save-button,
+.replay-controls {
+  position: relative;
+  z-index: 10000;
+}
+
+.replay-controls button {
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #d6dee7;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.replay-controls button:hover {
+  background: #1f2937;
+  border-color: #4b5563;
+}
+
+.panel-status {
+  font-size: 13px;
+}
+
 .search-block,
 .sort-row,
 .date-row {
@@ -119,10 +179,48 @@ textarea {
   place-items: center;
 }
 
-.trade-count {
-  padding: 8px 12px;
+.review-progress {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2d333b;
+}
+
+.review-progress div {
+  display: grid;
+  gap: 3px;
+}
+
+.review-progress span {
   color: #8b949e;
-  font-size: 13px;
+  font-size: 12px;
+}
+
+.review-progress strong {
+  color: #d6dee7;
+  font-size: 14px;
+}
+
+.continue-review {
+  grid-column: span 2;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #d6dee7;
+  min-height: 34px;
+  cursor: pointer;
+}
+
+.continue-review:hover:not(:disabled) {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.continue-review:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .trade-list {
@@ -284,6 +382,41 @@ p {
   cursor: not-allowed;
 }
 
+.candlestick-readout {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  left: 126px;
+  right: 10px;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.88);
+  color: #d6dee7;
+  font-size: 12px;
+  line-height: 1.25;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+.candlestick-readout span {
+  white-space: nowrap;
+}
+
+.candlestick-readout span span,
+.candlestick-readout .readout-time {
+  color: #8b949e;
+}
+
+.candlestick-readout span span {
+  margin-right: 4px;
+}
+
 .drawing-overlay {
   position: absolute;
   inset: 0;
@@ -415,5 +548,10 @@ label {
 
   .timeframes {
     justify-content: flex-start;
+  }
+
+  .candlestick-readout {
+    top: 50px;
+    left: 10px;
   }
 }

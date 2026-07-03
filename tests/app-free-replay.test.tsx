@@ -1,0 +1,72 @@
+// @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { App } from '../src/ui/App';
+
+vi.mock('lightweight-charts', () => ({
+  CandlestickSeries: 'Candlestick',
+  ColorType: { Solid: 'solid' },
+  CrosshairMode: { Normal: 0 },
+  createChart: () => ({
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
+    remove: vi.fn(),
+    subscribeCrosshairMove: vi.fn(),
+    timeScale: () => ({
+      coordinateToTime: vi.fn(),
+      getVisibleRange: vi.fn(),
+      setVisibleRange: vi.fn(),
+      subscribeVisibleLogicalRangeChange: vi.fn(),
+      subscribeVisibleTimeRangeChange: vi.fn(),
+      unsubscribeVisibleLogicalRangeChange: vi.fn(),
+      unsubscribeVisibleTimeRangeChange: vi.fn(),
+    }),
+  }),
+  createSeriesMarkers: () => ({ setMarkers: vi.fn() }),
+}));
+
+describe('App Free Replay', () => {
+  it('keeps the workspace rendered after starting Free Replay', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+            makeCandle('2024-05-21T10:05:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
+    expect(screen.queryByText('Choose an instrument and start time to begin Free Replay')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
+  });
+});
+
+function makeCandle(time: string) {
+  return {
+    instrument: 'BTC-USDT-SWAP',
+    timeframe: '5m',
+    timestamp: Date.parse(time),
+    open: 1,
+    high: 2,
+    low: 0.5,
+    close: 1.5,
+    volume: 10,
+  };
+}
