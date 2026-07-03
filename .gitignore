@@ -5,7 +5,8 @@ coverage/
 
 *.log
 
-# SQLite runtime sidecar files. The committed database snapshot is data/review.sqlite.
+# Local review data. Keep the database on this machine or migrate it manually.
+data/*.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite-journal
