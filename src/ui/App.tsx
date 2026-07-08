@@ -170,6 +170,10 @@ export function App() {
             <span>已复盘</span>
             <strong>{progress.reviewed.toLocaleString()} / {progress.total.toLocaleString()}</strong>
           </div>
+          <div>
+            <span>已复盘收益</span>
+            <strong className={profitTone(progress.reviewedProfit)}>{formatSignedUsdt(progress.reviewedProfit)}</strong>
+          </div>
           <button className="continue-review" disabled={!nextUnreviewedTrade} onClick={() => nextUnreviewedTrade && setSelectedId(nextUnreviewedTrade.id)}>
             {nextUnreviewedTrade ? '继续复盘' : '已完成'}
           </button>
@@ -696,6 +700,27 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
   }, [trade.id, timeframe]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      const chart = chartApiRef.current;
+      if (!chart) return;
+      const visible = currentVisibleRange(chart);
+      if (!visible) return;
+      event.preventDefault();
+      const step = timeframeMs(timeframe) / 1000;
+      const direction = event.key === 'ArrowRight' ? 1 : -1;
+      chart.timeScale().setVisibleRange({
+        from: (visible.from + step * direction) as UTCTimestamp,
+        to: (visible.to + step * direction) as UTCTimestamp,
+      });
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [timeframe]);
+
   function schedulePendingRender() {
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
     idleTimerRef.current = window.setTimeout(() => {
@@ -1010,6 +1035,18 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
 
 function formatPercent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatSignedUsdt(value: number): string {
+  const normalized = Object.is(value, -0) ? 0 : value;
+  const sign = normalized > 0 ? '+' : '';
+  return `${sign}${normalized.toFixed(2)} USDT`;
+}
+
+function profitTone(value: number): 'good' | 'bad' | undefined {
+  if (value > 0) return 'good';
+  if (value < 0) return 'bad';
+  return undefined;
 }
 
 function formatLeverage(value: number): string {

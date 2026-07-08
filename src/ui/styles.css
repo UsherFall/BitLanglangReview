@@ -181,7 +181,7 @@ textarea {
 
 .review-progress {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid #2d333b;
@@ -203,7 +203,7 @@ textarea {
 }
 
 .continue-review {
-  grid-column: span 2;
+  grid-column: span 3;
   border: 1px solid #303844;
   border-radius: 6px;
   background: #161b22;

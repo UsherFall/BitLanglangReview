@@ -4,6 +4,7 @@ export type ReviewProgress = {
   total: number;
   reviewed: number;
   current: number;
+  reviewedProfit: number;
 };
 
 export function isReviewedTrade(trade: ReviewedTrade): boolean {
@@ -12,10 +13,12 @@ export function isReviewedTrade(trade: ReviewedTrade): boolean {
 
 export function reviewProgress(trades: ReviewedTrade[], selectedTradeId: string): ReviewProgress {
   const selectedIndex = trades.findIndex((trade) => trade.id === selectedTradeId);
+  const reviewedTrades = trades.filter(isReviewedTrade);
   return {
     total: trades.length,
-    reviewed: trades.filter(isReviewedTrade).length,
+    reviewed: reviewedTrades.length,
     current: selectedIndex >= 0 ? selectedIndex + 1 : 0,
+    reviewedProfit: reviewedTrades.reduce((sum, trade) => sum + trade.profit, 0),
   };
 }
 
