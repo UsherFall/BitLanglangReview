@@ -1,4 +1,4 @@
-import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp } from 'lightweight-charts';
+import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { ChevronDown, ChevronUp, Eraser, Minus, Search, Slash } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Candlestick } from '../domain/candlestick';
@@ -12,6 +12,23 @@ import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForStart, freeR
 import { candlestickAtTime, formatCandlestickPrice } from './candlestick-readout';
 import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
 import { nextFreeReplayCursor, previousFreeReplayCursor, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
+import {
+  cancelPendingOrder,
+  closeMarket,
+  currentCursorCandle,
+  initialPaperTradingSession,
+  openMarket,
+  paperTradeMarkers,
+  paperTradingStats,
+  placeEntryLimit,
+  placeExitLimit,
+  processRevealedCandle,
+  startPaperTrading,
+  type PaperDirection,
+  type PaperStats,
+  type PaperTradingSettings,
+  type PaperTradingSession,
+} from './free-replay-paper-trading';
 import { ReviewEditor } from './ReviewEditor';
 import { firstUnreviewedTrade, reviewProgress } from './review-progress';
 import { tradeMarkers } from './trade-markers';
@@ -47,6 +64,7 @@ export function App() {
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
+  const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   const selectedTrade = data.trades.find((trade) => trade.id === selectedId) ?? data.trades[0] ?? null;
   const progress = reviewProgress(data.trades, selectedTrade?.id ?? '');
   const nextUnreviewedTrade = firstUnreviewedTrade(data.trades);
@@ -73,11 +91,18 @@ export function App() {
   }
 
   function revealNextFreeReplayCandle() {
-    setFreeReplay((current) => current ? { ...current, cursorTime: nextFreeReplayCursor(freeReplayCandles, current.cursorTime) } : current);
+    if (!freeReplay) return;
+    const nextCursorTime = nextFreeReplayCursor(freeReplayCandles, freeReplay.cursorTime);
+    if (nextCursorTime !== freeReplay.cursorTime) {
+      const revealedCandle = currentCursorCandle(freeReplayCandles, nextCursorTime);
+      if (revealedCandle) setPaperTrading((current) => processRevealedCandle(current, revealedCandle));
+    }
+    setFreeReplay({ ...freeReplay, cursorTime: nextCursorTime });
   }
 
   function rewindFreeReplayCandle() {
-    setFreeReplay((current) => current ? { ...current, cursorTime: previousFreeReplayCursor(freeReplayCandles, current.cursorTime, current.startCursorTime) } : current);
+    if (!freeReplay) return;
+    setFreeReplay({ ...freeReplay, cursorTime: previousFreeReplayCursor(freeReplayCandles, freeReplay.cursorTime, freeReplay.startCursorTime) });
   }
 
   function switchFreeReplayTimeframe(nextTimeframe: ReviewTimeframe) {
@@ -105,11 +130,15 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reviewMode, freeReplayCandles]);
+  }, [reviewMode, freeReplay, freeReplayCandles]);
 
   useEffect(() => {
     selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
   }, [selectedId]);
+
+  const freeReplayCurrentCandle = freeReplay ? currentCursorCandle(freeReplayCandles, freeReplay.cursorTime) : null;
+  const paperStats = paperTradingStats(paperTrading, freeReplayCurrentCandle);
+  const paperMarkers = freeReplay ? paperTradeMarkers(paperTrading.trades, timeframe, freeReplayCandles).filter((marker) => Number(marker.time) <= freeReplay.cursorTime) : [];
 
   return (
     <main className="app-shell">
@@ -191,7 +220,7 @@ export function App() {
           ))}
         </div>
           </>
-        ) : <FreeReplayPanel timeframe={timeframe} onStart={(next) => { setFreeReplay(next); setFreeReplayCandles([]); }} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} />}
+        ) : <FreeReplayPanel timeframe={timeframe} onStart={(next) => { setFreeReplay(next); setFreeReplayCandles([]); setPaperTrading(initialPaperTradingSession()); }} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} />}
       </aside>
       <section className="workspace">
         {reviewMode === 'freeReplay' ? freeReplay ? (
@@ -205,7 +234,21 @@ export function App() {
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => switchFreeReplayTimeframe(item)}>{item}</button>)}
               </div>
             </header>
-            <FreeReplayChart replay={freeReplay} timeframe={timeframe} onCandlesLoaded={setFreeReplayCandles} />
+            <div className="free-replay-workspace">
+              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperMarkers={paperMarkers} onCandlesLoaded={setFreeReplayCandles} />
+              <FreeReplayPaperTradingPanel
+                session={paperTrading}
+                stats={paperStats}
+                currentCandle={freeReplayCurrentCandle}
+                onStart={() => setPaperTrading((current) => startPaperTrading(current, freeReplay.cursorTime))}
+                onReset={() => setPaperTrading(initialPaperTradingSession())}
+                onMarketOpen={(settings) => freeReplayCurrentCandle && setPaperTrading((current) => openMarket(current, freeReplayCurrentCandle, settings))}
+                onLimitOpen={(limitPrice, settings) => setPaperTrading((current) => placeEntryLimit(current, limitPrice, settings, freeReplay.cursorTime))}
+                onMarketClose={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle))}
+                onLimitClose={(limitPrice) => setPaperTrading((current) => placeExitLimit(current, limitPrice, freeReplay.cursorTime))}
+                onCancelOrder={(kind) => setPaperTrading((current) => cancelPendingOrder(current, kind))}
+              />
+            </div>
           </>
         ) : (
           <div className="empty-state">Choose an instrument and start time to begin Free Replay</div>
@@ -239,10 +282,142 @@ export function App() {
   );
 }
 
-function FreeReplayChart({ replay, timeframe, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; onCandlesLoaded: (candles: Candlestick[]) => void }) {
+function FreeReplayPaperTradingPanel({
+  session,
+  stats,
+  currentCandle,
+  onStart,
+  onReset,
+  onMarketOpen,
+  onLimitOpen,
+  onMarketClose,
+  onLimitClose,
+  onCancelOrder,
+}: {
+  session: PaperTradingSession;
+  stats: PaperStats;
+  currentCandle: Candlestick | null;
+  onStart: () => void;
+  onReset: () => void;
+  onMarketOpen: (settings: PaperTradingSettings) => void;
+  onLimitOpen: (limitPrice: number, settings: PaperTradingSettings) => void;
+  onMarketClose: () => void;
+  onLimitClose: (limitPrice: number) => void;
+  onCancelOrder: (kind: 'entry' | 'exit') => void;
+}) {
+  const [direction, setDirection] = useState<PaperDirection>('long');
+  const [positionRatioPercent, setPositionRatioPercent] = useState(100);
+  const [leverage, setLeverage] = useState(1);
+  const [entryLimit, setEntryLimit] = useState('');
+  const [exitLimit, setExitLimit] = useState('');
+  const settings = { direction, positionRatioPercent, leverage };
+  const entryLimitPrice = Number(entryLimit);
+  const exitLimitPrice = Number(exitLimit);
+  const canSubmitEntryLimit = session.active && !session.position && Number.isFinite(entryLimitPrice) && entryLimitPrice > 0;
+  const canSubmitExitLimit = session.active && !!session.position && Number.isFinite(exitLimitPrice) && exitLimitPrice > 0;
+
+  return (
+    <aside className="paper-trading-panel" aria-label="Paper trading panel">
+      <div className="paper-panel-header">
+        <div>
+          <h2>模拟交易</h2>
+          <p>本金 1000 USDT</p>
+        </div>
+        <button type="button" aria-label="Reset paper trading" onClick={onReset}>重置</button>
+      </div>
+
+      <div className="paper-stats">
+        <Metric label="已实现" value={formatSignedUsdt(stats.realizedPnl)} tone={profitTone(stats.realizedPnl)} />
+        <Metric label="总收益率" value={formatPercent(stats.totalReturnRate)} tone={profitTone(stats.totalReturnRate)} />
+        <Metric label="胜率" value={stats.winRate === null ? '-' : formatPercent(stats.winRate)} />
+        <Metric label="盈亏比" value={stats.profitLossRatio === null ? '-' : stats.profitLossRatio.toFixed(2)} />
+      </div>
+
+      {!session.active ? (
+        <button type="button" aria-label="Start paper trading" className="save-button paper-primary" onClick={onStart}>开始模拟</button>
+      ) : (
+        <>
+          <div className="paper-section">
+            <span className="paper-section-title">参数</span>
+            <div className="segmented-control" aria-label="Direction">
+              <button type="button" className={direction === 'long' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('long')}>Long</button>
+              <button type="button" className={direction === 'short' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('short')}>Short</button>
+            </div>
+            <PresetNumberInput label="仓位比例" ariaLabel="Position ratio" value={positionRatioPercent} min={1} max={100} suffix="%" presets={[10, 25, 50, 100]} onChange={setPositionRatioPercent} />
+            <PresetNumberInput label="杠杆" ariaLabel="Leverage" value={leverage} min={1} max={125} suffix="x" presets={[1, 2, 3, 5, 10, 20]} onChange={setLeverage} />
+          </div>
+
+          {!session.position ? (
+            <div className="paper-section">
+              <span className="paper-section-title">开仓</span>
+              <button type="button" aria-label="Market open" className="save-button paper-primary" disabled={!currentCandle} onClick={() => onMarketOpen(settings)}>市价开仓</button>
+              <label>
+                限价开仓
+                <input aria-label="Entry limit price" inputMode="decimal" value={entryLimit} onChange={(event) => setEntryLimit(event.target.value)} />
+              </label>
+              <button type="button" aria-label="Place entry limit" disabled={!canSubmitEntryLimit} onClick={() => onLimitOpen(entryLimitPrice, settings)}>提交限价开仓</button>
+              {session.pendingEntry && <PendingOrderView label="待开仓" price={session.pendingEntry.limitPrice} cancelLabel="Cancel entry limit" onCancel={() => onCancelOrder('entry')} />}
+            </div>
+          ) : (
+            <div className="paper-section">
+              <span className="paper-section-title">持仓</span>
+              <div className="position-summary">
+                <span>{formatPaperDirection(session.position.direction)}</span>
+                <span>开仓 {session.position.entryPrice}</span>
+                <span>数量 {session.position.quantity.toFixed(4)}</span>
+                <span>保证金 {session.position.margin.toFixed(2)}</span>
+                <span className={profitTone(stats.floatingPnl ?? 0) ?? ''}>浮盈 {stats.floatingPnl === null ? '-' : formatSignedUsdt(stats.floatingPnl)}</span>
+              </div>
+              <button type="button" aria-label="Market close" className="save-button paper-primary" disabled={!currentCandle} onClick={onMarketClose}>市价平仓</button>
+              <label>
+                限价平仓
+                <input aria-label="Exit limit price" inputMode="decimal" value={exitLimit} onChange={(event) => setExitLimit(event.target.value)} />
+              </label>
+              <button type="button" aria-label="Place exit limit" disabled={!canSubmitExitLimit} onClick={() => onLimitClose(exitLimitPrice)}>提交限价平仓</button>
+              {session.pendingExit && <PendingOrderView label="待平仓" price={session.pendingExit.limitPrice} cancelLabel="Cancel exit limit" onCancel={() => onCancelOrder('exit')} />}
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="paper-section paper-trade-list">
+        <span className="paper-section-title">已完成交易</span>
+        {session.trades.length ? session.trades.map((trade) => (
+          <div key={`${trade.id}:${trade.exitTime}`} className="paper-trade-row">
+            <span>{formatPaperDirection(trade.direction)}</span>
+            <span>{trade.entryPrice} → {trade.exitPrice}</span>
+            <strong className={profitTone(trade.pnl) ?? ''}>{formatSignedUsdt(trade.pnl)}</strong>
+            <span>{formatPercent(trade.returnRate)}</span>
+          </div>
+        )) : <p>暂无成交</p>}
+      </div>
+    </aside>
+  );
+}
+
+function PresetNumberInput({ label, ariaLabel, value, min, max, suffix, presets, onChange }: { label: string; ariaLabel: string; value: number; min: number; max: number; suffix: string; presets: number[]; onChange: (value: number) => void }) {
+  return (
+    <div className="preset-input">
+      <label>
+        {label}
+        <input aria-label={ariaLabel} type="number" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      </label>
+      <div className="preset-buttons">
+        {presets.map((preset) => <button key={preset} type="button" className={value === preset ? 'selected' : ''} onClick={() => onChange(preset)}>{preset}{suffix}</button>)}
+      </div>
+    </div>
+  );
+}
+
+function PendingOrderView({ label, price, cancelLabel, onCancel }: { label: string; price: number; cancelLabel: string; onCancel: () => void }) {
+  return <div className="pending-order"><span>{label} {price}</span><button type="button" aria-label={cancelLabel} onClick={onCancel}>取消</button></div>;
+}
+
+function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; onCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<SVGSVGElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
   const loadingFutureRef = useRef(false);
   const lastFutureLoadAnchorRef = useRef<number | null>(null);
@@ -291,6 +466,7 @@ function FreeReplayChart({ replay, timeframe, onCandlesLoaded }: { replay: FreeR
     });
     chartApiRef.current = chart;
     seriesRef.current = series;
+    markersRef.current = createSeriesMarkers(series, []);
     const refreshOverlay = () => setOverlayVersion((version) => version + 1);
     chart.timeScale().subscribeVisibleTimeRangeChange(refreshOverlay);
     return () => chart.remove();
@@ -332,6 +508,7 @@ function FreeReplayChart({ replay, timeframe, onCandlesLoaded }: { replay: FreeR
     const range = entryVisibleRange(replay.startTime, timeframe);
     const rangeTo = Math.floor(replay.cursorTime + timeframeMs(timeframe) * 10 / 1000) as UTCTimestamp;
     series.setData(chartDataWithWhitespace(visibleCandles, [Number(range.from) * 1000, Number(rangeTo) * 1000]));
+    markersRef.current?.setMarkers(paperMarkers);
     const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
     if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey) {
       initializedRangeKeyRef.current = rangeKey;
@@ -341,7 +518,7 @@ function FreeReplayChart({ replay, timeframe, onCandlesLoaded }: { replay: FreeR
         suppressAutoLoadRef.current = false;
       }, 0);
     }
-  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
+  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe, paperMarkers]);
 
   useEffect(() => {
     if (!loadedCandlesRef.current.length) return;
@@ -1041,6 +1218,10 @@ function formatSignedUsdt(value: number): string {
   const normalized = Object.is(value, -0) ? 0 : value;
   const sign = normalized > 0 ? '+' : '';
   return `${sign}${normalized.toFixed(2)} USDT`;
+}
+
+function formatPaperDirection(direction: PaperDirection): string {
+  return direction === 'long' ? 'Long' : 'Short';
 }
 
 function profitTone(value: number): 'good' | 'bad' | undefined {

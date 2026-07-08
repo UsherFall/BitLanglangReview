@@ -56,9 +56,43 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
   });
+
+  it('supports a paper trading market open and close during Free Replay', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }),
+            makeCandle('2024-05-21T10:05:00+08:00', { close: 110 }),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
+
+    await waitFor(() => expect(screen.getAllByText('+100.00 USDT').length).toBeGreaterThan(0));
+    expect(screen.getAllByText('10.00%').length).toBeGreaterThan(0);
+  });
 });
 
-function makeCandle(time: string) {
+function makeCandle(time: string, overrides = {}) {
   return {
     instrument: 'BTC-USDT-SWAP',
     timeframe: '5m',
@@ -68,5 +102,6 @@ function makeCandle(time: string) {
     low: 0.5,
     close: 1.5,
     volume: 10,
+    ...overrides,
   };
 }
