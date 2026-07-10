@@ -105,3 +105,37 @@ Implemented adaptive chart drawing stroke widths by timeframe, fixed blank-overl
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 1m chart and starred reviews
+
+**Date**: 2026-07-10
+**Task**: 1m chart and starred reviews
+**Branch**: `master`
+
+### Summary
+
+Implemented 1m review timeframe support, starred review persistence and filtering, and tags combobox; updated specs and tests.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6d1bfb4` | (see git log) |
+| `9624deb` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
