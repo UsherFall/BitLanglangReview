@@ -71,3 +71,37 @@ Added adaptive chart price axis formatter for Trade Review and Free Replay, with
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Chart drawing width by timeframe
+
+**Date**: 2026-07-10
+**Task**: Chart drawing width by timeframe
+**Branch**: `master`
+
+### Summary
+
+Implemented adaptive chart drawing stroke widths by timeframe, fixed blank-overlay deselection, added drawing regression coverage, and recorded the task plan.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f009f47` | (see git log) |
+| `7781d02` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
