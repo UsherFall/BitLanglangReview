@@ -28,7 +28,7 @@ When changing Free Replay, verify:
 
 ## Forbidden Patterns
 
-Do not add `1m` as a Review Timeframe; `CONTEXT.md` says it is intentionally excluded. Do not move Review Store state into the Source Workbook. Do not introduce a global frontend store unless repeated prop/state wiring becomes a real maintenance problem.
+Do not move Review Store state into the Source Workbook. Do not introduce a global frontend store unless repeated prop/state wiring becomes a real maintenance problem. When changing Review Timeframe UI, verify `1m` remains first in the selector and uses the same 150-candle initial window/on-demand loading behavior as other timeframes.
 
 ## Existing Risk To Notice
 

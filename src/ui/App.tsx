@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronUp, Eraser, Minus, Search, Slash } from 'lucide-react';
+import { ChevronDown, ChevronUp, Eraser, Minus, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
@@ -60,7 +60,7 @@ export function App() {
   const [filters, setFilters] = useState<ReviewQueueOptions>({ sortField: 'entryTime', sortDirection: 'asc' });
   const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [] });
   const [selectedId, setSelectedId] = useState<string>('');
-  const selectedTradeRowRef = useRef<HTMLButtonElement | null>(null);
+  const selectedTradeRowRef = useRef<HTMLDivElement | null>(null);
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
@@ -89,6 +89,36 @@ export function App() {
       tags: [...new Set([...current.tags, ...review.tags])].sort(),
       trades: current.trades.map((trade) => (trade.id === review.tradeId ? { ...trade, review } : trade)),
     }));
+  }
+
+  async function toggleStarred(trade: ReviewedTrade) {
+    const nextStarred = !(trade.review?.starred ?? false);
+    const nextReview: TradeReview = {
+      tradeId: trade.id,
+      tags: trade.review?.tags ?? [],
+      note: trade.review?.note ?? '',
+      starred: nextStarred,
+      updatedAt: trade.review?.updatedAt ?? new Date().toISOString(),
+    };
+
+    setData((current) => ({
+      ...current,
+      trades: current.trades.map((item) => (item.id === trade.id ? { ...item, review: nextReview } : item)),
+    }));
+
+    try {
+      const saved = (await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tradeId: trade.id, tags: nextReview.tags, note: nextReview.note, starred: nextStarred }),
+      }).then((response) => response.json())) as TradeReview;
+      handleReviewSaved(saved);
+    } catch {
+      setData((current) => ({
+        ...current,
+        trades: current.trades.map((item) => (item.id === trade.id ? { ...item, review: trade.review } : item)),
+      }));
+    }
   }
 
   function revealNextFreeReplayCandle() {
@@ -173,6 +203,11 @@ export function App() {
             <option value="">全部标签</option>
             {data.tags.map((tag) => <option key={tag}>{tag}</option>)}
           </select>
+          <select value={filters.starred ?? ''} onChange={(event) => setFilters({ ...filters, starred: event.target.value as ReviewQueueOptions['starred'] || undefined })}>
+            <option value="">收藏状态</option>
+            <option value="yes">已收藏</option>
+            <option value="no">未收藏</option>
+          </select>
           <select value={filters.noteState ?? ''} onChange={(event) => setFilters({ ...filters, noteState: event.target.value as ReviewQueueOptions['noteState'] || undefined })}>
             <option value="">备注状态</option>
             <option value="withNote">有备注</option>
@@ -210,14 +245,27 @@ export function App() {
         </div>
         <div className="trade-list">
           {data.trades.map((trade) => (
-            <button key={trade.id} ref={trade.id === selectedTrade?.id ? selectedTradeRowRef : null} className={`trade-row ${trade.id === selectedTrade?.id ? 'active' : ''}`} onClick={() => setSelectedId(trade.id)}>
-              <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
-              <strong>{trade.instrument}</strong>
-              <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
-              <span className="trade-meta">{formatLeverage(trade.leverage)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
-              <span className={trade.profit >= 0 ? 'profit' : 'loss'}>{formatPercent(trade.returnRate)} / {trade.profit.toFixed(2)}</span>
-              <span className="tags">{trade.review?.tags.join(' · ') || '未标记'}</span>
-            </button>
+            <div key={trade.id} ref={trade.id === selectedTrade?.id ? selectedTradeRowRef : null} className={`trade-row ${trade.id === selectedTrade?.id ? 'active' : ''}`}>
+              <div className="star-cell">
+                <button
+                  type="button"
+                  aria-label={trade.review?.starred ? '取消收藏' : '收藏'}
+                  title={trade.review?.starred ? '取消收藏' : '收藏'}
+                  className={`star-toggle ${trade.review?.starred ? 'active' : ''}`}
+                  onClick={() => { void toggleStarred(trade); }}
+                >
+                  <Star size={16} fill={trade.review?.starred ? 'currentColor' : 'none'} />
+                </button>
+              </div>
+              <button type="button" className="trade-row-main" onClick={() => setSelectedId(trade.id)}>
+                <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
+                <strong>{trade.instrument}</strong>
+                <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
+                <span className="trade-meta">{formatLeverage(trade.leverage)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
+                <span className={trade.profit >= 0 ? 'profit' : 'loss'}>{formatPercent(trade.returnRate)} / {trade.profit.toFixed(2)}</span>
+                <span className="tags">{trade.review?.tags.join(' · ') || '未标记'}</span>
+              </button>
+            </div>
           ))}
         </div>
           </>
@@ -274,7 +322,7 @@ export function App() {
                 <Metric label="收益" value={`${selectedTrade.profit.toFixed(2)} USDT`} tone={selectedTrade.profit >= 0 ? 'good' : 'bad'} />
                 <Metric label="持仓" value={`${selectedTrade.holdingMinutes} 分钟`} />
               </div>
-              <ReviewEditor trade={selectedTrade} onSaved={handleReviewSaved} />
+              <ReviewEditor trade={selectedTrade} availableTags={data.tags} onSaved={handleReviewSaved} />
             </div>
           </>
         ) : <div className="empty-state">没有匹配的交易</div>}

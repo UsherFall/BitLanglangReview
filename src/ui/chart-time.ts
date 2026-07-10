@@ -40,6 +40,7 @@ export function entryVisibleRange(entryTime: string, timeframe: ReviewTimeframe)
 
 export function timeframeMs(timeframe: ReviewTimeframe): number {
   const map: Record<ReviewTimeframe, number> = {
+    '1m': 60_000,
     '5m': 5 * 60_000,
     '15m': 15 * 60_000,
     '1H': 60 * 60_000,

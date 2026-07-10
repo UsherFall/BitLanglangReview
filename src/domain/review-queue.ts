@@ -15,6 +15,7 @@ export type ReviewQueueOptions = {
   endDate?: string;
   result?: 'profit' | 'loss' | 'flat';
   tag?: string;
+  starred?: 'yes' | 'no';
   noteState?: 'withNote' | 'withoutNote';
   sortField?: SortField;
   sortDirection?: SortDirection;

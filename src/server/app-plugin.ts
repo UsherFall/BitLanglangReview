@@ -40,9 +40,9 @@ export function tradingReviewApiPlugin(): Plugin {
       server.middlewares.use('/api/reviews', async (req, res) => {
         if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
         const body = await readBody(req);
-        const parsed = JSON.parse(body || '{}') as { tradeId?: string; tags?: string[]; note?: string };
+        const parsed = JSON.parse(body || '{}') as { tradeId?: string; tags?: string[]; note?: string; starred?: boolean };
         if (!parsed.tradeId) return send(res, 400, { error: 'tradeId is required' });
-        send(res, 200, reviewStore.saveReview({ tradeId: parsed.tradeId, tags: parsed.tags ?? [], note: parsed.note ?? '' }));
+        send(res, 200, reviewStore.saveReview({ tradeId: parsed.tradeId, tags: parsed.tags ?? [], note: parsed.note ?? '', starred: parsed.starred ?? false }));
       });
 
       server.middlewares.use('/api/free-replay/instruments', async (req, res) => {
@@ -133,6 +133,7 @@ function toQueueOptions(params: URLSearchParams): ReviewQueueOptions {
     endDate: params.get('endDate') || undefined,
     result: (params.get('result') as ReviewQueueOptions['result']) || undefined,
     tag: params.get('tag') || undefined,
+    starred: (params.get('starred') as ReviewQueueOptions['starred']) || undefined,
     noteState: (params.get('noteState') as ReviewQueueOptions['noteState']) || undefined,
     sortField: (params.get('sortField') as ReviewQueueOptions['sortField']) || undefined,
     sortDirection: (params.get('sortDirection') as ReviewQueueOptions['sortDirection']) || undefined,

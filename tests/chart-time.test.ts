@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
-import { formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, markerTimeForEvent, timeframeTimeForPoint } from '../src/ui/chart-time';
+import { reviewTimeframes } from '../src/domain/trade';
+import { formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
 
 describe('Chart Time', () => {
+  it('supports 1m as the first review timeframe', () => {
+    expect(reviewTimeframes[0]).toBe('1m');
+    expect(timeframeMs('1m')).toBe(60_000);
+  });
+
+  it('formats 1m labels with intraday time like other minute timeframes', () => {
+    expect(formatChartTime((Date.parse('2024-05-21T10:07:00+08:00') / 1000) as never, '1m')).toBe('05-21 10:07');
+  });
+
   it('places a trade point on the review timeframe candlestick that contains it', () => {
     const candles: Candlestick[] = [
       makeCandle('2024-05-21T00:00:00+08:00'),
@@ -46,6 +56,7 @@ describe('Chart Time', () => {
   });
 
   it('places a free replay start minute on the containing review timeframe candlestick', () => {
+    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:30+08:00', '1m')).toBe(Date.parse('2024-05-21T10:07:00+08:00') / 1000);
     expect(freeReplayCursorTimeForStart('2024-05-21T10:07:00+08:00', '15m')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
     expect(freeReplayCursorTimeForStart('2024-05-21T10:07:00+08:00', '1H')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
   });

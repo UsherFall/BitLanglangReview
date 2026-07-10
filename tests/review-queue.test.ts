@@ -23,6 +23,11 @@ describe('Review Queue', () => {
     expect(buildReviewQueue(sampleTrades, sampleReviews, { sortField: 'returnRate', sortDirection: 'desc' }).map((trade) => trade.id)).toEqual(['t3', 't1', 't2']);
     expect(buildReviewQueue(sampleTrades, sampleReviews, { sortField: 'holdingMinutes', sortDirection: 'desc' }).map((trade) => trade.id)).toEqual(['t3', 't1', 't2']);
   });
+
+  it('filters starred and unstarred trades', () => {
+    expect(buildReviewQueue(sampleTrades, sampleReviews, { starred: 'yes' }).map((trade) => trade.id)).toEqual(['t2']);
+    expect(buildReviewQueue(sampleTrades, sampleReviews, { starred: 'no' }).map((trade) => trade.id)).toEqual(['t1', 't3']);
+  });
 });
 
 const sampleTrades: Trade[] = [
@@ -32,8 +37,8 @@ const sampleTrades: Trade[] = [
 ];
 
 const sampleReviews: TradeReview[] = [
-  { tradeId: 't2', tags: ['追高'], note: '进早了', updatedAt: '2026-01-01T00:00:00.000Z' },
-  { tradeId: 't3', tags: ['突破'], note: '', updatedAt: '2026-01-01T00:00:00.000Z' },
+  { tradeId: 't2', tags: ['追高'], note: '进早了', starred: true, updatedAt: '2026-01-01T00:00:00.000Z' },
+  { tradeId: 't3', tags: ['突破'], note: '', starred: false, updatedAt: '2026-01-01T00:00:00.000Z' },
 ];
 
 function makeTrade(overrides: Partial<Trade>): Trade {

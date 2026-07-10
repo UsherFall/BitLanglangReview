@@ -63,6 +63,6 @@ function makeTrade(input: { id: string; tags: string[]; note: string; profit?: n
     holdingMinutes: 5,
     amplitude: null,
     sourceNote: '',
-    review: { tradeId: input.id, tags: input.tags, note: input.note, updatedAt: '2024-05-21T00:00:00.000Z' },
+    review: { tradeId: input.id, tags: input.tags, note: input.note, starred: false, updatedAt: '2024-05-21T00:00:00.000Z' },
   };
 }

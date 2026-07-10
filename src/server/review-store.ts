@@ -5,12 +5,14 @@ type SaveReviewInput = {
   tradeId: string;
   tags: string[];
   note: string;
+  starred?: boolean;
 };
 
 type ReviewRow = {
   trade_id: string;
   tags_json: string;
   note: string;
+  starred: number;
   updated_at: string;
 };
 
@@ -25,9 +27,15 @@ export class ReviewStore {
         trade_id text primary key,
         tags_json text not null,
         note text not null,
+        starred integer not null default 0,
         updated_at text not null
       );
     `);
+    try {
+      this.db.exec('alter table trade_reviews add column starred integer not null default 0');
+    } catch {
+      // Column already exists.
+    }
   }
 
   saveReview(input: SaveReviewInput): TradeReview {
@@ -35,22 +43,25 @@ export class ReviewStore {
       tradeId: input.tradeId,
       tags: uniqueCleanTags(input.tags),
       note: input.note,
+      starred: input.starred ?? false,
       updatedAt: new Date().toISOString(),
     };
 
     this.db
       .prepare(
-        `insert into trade_reviews (trade_id, tags_json, note, updated_at)
-         values (@tradeId, @tagsJson, @note, @updatedAt)
+        `insert into trade_reviews (trade_id, tags_json, note, starred, updated_at)
+         values (@tradeId, @tagsJson, @note, @starred, @updatedAt)
          on conflict(trade_id) do update set
            tags_json = excluded.tags_json,
            note = excluded.note,
+           starred = excluded.starred,
            updated_at = excluded.updated_at`,
       )
       .run({
         tradeId: review.tradeId,
         tagsJson: JSON.stringify(review.tags),
         note: review.note,
+        starred: review.starred ? 1 : 0,
         updatedAt: review.updatedAt,
       });
 
@@ -77,6 +88,7 @@ function toReview(row: ReviewRow): TradeReview {
     tradeId: row.trade_id,
     tags: JSON.parse(row.tags_json) as string[],
     note: row.note,
+    starred: row.starred === 1,
     updatedAt: row.updated_at,
   };
 }

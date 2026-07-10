@@ -22,6 +22,8 @@ function matchesOptions(trade: ReviewedTrade, options: ReviewQueueOptions): bool
   if (options.result === 'loss' && trade.profit >= 0) return false;
   if (options.result === 'flat' && trade.profit !== 0) return false;
   if (options.tag && !(trade.review?.tags.includes(options.tag))) return false;
+  if (options.starred === 'yes' && !trade.review?.starred) return false;
+  if (options.starred === 'no' && trade.review?.starred) return false;
   if (options.noteState === 'withNote' && !trade.review?.note.trim()) return false;
   if (options.noteState === 'withoutNote' && trade.review?.note.trim()) return false;
   return true;
