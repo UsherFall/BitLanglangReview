@@ -684,7 +684,10 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   }
 
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
-    if (!drawingTool) return;
+    if (!drawingTool) {
+      setSelectedDrawingId('');
+      return;
+    }
     const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current);
     if (!point) return;
     if (drawingTool === 'horizontal') {
@@ -993,7 +996,10 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   }
 
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
-    if (!drawingTool) return;
+    if (!drawingTool) {
+      setSelectedDrawingId('');
+      return;
+    }
     const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current);
     if (!point) return;
     if (drawingTool === 'horizontal') {
@@ -1099,14 +1105,15 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series
 
 function DrawingShape({ drawing, selected, chart, series, timeframe, candles, onSelect, onPointerDown }: { drawing: ChartDrawing; selected: boolean; chart: IChartApi; series: ISeriesApi<'Candlestick'>; timeframe: ReviewTimeframe; candles: Candlestick[]; onSelect: (id: string) => void; onPointerDown: (event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) => void }) {
   const color = selected ? '#FACC15' : '#38BDF8';
-  const width = selected ? 3 : 2;
+  const style = drawingStyleForTimeframe(timeframe);
+  const width = selected ? style.selectedStrokeWidth : style.strokeWidth;
   if (drawing.kind === 'horizontal') {
     const y = series.priceToCoordinate(drawing.points[0]?.price ?? NaN);
     if (y == null) return null;
     return (
       <g>
         <line x1="0" x2="100%" y1={y} y2={y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
-        {selected && <circle cx="24" cy={y} r="5" className="drawing-handle" onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />}
+        {selected && <circle cx="24" cy={y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />}
       </g>
     );
   }
@@ -1115,10 +1122,16 @@ function DrawingShape({ drawing, selected, chart, series, timeframe, candles, on
   return (
     <g>
       <line x1={points[0]!.x} y1={points[0]!.y} x2={points[1]!.x} y2={points[1]!.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
-      {selected && <circle cx={points[0]!.x} cy={points[0]!.y} r="5" className="drawing-handle" onPointerDown={(event) => onPointerDown(event, drawing, 'start')} />}
-      {selected && <circle cx={points[1]!.x} cy={points[1]!.y} r="5" className="drawing-handle" onPointerDown={(event) => onPointerDown(event, drawing, 'end')} />}
+      {selected && <circle cx={points[0]!.x} cy={points[0]!.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'start')} />}
+      {selected && <circle cx={points[1]!.x} cy={points[1]!.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'end')} />}
     </g>
   );
+}
+
+function drawingStyleForTimeframe(timeframe: ReviewTimeframe): { strokeWidth: number; selectedStrokeWidth: number; handleRadius: number } {
+  if (timeframe === '5m' || timeframe === '15m') return { strokeWidth: 1, selectedStrokeWidth: 2, handleRadius: 4 };
+  if (timeframe === '1H' || timeframe === '4H') return { strokeWidth: 1.5, selectedStrokeWidth: 2.5, handleRadius: 5 };
+  return { strokeWidth: 2, selectedStrokeWidth: 3, handleRadius: 5 };
 }
 
 function pointFromMouse(event: React.MouseEvent<SVGSVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
