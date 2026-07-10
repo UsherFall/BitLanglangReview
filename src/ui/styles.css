@@ -630,6 +630,10 @@ p {
   cursor: move;
 }
 
+.drawing-deselect-target {
+  pointer-events: all;
+}
+
 .chart-status,
 .empty-state {
   position: absolute;

@@ -784,6 +784,16 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     void saveDrawing(updated);
   }
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedDrawingId) {
+        setSelectedDrawingId('');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDrawingId]);
+
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; }}>
       <div className="drawing-toolbar">
@@ -793,6 +803,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
       </div>
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
+        {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
         <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
@@ -935,6 +946,10 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
+      if (event.key === 'Escape') {
+        setSelectedDrawingId('');
+        return;
+      }
       if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
       const chart = chartApiRef.current;
       if (!chart) return;
@@ -1106,6 +1121,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
+        {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
         <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
