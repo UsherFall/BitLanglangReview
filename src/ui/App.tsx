@@ -8,6 +8,7 @@ import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/rev
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { visibleRangeForAnchor, visibleRangeForLatestAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
+import { formatChartPrice } from './chart-price';
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { candlestickAtTime, formatCandlestickPrice } from './candlestick-readout';
 import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
@@ -449,6 +450,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
       crosshair: { mode: CrosshairMode.Normal },
       localization: {
         locale: 'zh-CN',
+        priceFormatter: formatChartPrice,
         timeFormatter: (time: Time) => formatChartTime(time, timeframe),
       },
       timeScale: {
@@ -781,6 +783,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       crosshair: { mode: CrosshairMode.Normal },
       localization: {
         locale: 'zh-CN',
+        priceFormatter: formatChartPrice,
         timeFormatter: (time: Time) => formatChartTime(time, timeframe),
       },
       timeScale: {
