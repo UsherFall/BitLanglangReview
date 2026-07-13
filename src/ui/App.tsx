@@ -1,6 +1,6 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronUp, Eraser, Minus, Search, Slash, Star } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Minus, Search, Slash, Star } from 'lucide-react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
@@ -50,25 +50,87 @@ const sortLabels: Record<SortField, string> = {
 type DrawingDragTarget = 'body' | 'start' | 'end';
 type ReviewMode = 'trade' | 'freeReplay';
 
+const SIDEBAR_CONFIG_KEY = 'sidebar-config';
+const DEFAULT_SIDEBAR_WIDTH = 390;
+const MIN_SIDEBAR_WIDTH = 280;
+const COLLAPSED_SIDEBAR_WIDTH = 40;
+const NARROW_LAYOUT_QUERY = '(max-width: 920px)';
+
+type SidebarConfig = {
+  width: number;
+  collapsed: boolean;
+  filterCollapsed: boolean;
+};
+
+type SidebarDrag = {
+  pointerId: number;
+  startX: number;
+  startWidth: number;
+  moved: boolean;
+};
+
 type DrawingDrag = {
   drawing: ChartDrawing;
   target: DrawingDragTarget;
   startPoint: ChartPoint;
 };
 
+function clampSidebarWidth(width: number): number {
+  const maxWidth = typeof window === 'undefined' ? DEFAULT_SIDEBAR_WIDTH : Math.floor(window.innerWidth * 0.7);
+  return Math.min(Math.max(width, MIN_SIDEBAR_WIDTH), Math.max(MIN_SIDEBAR_WIDTH, maxWidth));
+}
+
+function loadSidebarConfig(): SidebarConfig {
+  const fallback = { width: DEFAULT_SIDEBAR_WIDTH, collapsed: false, filterCollapsed: false };
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SIDEBAR_CONFIG_KEY) ?? 'null') as Partial<SidebarConfig> | null;
+    return {
+      width: clampSidebarWidth(typeof parsed?.width === 'number' ? parsed.width : fallback.width),
+      collapsed: typeof parsed?.collapsed === 'boolean' ? parsed.collapsed : fallback.collapsed,
+      filterCollapsed: typeof parsed?.filterCollapsed === 'boolean' ? parsed.filterCollapsed : fallback.filterCollapsed,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function isNarrowLayout(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_LAYOUT_QUERY).matches;
+}
+
 export function App() {
   const [filters, setFilters] = useState<ReviewQueueOptions>({ sortField: 'entryTime', sortDirection: 'asc' });
   const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [] });
   const [selectedId, setSelectedId] = useState<string>('');
   const selectedTradeRowRef = useRef<HTMLDivElement | null>(null);
+  const sidebarDragRef = useRef<SidebarDrag | null>(null);
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
+  const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
   const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   const selectedTrade = data.trades.find((trade) => trade.id === selectedId) ?? data.trades[0] ?? null;
   const progress = reviewProgress(data.trades, selectedTrade?.id ?? '');
   const nextUnreviewedTrade = firstUnreviewedTrade(data.trades);
+  const sidebarGridWidth = sidebarConfig.collapsed ? `${COLLAPSED_SIDEBAR_WIDTH}px` : `${sidebarConfig.width}px`;
+  const shellStyle = { '--sidebar-grid-width': sidebarGridWidth } as CSSProperties;
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_CONFIG_KEY, JSON.stringify(sidebarConfig));
+  }, [sidebarConfig]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia(NARROW_LAYOUT_QUERY);
+    const expandOnNarrow = () => {
+      if (query.matches) setSidebarConfig((current) => ({ ...current, collapsed: false }));
+    };
+    expandOnNarrow();
+    query.addEventListener('change', expandOnNarrow);
+    return () => query.removeEventListener('change', expandOnNarrow);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams();
@@ -145,6 +207,49 @@ export function App() {
     } : current);
   }
 
+  function setFilterCollapsed(filterCollapsed: boolean) {
+    setSidebarConfig((current) => ({ ...current, filterCollapsed }));
+  }
+
+  function setSidebarCollapsed(collapsed: boolean) {
+    if (isNarrowLayout()) return;
+    setSidebarConfig((current) => ({ ...current, collapsed }));
+  }
+
+  function handleSidebarResizePointerDown(event: React.PointerEvent<HTMLButtonElement>) {
+    if (isNarrowLayout()) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sidebarDragRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: sidebarConfig.width, moved: false };
+    document.body.classList.add('sidebar-resizing');
+  }
+
+  function handleSidebarResizePointerMove(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = sidebarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientX - drag.startX;
+    if (Math.abs(delta) > 3) drag.moved = true;
+    if (!drag.moved) return;
+    const nextWidth = clampSidebarWidth(drag.startWidth + delta);
+    setSidebarConfig((current) => ({ ...current, collapsed: false, width: nextWidth }));
+  }
+
+  function handleSidebarResizePointerUp(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = sidebarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    sidebarDragRef.current = null;
+    document.body.classList.remove('sidebar-resizing');
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!drag.moved) setSidebarCollapsed(!sidebarConfig.collapsed);
+  }
+
+  function handleSidebarResizePointerCancel(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = sidebarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    sidebarDragRef.current = null;
+    document.body.classList.remove('sidebar-resizing');
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
   useEffect(() => {
     if (reviewMode !== 'freeReplay') return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -172,58 +277,75 @@ export function App() {
   const paperMarkers = freeReplay ? paperTradeMarkers(paperTrading.trades, timeframe, freeReplayCandles).filter((marker) => Number(marker.time) <= freeReplay.cursorTime) : [];
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <main className="app-shell" style={shellStyle}>
+      <aside className={`sidebar ${sidebarConfig.collapsed ? 'collapsed' : ''}`}>
+        {sidebarConfig.collapsed ? (
+          <div className="sidebar-rail">
+            <button type="button" className="sidebar-expand" aria-label="展开侧边栏" title="展开侧边栏" onClick={() => setSidebarCollapsed(false)}>
+              <ChevronRight size={18} />
+            </button>
+            <span className="sidebar-mode-label" title={reviewMode === 'trade' ? 'Trade Review' : 'Free Replay'}>{reviewMode === 'trade' ? 'TR' : 'FR'}</span>
+          </div>
+        ) : (
+          <>
         <div className="mode-switch">
           <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>Trade Review</button>
           <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>Free Replay</button>
         </div>
         {reviewMode === 'trade' ? (
           <>
-        <div className="toolbar">
-          <div className="search-block">
-            <Search size={16} />
-            <select value={filters.instrument ?? ''} onChange={(event) => setFilters({ ...filters, instrument: event.target.value || undefined })}>
-              <option value="">全部交易对</option>
-              {data.instruments.map((instrument) => <option key={instrument}>{instrument}</option>)}
-            </select>
-          </div>
-          <select value={filters.direction ?? ''} onChange={(event) => setFilters({ ...filters, direction: event.target.value as ReviewQueueOptions['direction'] || undefined })}>
-            <option value="">多空</option>
-            <option value="多">多</option>
-            <option value="空">空</option>
-          </select>
-          <select value={filters.result ?? ''} onChange={(event) => setFilters({ ...filters, result: event.target.value as ReviewQueueOptions['result'] || undefined })}>
-            <option value="">盈亏</option>
-            <option value="profit">盈利</option>
-            <option value="loss">亏损</option>
-            <option value="flat">打平</option>
-          </select>
-          <select value={filters.tag ?? ''} onChange={(event) => setFilters({ ...filters, tag: event.target.value || undefined })}>
-            <option value="">全部标签</option>
-            {data.tags.map((tag) => <option key={tag}>{tag}</option>)}
-          </select>
-          <select value={filters.starred ?? ''} onChange={(event) => setFilters({ ...filters, starred: event.target.value as ReviewQueueOptions['starred'] || undefined })}>
-            <option value="">收藏状态</option>
-            <option value="yes">已收藏</option>
-            <option value="no">未收藏</option>
-          </select>
-          <select value={filters.noteState ?? ''} onChange={(event) => setFilters({ ...filters, noteState: event.target.value as ReviewQueueOptions['noteState'] || undefined })}>
-            <option value="">备注状态</option>
-            <option value="withNote">有备注</option>
-            <option value="withoutNote">无备注</option>
-          </select>
-          <div className="date-row">
-            <input type="date" value={filters.startDate ?? ''} onChange={(event) => setFilters({ ...filters, startDate: event.target.value || undefined })} />
-            <input type="date" value={filters.endDate ?? ''} onChange={(event) => setFilters({ ...filters, endDate: event.target.value || undefined })} />
-          </div>
-          <div className="sort-row">
-            <select value={filters.sortField ?? 'entryTime'} onChange={(event) => setFilters({ ...filters, sortField: event.target.value as SortField })}>
-              {(Object.keys(sortLabels) as SortField[]).map((field) => <option key={field} value={field}>{sortLabels[field]}</option>)}
-            </select>
-            <button className="icon-button" title="切换排序方向" onClick={() => setFilters({ ...filters, sortDirection: filters.sortDirection === 'desc' ? 'asc' : 'desc' })}>
-              {filters.sortDirection === 'desc' ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
-            </button>
+        <div className={`toolbar ${sidebarConfig.filterCollapsed ? 'filter-collapsed' : ''}`}>
+          <button type="button" className="toolbar-header" aria-expanded={!sidebarConfig.filterCollapsed} onClick={() => setFilterCollapsed(!sidebarConfig.filterCollapsed)}>
+            <span>筛选</span>
+            <ChevronDown size={16} className="toolbar-chevron" />
+          </button>
+          <div className="toolbar-body">
+            <div className="toolbar-body-inner">
+              <div className="search-block">
+                <Search size={16} />
+                <select value={filters.instrument ?? ''} onChange={(event) => setFilters({ ...filters, instrument: event.target.value || undefined })}>
+                  <option value="">全部交易对</option>
+                  {data.instruments.map((instrument) => <option key={instrument}>{instrument}</option>)}
+                </select>
+              </div>
+              <select value={filters.direction ?? ''} onChange={(event) => setFilters({ ...filters, direction: event.target.value as ReviewQueueOptions['direction'] || undefined })}>
+                <option value="">多空</option>
+                <option value="多">多</option>
+                <option value="空">空</option>
+              </select>
+              <select value={filters.result ?? ''} onChange={(event) => setFilters({ ...filters, result: event.target.value as ReviewQueueOptions['result'] || undefined })}>
+                <option value="">盈亏</option>
+                <option value="profit">盈利</option>
+                <option value="loss">亏损</option>
+                <option value="flat">打平</option>
+              </select>
+              <select value={filters.tag ?? ''} onChange={(event) => setFilters({ ...filters, tag: event.target.value || undefined })}>
+                <option value="">全部标签</option>
+                {data.tags.map((tag) => <option key={tag}>{tag}</option>)}
+              </select>
+              <select value={filters.starred ?? ''} onChange={(event) => setFilters({ ...filters, starred: event.target.value as ReviewQueueOptions['starred'] || undefined })}>
+                <option value="">收藏状态</option>
+                <option value="yes">已收藏</option>
+                <option value="no">未收藏</option>
+              </select>
+              <select value={filters.noteState ?? ''} onChange={(event) => setFilters({ ...filters, noteState: event.target.value as ReviewQueueOptions['noteState'] || undefined })}>
+                <option value="">备注状态</option>
+                <option value="withNote">有备注</option>
+                <option value="withoutNote">无备注</option>
+              </select>
+              <div className="date-row">
+                <input type="date" value={filters.startDate ?? ''} onChange={(event) => setFilters({ ...filters, startDate: event.target.value || undefined })} />
+                <input type="date" value={filters.endDate ?? ''} onChange={(event) => setFilters({ ...filters, endDate: event.target.value || undefined })} />
+              </div>
+              <div className="sort-row">
+                <select value={filters.sortField ?? 'entryTime'} onChange={(event) => setFilters({ ...filters, sortField: event.target.value as SortField })}>
+                  {(Object.keys(sortLabels) as SortField[]).map((field) => <option key={field} value={field}>{sortLabels[field]}</option>)}
+                </select>
+                <button className="icon-button" title="切换排序方向" onClick={() => setFilters({ ...filters, sortDirection: filters.sortDirection === 'desc' ? 'asc' : 'desc' })}>
+                  {filters.sortDirection === 'desc' ? <ChevronDown size={17} /> : <ChevronUp size={17} />}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
         <div className="review-progress" aria-label="Review progress">
@@ -270,7 +392,21 @@ export function App() {
         </div>
           </>
         ) : <FreeReplayPanel timeframe={timeframe} onStart={(next) => { setFreeReplay(next); setFreeReplayCandles([]); setPaperTrading(initialPaperTradingSession()); }} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} />}
+          </>
+        )}
       </aside>
+      <button
+        type="button"
+        className="resize-handle"
+        aria-label={sidebarConfig.collapsed ? '展开侧边栏' : '调整或收起侧边栏'}
+        title={sidebarConfig.collapsed ? '展开侧边栏' : '拖拽调整宽度，点击收起'}
+        onPointerDown={handleSidebarResizePointerDown}
+        onPointerMove={handleSidebarResizePointerMove}
+        onPointerUp={handleSidebarResizePointerUp}
+        onPointerCancel={handleSidebarResizePointerCancel}
+      >
+        {sidebarConfig.collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+      </button>
       <section className="workspace">
         {reviewMode === 'freeReplay' ? freeReplay ? (
           <>

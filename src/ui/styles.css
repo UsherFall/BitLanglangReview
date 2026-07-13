@@ -33,7 +33,7 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 390px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-grid-width, 390px) 4px minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
@@ -46,13 +46,129 @@ textarea {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  align-items: stretch;
+}
+
+.sidebar-rail {
+  display: grid;
+  grid-template-rows: 40px auto;
+  justify-items: center;
+  gap: 10px;
+  padding: 8px 5px;
+}
+
+.sidebar-expand,
+.resize-handle {
+  border: 0;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+}
+
+.sidebar-expand {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+
+.sidebar-expand:hover,
+.resize-handle:hover {
+  color: #ffffff;
+  background: #1f2937;
+}
+
+.sidebar-mode-label {
+  width: 28px;
+  min-height: 28px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: #d6dee7;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resize-handle {
+  width: 4px;
+  min-width: 4px;
+  padding: 0;
+  border-radius: 0;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+  display: grid;
+  place-items: center;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.resize-handle svg {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.resize-handle:hover svg,
+.resize-handle:focus-visible svg {
+  opacity: 1;
+}
+
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .toolbar {
   display: grid;
-  gap: 8px;
-  padding: 12px;
   border-bottom: 1px solid #2d333b;
+}
+
+.toolbar-header {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: #d6dee7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.toolbar-header:hover {
+  background: #111827;
+}
+
+.toolbar-chevron {
+  transition: transform 0.18s ease;
+}
+
+.filter-collapsed .toolbar-chevron {
+  transform: rotate(-90deg);
+}
+
+.toolbar-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  transition: grid-template-rows 0.18s ease;
+}
+
+.filter-collapsed .toolbar-body {
+  grid-template-rows: 0fr;
+}
+
+.toolbar-body-inner {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
 }
 
 .mode-switch {
@@ -794,6 +910,10 @@ label,
   .app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: 42vh minmax(0, 1fr);
+  }
+
+  .resize-handle {
+    display: none;
   }
 
   .sidebar {
