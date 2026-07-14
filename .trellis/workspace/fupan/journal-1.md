@@ -206,3 +206,36 @@ Fixed Free Replay cursor advancement after chart zoom by scrolling the viewport 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Free Replay timeframe cursor anchoring
+
+**Date**: 2026-07-15
+**Task**: Free Replay timeframe cursor anchoring
+**Branch**: `master`
+
+### Summary
+
+Fixed Free Replay timeframe switching so new timeframe candle loading anchors on the previous replay cursor, added regression coverage for initial viewport, paper markers, and 1H to 4H cursor mapping.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da99c91` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

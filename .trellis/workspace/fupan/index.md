@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 6
-- **Last Active**: 2026-07-14
+- **Total Sessions**: 7
+- **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~208 | Active |
+| `journal-1.md` | ~241 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 7 | 2026-07-15 | Free Replay timeframe cursor anchoring | `da99c91` | `master` |
 | 6 | 2026-07-14 | Fix Free Replay zoom cursor follow | `486b096` | `master` |
 | 5 | 2026-07-14 | Fix drawing deselect on blank chart click | `5c77fc4`, `f015a61` | `master` |
 | 4 | 2026-07-10 | 1m chart and starred reviews | `6d1bfb4`, `9624deb` | `master` |
