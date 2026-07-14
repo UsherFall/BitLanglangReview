@@ -139,3 +139,37 @@ Implemented 1m review timeframe support, starred review persistence and filterin
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Fix drawing deselect on blank chart click
+
+**Date**: 2026-07-14
+**Task**: Fix drawing deselect on blank chart click
+**Branch**: `master`
+
+### Summary
+
+Fixed drawing deselection: clicking blank chart area now clears selected drawing. Root cause was CSS pointer-events: none on SVG overlay blocking click handlers. Added transparent rect with pointer-events: all when a drawing is selected and no tool is active. Also added Escape key fallback. Updated spec with jsdom pointer-events testing pitfall.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5c77fc4` | (see git log) |
+| `f015a61` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
