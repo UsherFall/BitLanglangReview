@@ -11,6 +11,7 @@ type InstrumentResponse = {
 export type FreeReplayStart = {
   instrument: string;
   startTime: string;
+  dataAnchorTime: string;
   startCursorTime: number;
   cursorTime: number;
 };
@@ -93,6 +94,7 @@ export function FreeReplayPanel({ timeframe, onStart, onReveal, onRewind }: { ti
         onStart?.({
           instrument: selectedInstrument,
           startTime,
+          dataAnchorTime: startTime,
           startCursorTime: cursorTime,
           cursorTime,
         });

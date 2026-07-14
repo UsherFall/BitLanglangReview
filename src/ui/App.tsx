@@ -202,6 +202,7 @@ export function App() {
     setTimeframe(nextTimeframe);
     setFreeReplay((current) => current ? {
       ...current,
+      dataAnchorTime: new Date(current.cursorTime * 1000).toISOString(),
       startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe),
       cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.cursorTime, nextTimeframe),
     } : current);
@@ -675,7 +676,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     pendingRenderRef.current = false;
     latestAnchorRef.current = null;
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
-    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.startTime, mode: 'initial' });
+    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial' });
     fetch(`/api/candles?${params}`)
       .then((response) => response.json())
       .then(({ candles }: { candles: Candlestick[] }) => {
@@ -685,7 +686,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
         setStatus(merged.length ? '' : 'No candlesticks');
       })
       .catch(() => setStatus('Candlestick loading failed'));
-  }, [replay.instrument, replay.startTime, timeframe]);
+  }, [replay.instrument, replay.startTime, replay.dataAnchorTime, timeframe]);
 
   useEffect(() => {
     const series = seriesRef.current;
