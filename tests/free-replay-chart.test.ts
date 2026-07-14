@@ -50,6 +50,16 @@ describe('Free Replay Chart', () => {
     expect(shouldPrefetchFutureCandles(candles, Date.parse('2024-05-21T10:05:00+08:00') / 1000, 1)).toBe(true);
     expect(shouldPrefetchFutureCandles(candles, Date.parse('2024-05-21T10:00:00+08:00') / 1000, 1)).toBe(false);
   });
+
+  it('prefetches when the cursor falls between loaded candlestick timestamps', () => {
+    const candles = [
+      makeCandle('2024-05-21T10:00:00+08:00'),
+      makeCandle('2024-05-21T10:05:00+08:00'),
+      makeCandle('2024-05-21T10:10:00+08:00'),
+    ];
+
+    expect(shouldPrefetchFutureCandles(candles, Date.parse('2024-05-21T10:05:30+08:00') / 1000, 1)).toBe(true);
+  });
 });
 
 function makeCandle(time: string): Candlestick {

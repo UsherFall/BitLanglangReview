@@ -616,6 +616,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const loadedCandlesRef = useRef<Candlestick[]>([]);
   const dragRef = useRef<DrawingDrag | null>(null);
+  const cursorFollowInitRef = useRef(false);
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
   const [status, setStatus] = useState('Loading candlesticks');
@@ -709,6 +710,28 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   useEffect(() => {
     if (!loadedCandlesRef.current.length) return;
     setRenderedCandles(loadedCandlesRef.current);
+  }, [replay.cursorTime]);
+
+  // Cursor follow effect: scroll viewport to keep cursor 10 steps from right edge.
+  useEffect(() => {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    if (!cursorFollowInitRef.current) {
+      cursorFollowInitRef.current = true;
+      return;
+    }
+    const visible = currentFreeReplayVisibleRange(chart);
+    if (!visible) return;
+    const step = timeframeMs(timeframe) / 1000;
+    const span = visible.to - visible.from;
+    suppressAutoLoadRef.current = true;
+    chart.timeScale().setVisibleRange({
+      from: (replay.cursorTime - span + step * 10) as UTCTimestamp,
+      to: (replay.cursorTime + step * 10) as UTCTimestamp,
+    });
+    window.setTimeout(() => {
+      suppressAutoLoadRef.current = false;
+    }, 0);
   }, [replay.cursorTime]);
 
   useEffect(() => {

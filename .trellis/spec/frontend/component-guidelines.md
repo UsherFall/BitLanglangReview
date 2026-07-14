@@ -24,6 +24,22 @@ Important local patterns:
 - Preserve the Chart Navigation Anchor when applying on-demand loaded candlesticks. See `visibleRangeForAnchor` and `visibleRangeForLatestAnchor` in `src/ui/chart-navigation-anchor.ts`.
 - In Free Replay, show only candles through the Free Replay Cursor. Use `visibleCandlesForFreeReplay` from `src/ui/free-replay-chart.ts`.
 
+### Free Replay Cursor Follow
+
+When the cursor advances in Free Replay, the chart viewport **must scroll to follow** so the user sees the new candle. Keep the current zoom level (visible span) by computing `span = visible.to - visible.from` before calling `setVisibleRange`:
+
+```typescript
+// Cursor follow: preserve zoom level, keep cursor 10 steps from right edge
+const step = timeframeMs(timeframe) / 1000;
+const span = visible.to - visible.from;
+chart.timeScale().setVisibleRange({
+  from: (replay.cursorTime - span + step * 10) as UTCTimestamp,
+  to: (replay.cursorTime + step * 10) as UTCTimestamp,
+});
+```
+
+Set `suppressAutoLoadRef.current = true` before `setVisibleRange` and reset it via `setTimeout(0)` to prevent the `visibleLogicalRangeChange` handler from firing during the range update. Use a `cursorFollowInitRef` guard to skip the first mount (the initial `setVisibleRange` is handled by the render effect's initialization block).
+
 ## Styling And Accessibility
 
 Use existing class names and extend `src/ui/styles.css`. Buttons that contain icons should use `lucide-react`, as shown by `Save`, `ChevronDown`, `ChevronUp`, `Minus`, `Slash`, and `Eraser`.
@@ -35,3 +51,13 @@ Inputs that do not have visible English text still need accessible labels. Exist
 Do not put pure chart or queue math directly into JSX when it can be tested as a helper. Do not show trade entry or exit markers during Free Replay; `Free Replay Chart Context` in `CONTEXT.md` explicitly excludes them. Do not make Review Notes count as reviewed; Review Progress is driven by tags.
 
 When changing chart drawing overlays, remember that SVG background clicks and drawing shape clicks share the same overlay surface. Shape and handle click handlers must stop propagation when they represent selecting or dragging a drawing; overlay blank-click handlers can then safely clear `selectedDrawingId`. Add or update an app-level regression test that asserts both sides: clicking a drawing selects/keeps it selected, and clicking blank chart overlay clears selection.
+
+### Common Mistake: Cursor advance without viewport scroll
+
+In `FreeReplayChart`, the render effect's `setVisibleRange` only runs on first initialization (guarded by `initializedRangeKeyRef`). After the user zooms or pans, subsequent cursor advances update data via `series.setData()` but leave the viewport unchanged. The cursor state advances correctly, but the user sees no visual change and thinks the button/keyboard doesn't work.
+
+**Fix**: Add a separate `useEffect` watching `replay.cursorTime` that calls `setVisibleRange` on every cursor change (skip first mount). See the "Free Replay Cursor Follow" section above.
+
+### Common Mistake: Strict equality in timestamp matching
+
+`shouldPrefetchFutureCandles` and similar helpers must use `>=` rather than `===` when matching `cursorTime * 1000` against candle timestamps. If the cursor timestamp has rounding deviation (e.g., from timeframe switch), strict equality silently returns `false` and future candle prefetch never triggers.

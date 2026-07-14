@@ -20,7 +20,7 @@ export function previousFreeReplayCursor(candles: Candlestick[], cursorTime: num
 
 export function shouldPrefetchFutureCandles(candles: Candlestick[], cursorTime: number, threshold: number): boolean {
   const ordered = [...candles].sort((a, b) => a.timestamp - b.timestamp);
-  const cursorIndex = ordered.findIndex((candle) => candle.timestamp === cursorTime * 1000);
+  const cursorIndex = ordered.findIndex((candle) => candle.timestamp >= cursorTime * 1000);
   if (cursorIndex < 0) return false;
   return ordered.length - cursorIndex - 1 <= threshold;
 }

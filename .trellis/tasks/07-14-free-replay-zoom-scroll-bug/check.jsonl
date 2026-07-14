@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/07-14-free-replay-zoom-scroll-bug/prd.md", "reason": "AC checklist to verify against"}
+{"file": ".trellis/tasks/07-14-free-replay-zoom-scroll-bug/implement.md", "reason": "Pre-release checks and rollback points"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality expectations and testing patterns"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component patterns for chart and chart overlays"}
