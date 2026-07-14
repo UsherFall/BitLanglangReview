@@ -173,3 +173,36 @@ Fixed drawing deselection: clicking blank chart area now clears selected drawing
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Fix Free Replay zoom cursor follow
+
+**Date**: 2026-07-14
+**Task**: Fix Free Replay zoom cursor follow
+**Branch**: `master`
+
+### Summary
+
+Fixed Free Replay cursor advancement after chart zoom by scrolling the viewport while preserving zoom span, relaxed future-prefetch timestamp matching, added regression tests, and documented the chart cursor-follow contract.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `486b096` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
