@@ -38,3 +38,36 @@ Implemented resizable/collapsible review sidebar and collapsible filter section 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Free Replay no-future progress model
+
+**Date**: 2026-07-28
+**Task**: Free Replay no-future progress model
+**Branch**: `master`
+
+### Summary
+
+Implemented exact Free Replay progressTime with no-future display cursor across timeframe switches, updated paper trading event timing, tests, specs, and archived the Trellis task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `89a831f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
