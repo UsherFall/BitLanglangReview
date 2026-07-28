@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import flatpickr from 'flatpickr';
 import 'flatpickr/dist/themes/dark.css';
 import type { ReviewTimeframe } from '../domain/trade';
-import { freeReplayCursorTimeForStart } from './chart-time';
+import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
 
 type InstrumentResponse = {
   instruments: string[];
@@ -13,6 +13,8 @@ export type FreeReplayStart = {
   startTime: string;
   dataAnchorTime: string;
   startCursorTime: number;
+  startProgressTime: number;
+  progressTime: number;
   cursorTime: number;
 };
 
@@ -90,11 +92,14 @@ export function FreeReplayPanel({ timeframe, onStart, onReveal, onRewind }: { ti
       </label>
       <button className="save-button" disabled={!selectedInstrument || !startTime} onClick={() => {
         if (!selectedInstrument || !startTime) return;
-        const cursorTime = freeReplayCursorTimeForStart(startTime, timeframe);
+        const progressTime = freeReplayProgressTimeForStart(startTime);
+        const cursorTime = freeReplayCursorTimeForProgress(progressTime, timeframe);
         onStart?.({
           instrument: selectedInstrument,
           startTime,
           dataAnchorTime: startTime,
+          startProgressTime: progressTime,
+          progressTime,
           startCursorTime: cursorTime,
           cursorTime,
         });

@@ -30,8 +30,10 @@ describe('FreeReplayPanel', () => {
       instrument: 'BTC-USDT-SWAP',
       startTime: '2024-05-21 10:07',
       dataAnchorTime: '2024-05-21 10:07',
-      startCursorTime: Date.parse('2024-05-21T10:00:00+08:00') / 1000,
-      cursorTime: Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+      startProgressTime: Date.parse('2024-05-21T10:07:00+08:00') / 1000,
+      progressTime: Date.parse('2024-05-21T10:07:00+08:00') / 1000,
+      startCursorTime: Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      cursorTime: Date.parse('2024-05-21T09:45:00+08:00') / 1000,
     });
   });
 

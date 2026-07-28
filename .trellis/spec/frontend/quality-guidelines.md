@@ -22,9 +22,9 @@ When changing trade review charts, verify:
 When changing Free Replay, verify:
 
 - Future candlesticks remain hidden until reveal.
-- Rewind cannot move before the start cursor.
+- Rewind cannot move before the start progress.
 - Trade markers are not rendered.
-- Switching Review Timeframes maps the cursor to the containing candlestick.
+- Switching Review Timeframes preserves true Free Replay `progressTime` and maps the display cursor to the latest complete candlestick whose end time is not after that progress.
 
 ## Forbidden Patterns
 

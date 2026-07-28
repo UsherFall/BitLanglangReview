@@ -77,8 +77,8 @@ describe('App Free Replay', () => {
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
           candles: [
-            makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }),
-            makeCandle('2024-05-21T10:05:00+08:00', { close: 110 }),
+            makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+            makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
           ],
         }));
       }
@@ -111,6 +111,7 @@ describe('App Free Replay', () => {
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
           candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
             makeCandle('2024-05-21T10:00:00+08:00'),
             makeCandle('2024-05-21T10:05:00+08:00'),
             makeCandle('2024-05-21T10:10:00+08:00'),
@@ -131,7 +132,7 @@ describe('App Free Replay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
 
-    const nextCursor = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
+    const nextCursor = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
       from: nextCursor - 1000 + 3000,
       to: nextCursor + 3000,
@@ -147,6 +148,7 @@ describe('App Free Replay', () => {
         return new Response(JSON.stringify({
           candles: [
             makeCandle('2024-05-21T00:00:00+08:00'),
+            makeCandle('2024-05-21T09:55:00+08:00'),
             makeCandle('2024-05-21T10:00:00+08:00'),
             makeCandle('2024-05-21T10:05:00+08:00'),
           ],
@@ -162,7 +164,7 @@ describe('App Free Replay', () => {
     fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
 
-    const cursor = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
+    const cursor = Date.parse('2024-05-21T09:55:00+08:00') / 1000;
     const step = 5 * 60;
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith(expect.objectContaining({
       to: cursor + step * 10,
@@ -181,12 +183,12 @@ describe('App Free Replay', () => {
         const timeframe = new URL(`http://localhost${url}`).searchParams.get('timeframe');
         const candles = timeframe === '15m'
           ? [
-              makeCandle('2024-05-21T10:00:00+08:00', { close: 100, timeframe: '15m' }),
-              makeCandle('2024-05-21T10:15:00+08:00', { close: 110, timeframe: '15m' }),
+              makeCandle('2024-05-21T09:45:00+08:00', { close: 100, timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { close: 110, timeframe: '15m' }),
             ]
           : [
-              makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }),
-              makeCandle('2024-05-21T10:05:00+08:00', { close: 110 }),
+              makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+              makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
               makeCandle('2024-05-21T10:10:00+08:00', { close: 115 }),
             ];
         return new Response(JSON.stringify({ candles }));
@@ -209,22 +211,22 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
 
     await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith([
-      expect.objectContaining({ time: Date.parse('2024-05-21T10:00:00+08:00') / 1000, text: '开 100' }),
-      expect.objectContaining({ time: Date.parse('2024-05-21T10:05:00+08:00') / 1000, text: '平 110' }),
+      expect.objectContaining({ time: Date.parse('2024-05-21T09:55:00+08:00') / 1000 }),
+      expect.objectContaining({ time: Date.parse('2024-05-21T10:00:00+08:00') / 1000 }),
     ]));
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
     await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith([
-      expect.objectContaining({ time: Date.parse('2024-05-21T10:00:00+08:00') / 1000, text: '开 100' }),
-      expect.objectContaining({ time: Date.parse('2024-05-21T10:00:00+08:00') / 1000, text: '平 110' }),
+      expect.objectContaining({ time: Date.parse('2024-05-21T09:45:00+08:00') / 1000 }),
+      expect.objectContaining({ time: Date.parse('2024-05-21T09:45:00+08:00') / 1000 }),
     ]));
     const latestMarkersCall = chartMocks.setMarkers.mock.calls.at(-1)?.[0];
     expect(latestMarkersCall).toHaveLength(2);
   });
 
-  it('anchors timeframe switch loading on the previous cursor candle, not start or paper trade times', async () => {
+  it('keeps Free Replay progress across large timeframe switches without revealing unfinished candles', async () => {
     const candleRequests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
@@ -235,21 +237,16 @@ describe('App Free Replay', () => {
         const timeframe = new URL(`http://localhost${url}`).searchParams.get('timeframe');
         const candles = timeframe === '4H'
           ? [
+              makeCandle('2024-05-21T04:00:00+08:00', { timeframe: '4H' }),
               makeCandle('2024-05-21T08:00:00+08:00', { timeframe: '4H' }),
               makeCandle('2024-05-21T12:00:00+08:00', { timeframe: '4H' }),
-              makeCandle('2024-05-21T16:00:00+08:00', { timeframe: '4H' }),
             ]
-          : timeframe === '1H'
-            ? [
-                makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '1H' }),
-                makeCandle('2024-05-21T11:00:00+08:00', { timeframe: '1H' }),
-                makeCandle('2024-05-21T12:00:00+08:00', { timeframe: '1H' }),
-                makeCandle('2024-05-21T13:00:00+08:00', { timeframe: '1H' }),
-              ]
-            : [
-                makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }),
-                makeCandle('2024-05-21T10:05:00+08:00', { close: 110 }),
-              ];
+          : [
+              makeCandle('2024-05-21T10:25:00+08:00'),
+              makeCandle('2024-05-21T10:30:00+08:00'),
+              makeCandle('2024-05-21T10:35:00+08:00'),
+              makeCandle('2024-05-21T11:55:00+08:00'),
+            ];
         return new Response(JSON.stringify({ candles }));
       }
       return new Response(JSON.stringify({}));
@@ -259,22 +256,11 @@ describe('App Free Replay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
     await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:35' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
-
-    fireEvent.click(screen.getByRole('button', { name: '1H' }));
-    await waitFor(() => expect(candleRequests.some((url) => url.includes('timeframe=1H'))).toBe(true));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
     chartMocks.setVisibleRange.mockClear();
-
     fireEvent.click(screen.getByRole('button', { name: '4H' }));
 
     const fourHourRequest = await waitFor(() => {
@@ -283,12 +269,37 @@ describe('App Free Replay', () => {
       return request ?? '';
     });
     const params = new URL(`http://localhost${fourHourRequest}`).searchParams;
-    expect(Date.parse(params.get('entryTime') ?? '')).toBe(Date.parse('2024-05-21T13:00:00+08:00'));
+    expect(Date.parse(params.get('entryTime') ?? '')).toBe(Date.parse('2024-05-21T10:35:00+08:00'));
 
-    const fourHourCursor = Date.parse('2024-05-21T12:00:00+08:00') / 1000;
+    const fourHourCursor = Date.parse('2024-05-21T04:00:00+08:00') / 1000;
     const fourHourStep = 4 * 60 * 60;
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith(expect.objectContaining({
       to: fourHourCursor + fourHourStep * 10,
+    })));
+
+    chartMocks.setVisibleRange.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+
+    const nextFourHourCursor = Date.parse('2024-05-21T08:00:00+08:00') / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith(expect.objectContaining({
+      to: nextFourHourCursor + fourHourStep * 10,
+    })));
+
+    candleRequests.length = 0;
+    chartMocks.setVisibleRange.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '5m' }));
+
+    const fiveMinuteRequest = await waitFor(() => {
+      const request = candleRequests.find((url) => url.includes('timeframe=5m'));
+      expect(request).toBeTruthy();
+      return request ?? '';
+    });
+    const fiveMinuteParams = new URL(`http://localhost${fiveMinuteRequest}`).searchParams;
+    expect(Date.parse(fiveMinuteParams.get('entryTime') ?? '')).toBe(Date.parse('2024-05-21T12:00:00+08:00'));
+
+    const fiveMinuteCursor = Date.parse('2024-05-21T11:55:00+08:00') / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith(expect.objectContaining({
+      to: fiveMinuteCursor + 5 * 60 * 10,
     })));
   });
 });

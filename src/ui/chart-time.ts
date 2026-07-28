@@ -13,14 +13,39 @@ export function timeframeTimeForPoint(pointTime: number, timeframe: ReviewTimefr
   return timeframeTimeForTimestamp(pointTime * 1000, timeframe, candles);
 }
 
-export function freeReplayCursorTimeForStart(startTime: string, timeframe: ReviewTimeframe): UTCTimestamp {
-  const timestamp = Date.parse(startTime);
+export function freeReplayProgressTimeForStart(startTime: string): UTCTimestamp {
+  const timestamp = parseReviewInputTime(startTime);
   if (!Number.isFinite(timestamp)) return 0 as UTCTimestamp;
-  return Math.floor(floorTimestamp(timestamp, timeframe) / 1000) as UTCTimestamp;
+  return Math.floor(timestamp / 1000) as UTCTimestamp;
+}
+
+export function freeReplayCursorTimeForStart(startTime: string, timeframe: ReviewTimeframe): UTCTimestamp {
+  const timestamp = parseReviewInputTime(startTime);
+  if (!Number.isFinite(timestamp)) return 0 as UTCTimestamp;
+  return freeReplayCursorTimeForProgress(Math.floor(timestamp / 1000), timeframe);
 }
 
 export function freeReplayCursorTimeForTimeframeSwitch(previousCursorTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
-  return Math.floor(floorTimestamp(previousCursorTime * 1000, timeframe) / 1000) as UTCTimestamp;
+  return freeReplayCursorTimeForProgress(previousCursorTime, timeframe);
+}
+
+export function freeReplayCursorTimeForProgress(progressTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
+  const progressTimestamp = progressTime * 1000;
+  if (!Number.isFinite(progressTimestamp)) return 0 as UTCTimestamp;
+  const containingStart = floorTimestamp(progressTimestamp, timeframe);
+  return Math.floor(floorTimestamp(containingStart - 1, timeframe) / 1000) as UTCTimestamp;
+}
+
+export function freeReplayCandleCompletionTime(cursorTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
+  const cursorTimestamp = cursorTime * 1000;
+  if (!Number.isFinite(cursorTimestamp)) return 0 as UTCTimestamp;
+  if (timeframe === '1M') {
+    const parts = shanghaiParts(new Date(cursorTimestamp));
+    const year = Number(parts.year);
+    const month = Number(parts.month);
+    return Math.floor((Date.UTC(year, month, 1) - 8 * 60 * 60_000) / 1000) as UTCTimestamp;
+  }
+  return Math.floor((cursorTimestamp + timeframeMs(timeframe)) / 1000) as UTCTimestamp;
 }
 
 function timeframeTimeForTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[]): UTCTimestamp {
@@ -110,6 +135,15 @@ function timeToTimestamp(time: Time): number {
   if (typeof time === 'number') return time * 1000;
   if (typeof time === 'string') return Date.parse(`${time}T00:00:00+08:00`);
   return Date.parse(`${time.year}-${pad(time.month)}-${pad(time.day)}T00:00:00+08:00`);
+}
+
+function parseReviewInputTime(value: string): number {
+  const trimmed = value.trim();
+  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed)) return Date.parse(trimmed);
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+    return Date.parse(`${trimmed.replace(' ', 'T')}+08:00`);
+  }
+  return Date.parse(trimmed);
 }
 
 function shanghaiParts(date: Date): Record<'year' | 'month' | 'day' | 'hour' | 'minute', string> {

@@ -9,10 +9,10 @@ import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { visibleRangeForAnchor, visibleRangeForLatestAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
-import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { candlestickAtTime, formatCandlestickPrice } from './candlestick-readout';
 import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
-import { nextFreeReplayCursor, previousFreeReplayCursor, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
+import { nextFreeReplayProgress, previousFreeReplayProgress, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
   cancelPendingOrder,
   closeMarket,
@@ -185,26 +185,31 @@ export function App() {
 
   function revealNextFreeReplayCandle() {
     if (!freeReplay) return;
-    const nextCursorTime = nextFreeReplayCursor(freeReplayCandles, freeReplay.cursorTime);
-    if (nextCursorTime !== freeReplay.cursorTime) {
-      const revealedCandle = currentCursorCandle(freeReplayCandles, nextCursorTime);
-      if (revealedCandle) setPaperTrading((current) => processRevealedCandle(current, revealedCandle));
+    const nextReplay = nextFreeReplayProgress(freeReplayCandles, freeReplay.cursorTime, freeReplay.progressTime, timeframe);
+    if (nextReplay.cursorTime !== freeReplay.cursorTime) {
+      const revealedCandle = currentCursorCandle(freeReplayCandles, nextReplay.cursorTime);
+      if (revealedCandle) setPaperTrading((current) => processRevealedCandle(current, revealedCandle, nextReplay.progressTime));
     }
-    setFreeReplay({ ...freeReplay, cursorTime: nextCursorTime });
+    setFreeReplay({ ...freeReplay, ...nextReplay });
   }
 
   function rewindFreeReplayCandle() {
     if (!freeReplay) return;
-    setFreeReplay({ ...freeReplay, cursorTime: previousFreeReplayCursor(freeReplayCandles, freeReplay.cursorTime, freeReplay.startCursorTime) });
+    const progressTime = Math.max(previousFreeReplayProgress(freeReplay.cursorTime), freeReplay.startProgressTime);
+    setFreeReplay({
+      ...freeReplay,
+      progressTime,
+      cursorTime: freeReplayCursorTimeForProgress(progressTime, timeframe),
+    });
   }
 
   function switchFreeReplayTimeframe(nextTimeframe: ReviewTimeframe) {
     setTimeframe(nextTimeframe);
     setFreeReplay((current) => current ? {
       ...current,
-      dataAnchorTime: new Date(current.cursorTime * 1000).toISOString(),
+      dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
       startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe),
-      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.cursorTime, nextTimeframe),
+      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe),
     } : current);
   }
 
@@ -267,7 +272,7 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reviewMode, freeReplay, freeReplayCandles]);
+  }, [reviewMode, freeReplay, freeReplayCandles, timeframe]);
 
   useEffect(() => {
     selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
@@ -426,12 +431,12 @@ export function App() {
                 session={paperTrading}
                 stats={paperStats}
                 currentCandle={freeReplayCurrentCandle}
-                onStart={() => setPaperTrading((current) => startPaperTrading(current, freeReplay.cursorTime))}
+                onStart={() => setPaperTrading((current) => startPaperTrading(current, freeReplay.progressTime))}
                 onReset={() => setPaperTrading(initialPaperTradingSession())}
-                onMarketOpen={(settings) => freeReplayCurrentCandle && setPaperTrading((current) => openMarket(current, freeReplayCurrentCandle, settings))}
-                onLimitOpen={(limitPrice, settings) => setPaperTrading((current) => placeEntryLimit(current, limitPrice, settings, freeReplay.cursorTime))}
-                onMarketClose={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle))}
-                onLimitClose={(limitPrice) => setPaperTrading((current) => placeExitLimit(current, limitPrice, freeReplay.cursorTime))}
+                onMarketOpen={(settings) => freeReplayCurrentCandle && setPaperTrading((current) => openMarket(current, freeReplayCurrentCandle, settings, freeReplay.progressTime))}
+                onLimitOpen={(limitPrice, settings) => setPaperTrading((current) => placeEntryLimit(current, limitPrice, settings, freeReplay.progressTime))}
+                onMarketClose={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle, freeReplay.progressTime))}
+                onLimitClose={(limitPrice) => setPaperTrading((current) => placeExitLimit(current, limitPrice, freeReplay.progressTime))}
                 onCancelOrder={(kind) => setPaperTrading((current) => cancelPendingOrder(current, kind))}
               />
             </div>

@@ -11,7 +11,7 @@ Use typed inline props for small components and exported types when another file
 Prefer callbacks that report completed domain events instead of exposing component internals:
 
 - `ReviewEditor` calls `onSaved(review)` after `/api/reviews` returns a `TradeReview`.
-- `FreeReplayPanel` calls `onStart(start)` after it maps the selected start time to a containing candlestick through `freeReplayCursorTimeForStart`.
+- `FreeReplayPanel` calls `onStart(start)` after it records the selected start time as exact Free Replay `progressTime` and derives the current timeframe cursor from that progress through no-future Free Replay helpers.
 
 ## Chart Components
 
@@ -22,7 +22,7 @@ Important local patterns:
 - Create and remove the chart in a mount-only `useEffect`.
 - Use refs for loaded/rendered candlestick arrays when event handlers need current data without re-subscribing every render.
 - Preserve the Chart Navigation Anchor when applying on-demand loaded candlesticks. See `visibleRangeForAnchor` and `visibleRangeForLatestAnchor` in `src/ui/chart-navigation-anchor.ts`.
-- In Free Replay, show only candles through the Free Replay Cursor. Use `visibleCandlesForFreeReplay` from `src/ui/free-replay-chart.ts`.
+- In Free Replay, show only candles through the Free Replay Cursor. The cursor is a derived display boundary: the latest complete candlestick whose end time is not after `replay.progressTime`. Use `visibleCandlesForFreeReplay` from `src/ui/free-replay-chart.ts`.
 
 ### Free Replay Cursor Follow
 
@@ -39,6 +39,8 @@ chart.timeScale().setVisibleRange({
 ```
 
 Set `suppressAutoLoadRef.current = true` before `setVisibleRange` and reset it via `setTimeout(0)` to prevent the `visibleLogicalRangeChange` handler from firing during the range update. Use a `cursorFollowInitRef` guard to skip the first mount (the initial `setVisibleRange` is handled by the render effect's initialization block).
+
+Free Replay must keep `progressTime` separate from `cursorTime`. Switching Review Timeframes preserves `progressTime` and recomputes the derived cursor; it must not floor and store the old cursor as the new true progress. For example, `progressTime = 10:35` maps to `10:30` on `5m` and `04:00` on `4H` so the unfinished `08:00-12:00` candle is not shown.
 
 ## Styling And Accessibility
 

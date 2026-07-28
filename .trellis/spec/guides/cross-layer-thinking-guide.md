@@ -11,7 +11,7 @@ Common paths in this app:
 - Source Workbook row -> `loadTradesFromWorkbook` -> `Trade` -> `buildReviewQueue` -> `/api/trades` -> sidebar trade row.
 - Review Editor draft -> `POST /api/reviews` -> `ReviewStore.saveReview` -> `TradeReview` -> local queue update -> Review Progress.
 - Chart navigation -> visible range threshold -> `/api/candles` -> `CandlestickService` -> `CandlestickStore` -> merged candles -> chart `setData` -> navigation anchor restoration.
-- Free Replay start input -> `freeReplayCursorTimeForStart` -> `/api/candles` -> hidden future candles -> reveal/rewind cursor helpers.
+- Free Replay start input -> exact `progressTime` -> no-future display cursor -> `/api/candles` -> hidden future candles -> reveal/rewind progress helpers.
 - Drawing overlay pointer event -> `SaveChartDrawingInput` -> `/api/drawings` -> `DrawingStore` -> instrument-level redraw.
 
 ## Boundary Questions
@@ -32,7 +32,7 @@ Time bugs are the highest-risk cross-layer area in this project. Preserve these 
 - Source Workbook trade times are normalized to Shanghai ISO strings with `+08:00`.
 - Domain/server Candlestick timestamps are milliseconds.
 - `lightweight-charts` times are seconds.
-- Entry, exit, drawing times, and Free Replay start times belong to the containing Candlestick for the active Review Timeframe.
+- Entry, exit, and drawing times belong to the containing Candlestick for the active Review Timeframe. Free Replay is stricter: `progressTime` is exact, and the display cursor belongs to the latest complete Candlestick whose end time is not after `progressTime`.
 - Initial Review Window is 150 candles before entry plus 150 after entry.
 - On-demand loading must not move the Chart Navigation Anchor.
 

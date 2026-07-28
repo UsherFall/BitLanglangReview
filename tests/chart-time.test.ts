@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import { reviewTimeframes } from '../src/domain/trade';
-import { formatChartTime, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
+import { formatChartTime, freeReplayCandleCompletionTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
 
 describe('Chart Time', () => {
   it('supports 1m as the first review timeframe', () => {
@@ -55,17 +55,26 @@ describe('Chart Time', () => {
     expect(timeframeTimeForPoint(Date.parse('2024-05-21T01:17:00.000+08:00') / 1000, '4H', candles)).toBe(Date.parse('2024-05-21T00:00:00+08:00') / 1000);
   });
 
-  it('places a free replay start minute on the containing review timeframe candlestick', () => {
-    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:30+08:00', '1m')).toBe(Date.parse('2024-05-21T10:07:00+08:00') / 1000);
-    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:00+08:00', '15m')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
-    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:00+08:00', '1H')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
+  it('keeps the free replay start progress exact while displaying only completed candles', () => {
+    expect(freeReplayProgressTimeForStart('2024-05-21 10:35')).toBe(Date.parse('2024-05-21T10:35:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForStart('2024-05-21T10:07:30+08:00', '1m')).toBe(Date.parse('2024-05-21T10:06:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForStart('2024-05-21T10:35:00+08:00', '5m')).toBe(Date.parse('2024-05-21T10:30:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForStart('2024-05-21T10:35:00+08:00', '4H')).toBe(Date.parse('2024-05-21T04:00:00+08:00') / 1000);
   });
 
-  it('places the free replay cursor on the containing candlestick when switching review timeframes', () => {
-    const previousCursor = Date.parse('2024-05-21T10:35:00+08:00') / 1000;
+  it('maps free replay progress to the latest completed candlestick when switching review timeframes', () => {
+    const progress = Date.parse('2024-05-21T10:35:00+08:00') / 1000;
 
-    expect(freeReplayCursorTimeForTimeframeSwitch(previousCursor, '15m')).toBe(Date.parse('2024-05-21T10:30:00+08:00') / 1000);
-    expect(freeReplayCursorTimeForTimeframeSwitch(previousCursor, '1H')).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForProgress(progress, '5m')).toBe(Date.parse('2024-05-21T10:30:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForTimeframeSwitch(progress, '15m')).toBe(Date.parse('2024-05-21T10:15:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForTimeframeSwitch(progress, '1H')).toBe(Date.parse('2024-05-21T09:00:00+08:00') / 1000);
+    expect(freeReplayCursorTimeForTimeframeSwitch(progress, '4H')).toBe(Date.parse('2024-05-21T04:00:00+08:00') / 1000);
+  });
+
+  it('computes completion times for free replay cursor candles', () => {
+    expect(freeReplayCandleCompletionTime(Date.parse('2024-05-21T10:30:00+08:00') / 1000, '5m')).toBe(Date.parse('2024-05-21T10:35:00+08:00') / 1000);
+    expect(freeReplayCandleCompletionTime(Date.parse('2024-05-21T08:00:00+08:00') / 1000, '4H')).toBe(Date.parse('2024-05-21T12:00:00+08:00') / 1000);
+    expect(freeReplayCandleCompletionTime(Date.parse('2024-05-01T00:00:00+08:00') / 1000, '1M')).toBe(Date.parse('2024-06-01T00:00:00+08:00') / 1000);
   });
 });
 

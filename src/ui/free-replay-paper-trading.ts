@@ -1,7 +1,7 @@
 import type { SeriesMarker, UTCTimestamp } from 'lightweight-charts';
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
-import { markerTimeForEvent } from './chart-time';
+import { freeReplayCursorTimeForProgress } from './chart-time';
 
 export const PAPER_ACCOUNT_EQUITY = 1000;
 
@@ -82,9 +82,9 @@ export function startPaperTrading(session: PaperTradingSession, cursorTime: numb
   };
 }
 
-export function openMarket(session: PaperTradingSession, candle: Candlestick, settings: PaperTradingSettings): PaperTradingSession {
+export function openMarket(session: PaperTradingSession, candle: Candlestick, settings: PaperTradingSettings, eventTime: number): PaperTradingSession {
   if (!session.active || session.position) return session;
-  return openPosition(session, candle.close, candle.timestamp, settings);
+  return openPosition(session, candle.close, eventTime * 1000, settings);
 }
 
 export function placeEntryLimit(session: PaperTradingSession, limitPrice: number, settings: PaperTradingSettings, cursorTime: number): PaperTradingSession {
@@ -102,9 +102,9 @@ export function placeEntryLimit(session: PaperTradingSession, limitPrice: number
   return { ...session, nextId: session.nextId + 1, pendingEntry: order };
 }
 
-export function closeMarket(session: PaperTradingSession, candle: Candlestick): PaperTradingSession {
+export function closeMarket(session: PaperTradingSession, candle: Candlestick, eventTime: number): PaperTradingSession {
   if (!session.active || !session.position) return session;
-  return closePosition(session, candle.close, candle.timestamp);
+  return closePosition(session, candle.close, eventTime * 1000);
 }
 
 export function placeExitLimit(session: PaperTradingSession, limitPrice: number, cursorTime: number): PaperTradingSession {
@@ -125,17 +125,17 @@ export function cancelPendingOrder(session: PaperTradingSession, kind: PaperOrde
   return kind === 'entry' ? { ...session, pendingEntry: null } : { ...session, pendingExit: null };
 }
 
-export function processRevealedCandle(session: PaperTradingSession, candle: Candlestick): PaperTradingSession {
+export function processRevealedCandle(session: PaperTradingSession, candle: Candlestick, eventTime: number): PaperTradingSession {
   if (!session.active) return session;
   if (!session.position && session.pendingEntry && limitTouched(candle, session.pendingEntry.limitPrice)) {
-    return openPosition(session, session.pendingEntry.limitPrice, candle.timestamp, {
+    return openPosition(session, session.pendingEntry.limitPrice, eventTime * 1000, {
       direction: session.pendingEntry.direction,
       positionRatioPercent: session.pendingEntry.positionRatioPercent,
       leverage: session.pendingEntry.leverage,
     });
   }
   if (session.position && session.pendingExit && limitTouched(candle, session.pendingExit.limitPrice)) {
-    return closePosition(session, session.pendingExit.limitPrice, candle.timestamp);
+    return closePosition(session, session.pendingExit.limitPrice, eventTime * 1000);
   }
   return session;
 }
@@ -167,14 +167,14 @@ export function paperTradeMarkers(trades: PaperTrade[], timeframe: ReviewTimefra
     const isLong = trade.direction === 'long';
     return [
       {
-        time: markerTimeForEvent(new Date(trade.entryTime).toISOString(), timeframe, candles),
+        time: freeReplayCursorTimeForProgress(trade.entryTime / 1000, timeframe),
         position: isLong ? 'belowBar' : 'aboveBar',
         color: '#FACC15',
         shape: isLong ? 'arrowUp' : 'arrowDown',
         text: `开 ${trade.entryPrice}`,
       },
       {
-        time: markerTimeForEvent(new Date(trade.exitTime).toISOString(), timeframe, candles),
+        time: freeReplayCursorTimeForProgress(trade.exitTime / 1000, timeframe),
         position: isLong ? 'aboveBar' : 'belowBar',
         color: '#38BDF8',
         shape: isLong ? 'arrowDown' : 'arrowUp',

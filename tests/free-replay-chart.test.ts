@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
-import { nextFreeReplayCursor, previousFreeReplayCursor, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from '../src/ui/free-replay-chart';
+import { nextFreeReplayCursor, nextFreeReplayProgress, previousFreeReplayCursor, previousFreeReplayProgress, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from '../src/ui/free-replay-chart';
 
 describe('Free Replay Chart', () => {
   it('shows candlesticks through the free replay cursor and hides future candlesticks', () => {
@@ -38,6 +38,24 @@ describe('Free Replay Chart', () => {
 
     expect(previousFreeReplayCursor(candles, Date.parse('2024-05-21T10:10:00+08:00') / 1000, startCursor)).toBe(Date.parse('2024-05-21T10:05:00+08:00') / 1000);
     expect(previousFreeReplayCursor(candles, startCursor, startCursor)).toBe(startCursor);
+  });
+
+  it('advances progress to the revealed candle completion time', () => {
+    const candles = [
+      makeCandle('2024-05-21T04:00:00+08:00'),
+      makeCandle('2024-05-21T08:00:00+08:00'),
+    ];
+    const currentCursor = Date.parse('2024-05-21T04:00:00+08:00') / 1000;
+    const progress = Date.parse('2024-05-21T10:35:00+08:00') / 1000;
+
+    expect(nextFreeReplayProgress(candles, currentCursor, progress, '4H')).toEqual({
+      cursorTime: Date.parse('2024-05-21T08:00:00+08:00') / 1000,
+      progressTime: Date.parse('2024-05-21T12:00:00+08:00') / 1000,
+    });
+  });
+
+  it('rewinds progress to the current displayed candlestick start time', () => {
+    expect(previousFreeReplayProgress(Date.parse('2024-05-21T08:00:00+08:00') / 1000)).toBe(Date.parse('2024-05-21T08:00:00+08:00') / 1000);
   });
 
   it('prefetches more future candlesticks before the hidden buffer is exhausted', () => {

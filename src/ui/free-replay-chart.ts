@@ -1,4 +1,6 @@
 import type { Candlestick } from '../domain/candlestick';
+import type { ReviewTimeframe } from '../domain/trade';
+import { freeReplayCandleCompletionTime } from './chart-time';
 
 export function visibleCandlesForFreeReplay(candles: Candlestick[], cursorTime: number): Candlestick[] {
   const cursorTimestamp = cursorTime * 1000;
@@ -11,11 +13,24 @@ export function nextFreeReplayCursor(candles: Candlestick[], cursorTime: number)
   return next ? next.timestamp / 1000 : cursorTime;
 }
 
+export function nextFreeReplayProgress(candles: Candlestick[], cursorTime: number, progressTime: number, timeframe: ReviewTimeframe): { cursorTime: number; progressTime: number } {
+  const nextCursorTime = nextFreeReplayCursor(candles, cursorTime);
+  if (nextCursorTime === cursorTime) return { cursorTime, progressTime };
+  return {
+    cursorTime: nextCursorTime,
+    progressTime: freeReplayCandleCompletionTime(nextCursorTime, timeframe),
+  };
+}
+
 export function previousFreeReplayCursor(candles: Candlestick[], cursorTime: number, startCursorTime: number): number {
   if (cursorTime <= startCursorTime) return startCursorTime;
   const cursorTimestamp = cursorTime * 1000;
   const previous = [...candles].sort((a, b) => b.timestamp - a.timestamp).find((candle) => candle.timestamp < cursorTimestamp);
   return Math.max(previous ? previous.timestamp / 1000 : startCursorTime, startCursorTime);
+}
+
+export function previousFreeReplayProgress(cursorTime: number): number {
+  return cursorTime;
 }
 
 export function shouldPrefetchFutureCandles(candles: Candlestick[], cursorTime: number, threshold: number): boolean {
