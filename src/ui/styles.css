@@ -579,6 +579,12 @@ p {
   font-size: 12px;
 }
 
+.paper-help-text {
+  color: #8b949e;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .segmented-control,
 .preset-buttons {
   display: grid;
@@ -684,7 +690,7 @@ p {
   position: absolute;
   z-index: 4;
   top: 10px;
-  left: 126px;
+  left: 252px;
   right: 10px;
   min-height: 42px;
   display: flex;
@@ -713,6 +719,26 @@ p {
 
 .candlestick-readout span span {
   margin-right: 4px;
+}
+
+.hover-price-percentage {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  left: 252px;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.88);
+  color: #d6dee7;
+  font-size: 12px;
+  line-height: 1.25;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
 }
 
 .drawing-overlay {

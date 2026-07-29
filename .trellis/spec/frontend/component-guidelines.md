@@ -54,6 +54,23 @@ Inputs that do not have visible English text still need accessible labels. Exist
 
 Do not put pure chart or queue math directly into JSX when it can be tested as a helper. Do not show trade entry or exit markers during Free Replay; `Free Replay Chart Context` in `CONTEXT.md` explicitly excludes them. Do not make Review Notes count as reviewed; Review Progress is driven by tags.
 
+### Free Replay Paper Trading Orders
+
+Free Replay paper trading state lives in `src/ui/free-replay-paper-trading.ts`; keep order execution rules there and cover them with unit tests before wiring UI controls in `App.tsx`.
+
+Order execution contracts:
+
+- Market open/close uses the current Free Replay cursor candlestick close.
+- Entry and exit limit orders trigger only when a newly revealed candlestick contains the limit price: `low <= price <= high`.
+- Stop-loss orders are valid only on the loss side of the open position: long stop loss below entry price, short stop loss above entry price.
+- Stop-loss orders trigger on newly revealed candlesticks with direction-specific checks: long uses `low <= stopPrice`, short uses `high >= stopPrice`.
+- If one newly revealed candlestick touches both an exit limit and a stop-loss price, execute the stop loss first because OHLC data does not contain the intrabar touch order.
+
+Required tests when changing this area:
+
+- Unit tests for the order state transition in `tests/free-replay-paper-trading.test.ts`.
+- App-level tests in `tests/app-free-replay.test.tsx` for any visible control or workflow change.
+
 When changing chart drawing overlays, remember that SVG background clicks and drawing shape clicks share the same overlay surface. Shape and handle click handlers must stop propagation when they represent selecting or dragging a drawing; overlay blank-click handlers can then safely clear `selectedDrawingId`. Add or update an app-level regression test that asserts both sides: clicking a drawing selects/keeps it selected, and clicking blank chart overlay clears selection.
 
 ### Common Mistake: Cursor advance without viewport scroll

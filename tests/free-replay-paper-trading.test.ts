@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import {
   cancelPendingOrder,
+  cancelStopLoss,
   closeMarket,
   currentCursorCandle,
   initialPaperTradingSession,
@@ -10,6 +11,7 @@ import {
   paperTradingStats,
   placeEntryLimit,
   placeExitLimit,
+  placeStopLoss,
   processRevealedCandle,
   startPaperTrading,
   type PaperTradingSettings,
@@ -104,6 +106,52 @@ describe('Free Replay Paper Trading', () => {
     expect(closed.trades[0].exitPrice).toBe(105);
     expect(closed.trades[0].exitTime).toBe(exitTime * 1000);
     expect(closed.pendingExit).toBeNull();
+  });
+
+  it('closes a long position when a stop loss is touched by a revealed candle', () => {
+    const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
+    const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
+    const stopped = placeStopLoss(opened, 95, 1);
+    const closed = processRevealedCandle(stopped, makeCandle('2024-05-21T10:05:00+08:00', { low: 94, high: 110 }), 2);
+
+    expect(closed.position).toBeNull();
+    expect(closed.trades[0].exitPrice).toBe(95);
+    expect(closed.trades[0].pnl).toBe(-50);
+    expect(closed.pendingStopLoss).toBeNull();
+  });
+
+  it('closes a short position when a stop loss is touched by a revealed candle', () => {
+    const settings: PaperTradingSettings = { direction: 'short', positionRatioPercent: 100, leverage: 1 };
+    const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
+    const stopped = placeStopLoss(opened, 105, 1);
+    const closed = processRevealedCandle(stopped, makeCandle('2024-05-21T10:05:00+08:00', { low: 90, high: 106 }), 2);
+
+    expect(closed.position).toBeNull();
+    expect(closed.trades[0].exitPrice).toBe(105);
+    expect(closed.trades[0].pnl).toBe(-50);
+  });
+
+  it('executes stop loss before exit limit when both are touched by one revealed candle', () => {
+    const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
+    const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
+    const withExit = placeExitLimit(opened, 110, 1);
+    const withStop = placeStopLoss(withExit, 95, 1);
+    const closed = processRevealedCandle(withStop, makeCandle('2024-05-21T10:05:00+08:00', { low: 94, high: 111 }), 2);
+
+    expect(closed.position).toBeNull();
+    expect(closed.trades[0].exitPrice).toBe(95);
+    expect(closed.pendingExit).toBeNull();
+  });
+
+  it('requires stop loss to be on the loss side and can cancel it', () => {
+    const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
+    const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
+    const ignored = placeStopLoss(opened, 105, 1);
+    const stopped = placeStopLoss(opened, 95, 1);
+
+    expect(ignored.pendingStopLoss).toBeNull();
+    expect(stopped.pendingStopLoss?.limitPrice).toBe(95);
+    expect(cancelStopLoss(stopped).pendingStopLoss).toBeNull();
   });
 
   it('creates Trade Review-style markers for completed paper trades', () => {

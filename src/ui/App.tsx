@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
@@ -12,7 +12,7 @@ import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
-import { candlestickAtTime, formatCandlestickPrice } from './candlestick-readout';
+import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
@@ -25,8 +25,10 @@ import {
   paperTradingStats,
   placeEntryLimit,
   placeExitLimit,
+  placeStopLoss,
   processRevealedCandle,
   startPaperTrading,
+  cancelStopLoss,
   type PaperDirection,
   type PaperStats,
   type PaperTradingSettings,
@@ -440,6 +442,8 @@ export function App() {
                 onMarketClose={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle, freeReplay.progressTime))}
                 onLimitClose={(limitPrice) => setPaperTrading((current) => placeExitLimit(current, limitPrice, freeReplay.progressTime))}
                 onCancelOrder={(kind) => setPaperTrading((current) => cancelPendingOrder(current, kind))}
+                onStopLoss={(stopPrice) => setPaperTrading((current) => placeStopLoss(current, stopPrice, freeReplay.progressTime))}
+                onCancelStopLoss={() => setPaperTrading((current) => cancelStopLoss(current))}
               />
             </div>
           </>
@@ -486,6 +490,8 @@ function FreeReplayPaperTradingPanel({
   onMarketClose,
   onLimitClose,
   onCancelOrder,
+  onStopLoss,
+  onCancelStopLoss,
 }: {
   session: PaperTradingSession;
   stats: PaperStats;
@@ -497,17 +503,23 @@ function FreeReplayPaperTradingPanel({
   onMarketClose: () => void;
   onLimitClose: (limitPrice: number) => void;
   onCancelOrder: (kind: 'entry' | 'exit') => void;
+  onStopLoss: (stopPrice: number) => void;
+  onCancelStopLoss: () => void;
 }) {
   const [direction, setDirection] = useState<PaperDirection>('long');
   const [positionRatioPercent, setPositionRatioPercent] = useState(100);
   const [leverage, setLeverage] = useState(1);
   const [entryLimit, setEntryLimit] = useState('');
   const [exitLimit, setExitLimit] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
   const settings = { direction, positionRatioPercent, leverage };
   const entryLimitPrice = Number(entryLimit);
   const exitLimitPrice = Number(exitLimit);
+  const stopLossPrice = Number(stopLoss);
   const canSubmitEntryLimit = session.active && !session.position && Number.isFinite(entryLimitPrice) && entryLimitPrice > 0;
   const canSubmitExitLimit = session.active && !!session.position && Number.isFinite(exitLimitPrice) && exitLimitPrice > 0;
+  const canSubmitStopLoss = session.active && !!session.position && isValidStopLossInput(session.position, stopLossPrice);
+  const stopLossHint = session.position ? stopLossInputHint(session.position) : '';
 
   return (
     <aside className="paper-trading-panel" aria-label="Paper trading panel">
@@ -568,6 +580,13 @@ function FreeReplayPaperTradingPanel({
               </label>
               <button type="button" aria-label="Place exit limit" disabled={!canSubmitExitLimit} onClick={() => onLimitClose(exitLimitPrice)}>提交限价平仓</button>
               {session.pendingExit && <PendingOrderView label="待平仓" price={session.pendingExit.limitPrice} cancelLabel="Cancel exit limit" onCancel={() => onCancelOrder('exit')} />}
+              <label>
+                止损
+                <input aria-label="Stop loss price" inputMode="decimal" placeholder={stopLossHint} value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} />
+              </label>
+              <span className="paper-help-text">{stopLossHint}</span>
+              <button type="button" aria-label="Place stop loss" disabled={!canSubmitStopLoss} onClick={() => onStopLoss(stopLossPrice)}>提交止损</button>
+              {session.pendingStopLoss && <PendingOrderView label="待止损" price={session.pendingStopLoss.limitPrice} cancelLabel="Cancel stop loss" onCancel={onCancelStopLoss} />}
             </div>
           )}
         </>
@@ -606,6 +625,15 @@ function PendingOrderView({ label, price, cancelLabel, onCancel }: { label: stri
   return <div className="pending-order"><span>{label} {price}</span><button type="button" aria-label={cancelLabel} onClick={onCancel}>取消</button></div>;
 }
 
+function isValidStopLossInput(position: NonNullable<PaperTradingSession['position']>, stopPrice: number): boolean {
+  if (!Number.isFinite(stopPrice) || stopPrice <= 0) return false;
+  return position.direction === 'long' ? stopPrice < position.entryPrice : stopPrice > position.entryPrice;
+}
+
+function stopLossInputHint(position: NonNullable<PaperTradingSession['position']>): string {
+  return position.direction === 'long' ? `低于开仓价 ${position.entryPrice}` : `高于开仓价 ${position.entryPrice}`;
+}
+
 function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; onCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<SVGSVGElement>(null);
@@ -618,7 +646,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const lastLoadEarlierRangeRef = useRef<VisibleTimeRange | null>(null);
   const initializedRangeKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
-  const pointerRef = useRef<{ inside: boolean; x: number }>({ inside: false, x: 0 });
+  const pointerRef = useRef<{ inside: boolean; x: number; y: number }>({ inside: false, x: 0, y: 0 });
   const pendingRenderRef = useRef(false);
   const idleTimerRef = useRef<number | null>(null);
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
@@ -636,6 +664,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const [selectedDrawingId, setSelectedDrawingId] = useState('');
   const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
+  const [hoverPercentage, setHoverPercentage] = useState<number | null>(null);
+  const [markersVisible, setMarkersVisible] = useState(true);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -698,6 +728,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     if (chart) resetChartPriceScale(chart);
     setPriceScaleMode(PriceScaleMode.Normal);
     setStatus('Loading candlesticks');
+    setHoverPercentage(null);
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
     initializedRangeKeyRef.current = '';
@@ -717,6 +748,11 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   }, [replay.instrument, replay.startTime, replay.dataAnchorTime, timeframe]);
 
   useEffect(() => {
+    if (!pointerRef.current.inside) return;
+    updateHoverPercentage(pointerRef.current.y);
+  }, [replay.cursorTime, renderedCandles]);
+
+  useEffect(() => {
     const series = seriesRef.current;
     const chart = chartApiRef.current;
     if (!series || !chart) return;
@@ -725,7 +761,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     const visibleBars = pendingSwitchVisibleBarsRef.current ?? visibleBarsForChart(chart, chartRef.current);
     const range = cursorAnchoredTimeRange(replay.cursorTime, step, visibleBars);
     series.setData(chartDataWithWhitespace(visibleCandles, [range.from * 1000, range.to * 1000]));
-    markersRef.current?.setMarkers(paperMarkers);
+    markersRef.current?.setMarkers(markersVisible ? paperMarkers : []);
     const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
     if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey) {
       initializedRangeKeyRef.current = rangeKey;
@@ -741,7 +777,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
         suppressAutoLoadRef.current = false;
       }, 0);
     }
-  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe, paperMarkers]);
+  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe, paperMarkers, markersVisible]);
 
   useEffect(() => {
     if (!loadedCandlesRef.current.length) return;
@@ -938,6 +974,18 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     setPriceScaleMode((current) => current === PriceScaleMode.Logarithmic ? PriceScaleMode.Normal : PriceScaleMode.Logarithmic);
   }
 
+  function updateHoverPercentage(clientY: number) {
+    const series = seriesRef.current;
+    const rect = chartRef.current?.getBoundingClientRect();
+    const baseline = currentCursorCandle(loadedCandlesRef.current, replay.cursorTime)?.close;
+    if (!series || !rect) {
+      setHoverPercentage(null);
+      return;
+    }
+    const pointerPrice = series.coordinateToPrice(clientY - rect.top);
+    setHoverPercentage(hoverPricePercentage(pointerPrice, baseline));
+  }
+
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
     if (!drawingTool) {
       setSelectedDrawingId('');
@@ -1002,14 +1050,16 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   }, [selectedDrawingId]);
 
   return (
-    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; }}>
+    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
       <div className="drawing-toolbar">
         <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="Horizontal line" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
         <button className={drawingTool === 'segment' ? 'selected' : ''} title="Segment" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
         <button title="Delete selected drawing" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-label={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
       </div>
+      {hoverPercentage !== null && <div className="hover-price-percentage">{formatHoverPricePercentage(hoverPercentage)}</div>}
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
@@ -1038,6 +1088,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const previousChartKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
   const dragRef = useRef<DrawingDrag | null>(null);
+  const markersVisibleRef = useRef(true);
   const [status, setStatus] = useState('加载 K 线');
   const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Normal);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
@@ -1046,6 +1097,11 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
   const [activeCandle, setActiveCandle] = useState<Candlestick | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
+  const [markersVisible, setMarkersVisible] = useState(true);
+
+  useEffect(() => {
+    markersVisibleRef.current = markersVisible;
+  }, [markersVisible]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1134,7 +1190,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
           ? centeredTimeRange(preservedCenterTime, timeframeMs(timeframe) / 1000, preservedVisibleBars)
           : entryVisibleRange(trade.entryTime, timeframe);
         suppressAutoLoadRef.current = true;
-        renderCandles(trade, timeframe, candlesRef.current, series, markersRef.current);
+        renderCandles(trade, timeframe, candlesRef.current, series, markersRef.current, markersVisibleRef.current);
         if (preservedCenterTime !== null && preservedVisibleBars !== null) {
           const centerIndex = chart.timeScale().timeToIndex(preservedCenterTime as UTCTimestamp, true);
           if (centerIndex != null) {
@@ -1152,6 +1208,10 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       })
       .catch(() => setStatus('K 线加载失败'));
   }, [trade.id, timeframe]);
+
+  useEffect(() => {
+    markersRef.current?.setMarkers(markersVisible ? tradeMarkers(trade, timeframe, renderedCandlesRef.current) : []);
+  }, [markersVisible, trade.id, timeframe]);
 
   useEffect(() => {
     const chart = chartApiRef.current;
@@ -1223,7 +1283,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     pendingRenderRef.current = false;
     renderedCandlesRef.current = candlesRef.current;
     suppressAutoLoadRef.current = true;
-    renderCandles(trade, timeframe, renderedCandlesRef.current, series, markersRef.current);
+    renderCandles(trade, timeframe, renderedCandlesRef.current, series, markersRef.current, markersVisibleRef.current);
     if (visible && anchor) {
       chart.timeScale().setVisibleRange(visibleRangeForAnchor(anchor, visible.to - visible.from) as { from: UTCTimestamp; to: UTCTimestamp });
     }
@@ -1368,6 +1428,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-label={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
       </div>
       <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
       <div ref={chartRef} className="chart" />
@@ -1503,10 +1564,10 @@ function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'
   return x == null || y == null ? null : { x, y };
 }
 
-function renderCandles(trade: ReviewedTrade, timeframe: ReviewTimeframe, candles: Candlestick[], series: ISeriesApi<'Candlestick'>, markers: ISeriesMarkersPluginApi<Time> | null) {
+function renderCandles(trade: ReviewedTrade, timeframe: ReviewTimeframe, candles: Candlestick[], series: ISeriesApi<'Candlestick'>, markers: ISeriesMarkersPluginApi<Time> | null, markersVisible = true) {
   const nextMarkers = tradeMarkers(trade, timeframe, candles);
   series.setData(chartDataWithWhitespace(candles, nextMarkers.map((marker) => Number(marker.time) * 1000)));
-  markers?.setMarkers(nextMarkers);
+  markers?.setMarkers(markersVisible ? nextMarkers : []);
 }
 
 function chartDataWithWhitespace(candles: Candlestick[], extraTimestamps: number[] = []) {

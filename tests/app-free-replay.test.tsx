@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/ui/App';
 
 const chartMocks = vi.hoisted(() => ({
+  coordinateToPrice: vi.fn(() => 110),
   getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
   getVisibleRange: vi.fn(),
   priceScaleApplyOptions: vi.fn(),
@@ -21,7 +22,7 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), coordinateToPrice: chartMocks.coordinateToPrice }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
     subscribeCrosshairMove: vi.fn(),
@@ -44,6 +45,8 @@ vi.mock('lightweight-charts', () => ({
 
 describe('App Free Replay', () => {
   beforeEach(() => {
+    chartMocks.coordinateToPrice.mockClear();
+    chartMocks.coordinateToPrice.mockReturnValue(110);
     chartMocks.getVisibleRange.mockReturnValue({ from: 1000, to: 2000 });
     chartMocks.getVisibleLogicalRange.mockClear();
     chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 160 });
@@ -188,6 +191,127 @@ describe('App Free Replay', () => {
     void cursor;
     void step;
     await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
+  });
+
+  it('toggles Free Replay paper trade entry and exit markers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+            makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
+    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('100') }),
+      expect.objectContaining({ text: expect.stringContaining('110') }),
+    ])));
+
+    chartMocks.setMarkers.mockClear();
+    fireEvent.click(screen.getByLabelText('Hide entry and exit markers'));
+
+    expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
+
+    chartMocks.setMarkers.mockClear();
+    fireEvent.click(screen.getByLabelText('Show entry and exit markers'));
+
+    expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('100') }),
+      expect.objectContaining({ text: expect.stringContaining('110') }),
+    ]));
+  });
+
+  it('sets a stop loss and closes automatically when the next revealed candle touches it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+            makeCandle('2024-05-21T10:00:00+08:00', { low: 94, high: 101, close: 96 }),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
+    fireEvent.change(screen.getByLabelText('Stop loss price'), { target: { value: '95' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Place stop loss' }));
+
+    expect(screen.getByText(/95/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+
+    await waitFor(() => expect(screen.getAllByText('-50.00 USDT').length).toBeGreaterThan(0));
+    expect(screen.queryByLabelText('Cancel stop loss')).not.toBeInTheDocument();
+  });
+
+  it('shows Free Replay hover percentage from the latest revealed candle close', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+            makeCandle('2024-05-21T10:00:00+08:00', { close: 120 }),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+
+    const chartWrap = document.querySelector('.free-replay-workspace .chart-wrap') as HTMLElement;
+    fireEvent.pointerMove(chartWrap, { clientY: 24 });
+
+    expect(await screen.findByText('+10.00%')).toBeInTheDocument();
+    expect(chartMocks.coordinateToPrice).toHaveBeenCalled();
+
+    fireEvent.pointerLeave(chartWrap);
+
+    expect(screen.queryByText('+10.00%')).not.toBeInTheDocument();
   });
 
   it('toggles log scale and resets the Free Replay price scale to normal autoscale', async () => {

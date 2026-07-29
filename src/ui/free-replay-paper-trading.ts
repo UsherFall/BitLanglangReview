@@ -49,6 +49,7 @@ export type PaperTradingSession = {
   nextId: number;
   pendingEntry: PaperOrder | null;
   pendingExit: PaperOrder | null;
+  pendingStopLoss: PaperOrder | null;
   position: PaperPosition | null;
   trades: PaperTrade[];
 };
@@ -69,6 +70,7 @@ export function initialPaperTradingSession(): PaperTradingSession {
     nextId: 1,
     pendingEntry: null,
     pendingExit: null,
+    pendingStopLoss: null,
     position: null,
     trades: [],
   };
@@ -121,8 +123,26 @@ export function placeExitLimit(session: PaperTradingSession, limitPrice: number,
   return { ...session, nextId: session.nextId + 1, pendingExit: order };
 }
 
+export function placeStopLoss(session: PaperTradingSession, stopPrice: number, cursorTime: number): PaperTradingSession {
+  if (!session.active || !session.position || !isValidStopLossPrice(session.position, stopPrice)) return session;
+  const order: PaperOrder = {
+    id: nextId(session, 'stop'),
+    kind: 'exit',
+    direction: session.position.direction,
+    limitPrice: stopPrice,
+    positionRatioPercent: session.position.positionRatioPercent,
+    leverage: session.position.leverage,
+    createdAtCursorTime: cursorTime,
+  };
+  return { ...session, nextId: session.nextId + 1, pendingStopLoss: order };
+}
+
 export function cancelPendingOrder(session: PaperTradingSession, kind: PaperOrderKind): PaperTradingSession {
   return kind === 'entry' ? { ...session, pendingEntry: null } : { ...session, pendingExit: null };
+}
+
+export function cancelStopLoss(session: PaperTradingSession): PaperTradingSession {
+  return { ...session, pendingStopLoss: null };
 }
 
 export function processRevealedCandle(session: PaperTradingSession, candle: Candlestick, eventTime: number): PaperTradingSession {
@@ -133,6 +153,9 @@ export function processRevealedCandle(session: PaperTradingSession, candle: Cand
       positionRatioPercent: session.pendingEntry.positionRatioPercent,
       leverage: session.pendingEntry.leverage,
     });
+  }
+  if (session.position && session.pendingStopLoss && stopLossTouched(candle, session.position.direction, session.pendingStopLoss.limitPrice)) {
+    return closePosition({ ...session, pendingStopLoss: null }, session.pendingStopLoss.limitPrice, eventTime * 1000);
   }
   if (session.position && session.pendingExit && limitTouched(candle, session.pendingExit.limitPrice)) {
     return closePosition(session, session.pendingExit.limitPrice, eventTime * 1000);
@@ -220,9 +243,15 @@ function closePosition(session: PaperTradingSession, exitPrice: number, exitTime
   return {
     ...session,
     pendingExit: null,
+    pendingStopLoss: null,
     position: null,
     trades: [...session.trades, trade],
   };
+}
+
+function isValidStopLossPrice(position: PaperPosition, stopPrice: number): boolean {
+  if (!isPositiveFinite(stopPrice)) return false;
+  return position.direction === 'long' ? stopPrice < position.entryPrice : stopPrice > position.entryPrice;
 }
 
 function normalizeSettings(settings: PaperTradingSettings): PaperTradingSettings {
@@ -240,6 +269,10 @@ function pnlFor(position: PaperPosition, exitPrice: number): number {
 
 function limitTouched(candle: Candlestick, limitPrice: number): boolean {
   return candle.low <= limitPrice && limitPrice <= candle.high;
+}
+
+function stopLossTouched(candle: Candlestick, direction: PaperDirection, stopPrice: number): boolean {
+  return direction === 'long' ? candle.low <= stopPrice : candle.high >= stopPrice;
 }
 
 function average(values: number[]): number | null {

@@ -6,6 +6,7 @@ import { App } from '../src/ui/App';
 
 const chartMocks = vi.hoisted(() => ({
   getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
+  setMarkers: vi.fn(),
   setVisibleLogicalRange: vi.fn(),
   setVisibleRange: vi.fn(),
   timeToIndex: vi.fn(() => 150),
@@ -36,7 +37,7 @@ vi.mock('lightweight-charts', () => ({
       unsubscribeVisibleTimeRangeChange: vi.fn(),
     }),
   }),
-  createSeriesMarkers: () => ({ setMarkers: vi.fn() }),
+  createSeriesMarkers: () => ({ setMarkers: chartMocks.setMarkers }),
 }));
 
 describe('App Review Progress', () => {
@@ -48,6 +49,7 @@ describe('App Review Progress', () => {
     chartMocks.setVisibleLogicalRange.mockClear();
     chartMocks.getVisibleRange.mockClear();
     chartMocks.getVisibleRange.mockReturnValue({ from: 1000, to: 2000 });
+    chartMocks.setMarkers.mockClear();
     chartMocks.timeToIndex.mockClear();
     chartMocks.timeToIndex.mockReturnValue(150);
   });
@@ -91,6 +93,31 @@ describe('App Review Progress', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({ from: 700, to: 1700 }));
+  });
+
+  it('toggles Trade Review entry and exit markers', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await progressPanel();
+    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+    ])));
+
+    chartMocks.setMarkers.mockClear();
+    fireEvent.click(screen.getByLabelText('Hide entry and exit markers'));
+
+    expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
+
+    chartMocks.setMarkers.mockClear();
+    fireEvent.click(screen.getByLabelText('Show entry and exit markers'));
+
+    expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+    ]));
   });
 
   it('keeps the Trade Review visible center when switching timeframe', async () => {
