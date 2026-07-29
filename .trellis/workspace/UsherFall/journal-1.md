@@ -104,3 +104,36 @@ Implemented chart price scale reset/log toggle and logical-range timeframe switc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Free Replay chart trading tools
+
+**Date**: 2026-07-29
+**Task**: Free Replay chart trading tools
+**Branch**: `master`
+
+### Summary
+
+Added Free Replay hover percentage readout, marker visibility toggles, and paper-trading stop loss with tests and frontend spec updates.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ef6c377` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
