@@ -7,24 +7,31 @@ import { formatChartPrice } from '../src/ui/chart-price';
 
 const chartMocks = vi.hoisted(() => ({
   createChartOptions: [] as unknown[],
+  priceScaleApplyOptions: vi.fn(),
 }));
 
 vi.mock('lightweight-charts', () => ({
   CandlestickSeries: 'Candlestick',
   ColorType: { Solid: 'solid' },
   CrosshairMode: { Normal: 0 },
+  PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: (_container: HTMLElement, options: unknown) => {
     chartMocks.createChartOptions.push(options);
     return {
       addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
       remove: vi.fn(),
+      priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
       subscribeCrosshairMove: vi.fn(),
       timeScale: () => ({
         coordinateToTime: vi.fn(),
+        getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
         getVisibleRange: vi.fn(() => ({ from: 1000, to: 2000 })),
+        options: vi.fn(() => ({ barSpacing: 6 })),
+        setVisibleLogicalRange: vi.fn(),
         setVisibleRange: vi.fn(),
         subscribeVisibleLogicalRangeChange: vi.fn(),
         subscribeVisibleTimeRangeChange: vi.fn(),
+        timeToIndex: vi.fn(() => 150),
         unsubscribeVisibleLogicalRangeChange: vi.fn(),
         unsubscribeVisibleTimeRangeChange: vi.fn(),
       }),
@@ -37,6 +44,7 @@ describe('App Chart Price', () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
     chartMocks.createChartOptions.length = 0;
+    chartMocks.priceScaleApplyOptions.mockClear();
   });
 
   it('uses the adaptive price formatter for Trade Review and Free Replay charts', async () => {
@@ -54,6 +62,22 @@ describe('App Chart Price', () => {
 
     await waitFor(() => expect(chartMocks.createChartOptions).toHaveLength(2));
     expect(priceFormatterAt(1)).toBe(formatChartPrice);
+  });
+
+  it('toggles log scale and resets the Trade Review price scale to normal autoscale', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await waitFor(() => expect(chartMocks.createChartOptions).toHaveLength(1));
+    chartMocks.priceScaleApplyOptions.mockClear();
+
+    fireEvent.click(screen.getByLabelText('Toggle log price scale'));
+    await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
+
+    chartMocks.priceScaleApplyOptions.mockClear();
+    fireEvent.click(screen.getByLabelText('Reset price scale'));
+    await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 0, autoScale: true })));
   });
 });
 

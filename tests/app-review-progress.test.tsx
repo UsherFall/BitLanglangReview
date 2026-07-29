@@ -5,7 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/ui/App';
 
 const chartMocks = vi.hoisted(() => ({
+  getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
+  setVisibleLogicalRange: vi.fn(),
   setVisibleRange: vi.fn(),
+  timeToIndex: vi.fn(() => 150),
   getVisibleRange: vi.fn(() => ({ from: 1000, to: 2000 })),
 }));
 
@@ -13,16 +16,22 @@ vi.mock('lightweight-charts', () => ({
   CandlestickSeries: 'Candlestick',
   ColorType: { Solid: 'solid' },
   CrosshairMode: { Normal: 0 },
+  PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
     addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
     remove: vi.fn(),
+    priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: vi.fn(),
     timeScale: () => ({
       coordinateToTime: vi.fn(),
+      getVisibleLogicalRange: chartMocks.getVisibleLogicalRange,
       getVisibleRange: chartMocks.getVisibleRange,
+      options: vi.fn(() => ({ barSpacing: 6 })),
+      setVisibleLogicalRange: chartMocks.setVisibleLogicalRange,
       setVisibleRange: chartMocks.setVisibleRange,
       subscribeVisibleLogicalRangeChange: vi.fn(),
       subscribeVisibleTimeRangeChange: vi.fn(),
+      timeToIndex: chartMocks.timeToIndex,
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleTimeRangeChange: vi.fn(),
     }),
@@ -34,8 +43,13 @@ describe('App Review Progress', () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
     chartMocks.setVisibleRange.mockClear();
+    chartMocks.getVisibleLogicalRange.mockClear();
+    chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 160 });
+    chartMocks.setVisibleLogicalRange.mockClear();
     chartMocks.getVisibleRange.mockClear();
     chartMocks.getVisibleRange.mockReturnValue({ from: 1000, to: 2000 });
+    chartMocks.timeToIndex.mockClear();
+    chartMocks.timeToIndex.mockReturnValue(150);
   });
 
   it('shows the selected Trade position, reviewed count, and reviewed profit for the current Review Queue', async () => {
@@ -77,6 +91,20 @@ describe('App Review Progress', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({ from: 700, to: 1700 }));
+  });
+
+  it('keeps the Trade Review visible center when switching timeframe', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await progressPanel();
+    chartMocks.setVisibleRange.mockClear();
+    chartMocks.getVisibleRange.mockReturnValue({ from: 1000, to: 2000 });
+
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+
+    await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 70, to: 230 }));
   });
 
   it('does not move the Trade Review chart when arrow keys come from a form control', async () => {

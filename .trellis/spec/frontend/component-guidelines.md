@@ -38,7 +38,9 @@ chart.timeScale().setVisibleRange({
 });
 ```
 
-Set `suppressAutoLoadRef.current = true` before `setVisibleRange` and reset it via `setTimeout(0)` to prevent the `visibleLogicalRangeChange` handler from firing during the range update. Use a `cursorFollowInitRef` guard to skip the first mount (the initial `setVisibleRange` is handled by the render effect's initialization block).
+Set `suppressAutoLoadRef.current = true` before `setVisibleRange` and reset it via `setTimeout(0)` to prevent the `visibleLogicalRangeChange` handler from firing during the range update. Use a range-key guard (`instrument:startTime:timeframe`) to skip the first cursor-follow pass for each newly initialized chart range; otherwise a timeframe switch can reuse the previous timeframe's visible span and overwrite the fresh initialization.
+
+When switching Review Timeframes, preserve candle visual density rather than preserving the old time span. Prefer `chart.timeScale().getVisibleLogicalRange()` to derive the actual visible candle count; fall back to `chart.timeScale().options().barSpacing` and chart width only when logical range is unavailable. After the new timeframe data is rendered, use `timeToIndex(..., true)` for the anchor and `setVisibleLogicalRange(...)` for the destination viewport. Free Replay anchors this logical range on `replay.cursorTime` with about 10 future bars of right padding; Trade Review anchors it on the previous visible center time.
 
 Free Replay must keep `progressTime` separate from `cursorTime`. Switching Review Timeframes preserves `progressTime` and recomputes the derived cursor; it must not floor and store the old cursor as the new true progress. For example, `progressTime = 10:35` maps to `10:30` on `5m` and `04:00` on `4H` so the unfinished `08:00-12:00` candle is not shown.
 
@@ -59,6 +61,10 @@ When changing chart drawing overlays, remember that SVG background clicks and dr
 In `FreeReplayChart`, the render effect's `setVisibleRange` only runs on first initialization (guarded by `initializedRangeKeyRef`). After the user zooms or pans, subsequent cursor advances update data via `series.setData()` but leave the viewport unchanged. The cursor state advances correctly, but the user sees no visual change and thinks the button/keyboard doesn't work.
 
 **Fix**: Add a separate `useEffect` watching `replay.cursorTime` that calls `setVisibleRange` on every cursor change (skip first mount). See the "Free Replay Cursor Follow" section above.
+
+### Common Mistake: Preserving old time span across timeframe switches
+
+Switching from a short Review Timeframe to a long one while reusing the old visible time span makes candles appear suddenly huge; switching back can make the chart look compressed or misplaced. Preserve visual candle density instead: carry forward the visible logical range span / visible candle count, map the anchor time to the destination series with `timeToIndex(..., true)`, call `setVisibleLogicalRange(...)`, and reset the price scale to autoscale so manual right-axis drags do not leak across timeframes. Do not rely on `barSpacing` alone as the primary signal; it can be less representative than the current logical range after chart initialization or library-internal scaling. Do not use `setVisibleRange(...)` as the primary timeframe-switch mechanism when the goal is preserving candle width; it preserves time ranges and can reintroduce timeframe-duration scaling.
 
 ### Common Mistake: Strict equality in timestamp matching
 

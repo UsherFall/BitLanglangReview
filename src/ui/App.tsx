@@ -1,5 +1,5 @@
-import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Minus, Search, Slash, Star } from 'lucide-react';
+import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
@@ -9,7 +9,9 @@ import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { visibleRangeForAnchor, visibleRangeForLatestAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
+import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice } from './candlestick-readout';
 import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
@@ -622,10 +624,13 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const loadedCandlesRef = useRef<Candlestick[]>([]);
   const dragRef = useRef<DrawingDrag | null>(null);
-  const cursorFollowInitRef = useRef(false);
+  const cursorFollowRangeKeyRef = useRef('');
+  const pendingSwitchVisibleBarsRef = useRef<number | null>(null);
+  const previousRangeKeyRef = useRef('');
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
   const [status, setStatus] = useState('Loading candlesticks');
+  const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Normal);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState('');
@@ -660,10 +665,17 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     chartApiRef.current = chart;
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
+    resetChartPriceScale(chart);
     const refreshOverlay = () => setOverlayVersion((version) => version + 1);
     chart.timeScale().subscribeVisibleTimeRangeChange(refreshOverlay);
     return () => chart.remove();
   }, []);
+
+  useEffect(() => {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    applyChartPriceScaleMode(chart, priceScaleMode);
+  }, [priceScaleMode]);
 
   useEffect(() => {
     setSelectedDrawingId('');
@@ -674,6 +686,17 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   }, [replay.instrument]);
 
   useEffect(() => {
+    const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
+    const chart = chartApiRef.current;
+    const previousRangeKey = previousRangeKeyRef.current;
+    if (previousRangeKey && previousRangeKey !== rangeKey && chart) {
+      pendingSwitchVisibleBarsRef.current = visibleBarsForChart(chart, chartRef.current);
+    } else {
+      pendingSwitchVisibleBarsRef.current = null;
+    }
+    previousRangeKeyRef.current = rangeKey;
+    if (chart) resetChartPriceScale(chart);
+    setPriceScaleMode(PriceScaleMode.Normal);
     setStatus('Loading candlesticks');
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
@@ -698,15 +721,22 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     const chart = chartApiRef.current;
     if (!series || !chart) return;
     const visibleCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime);
-    const range = entryVisibleRange(replay.startTime, timeframe);
-    const rangeTo = Math.floor(replay.cursorTime + timeframeMs(timeframe) * 10 / 1000) as UTCTimestamp;
-    series.setData(chartDataWithWhitespace(visibleCandles, [Number(range.from) * 1000, Number(rangeTo) * 1000]));
+    const step = timeframeMs(timeframe) / 1000;
+    const visibleBars = pendingSwitchVisibleBarsRef.current ?? visibleBarsForChart(chart, chartRef.current);
+    const range = cursorAnchoredTimeRange(replay.cursorTime, step, visibleBars);
+    series.setData(chartDataWithWhitespace(visibleCandles, [range.from * 1000, range.to * 1000]));
     markersRef.current?.setMarkers(paperMarkers);
     const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
     if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey) {
       initializedRangeKeyRef.current = rangeKey;
+      pendingSwitchVisibleBarsRef.current = null;
       suppressAutoLoadRef.current = true;
-      chart.timeScale().setVisibleRange({ from: range.from, to: rangeTo });
+      const cursorIndex = chart.timeScale().timeToIndex(replay.cursorTime as UTCTimestamp, true);
+      if (cursorIndex != null) {
+        chart.timeScale().setVisibleLogicalRange(cursorAnchoredLogicalRange(Number(cursorIndex), visibleBars));
+      } else {
+        chart.timeScale().setVisibleRange(range as { from: UTCTimestamp; to: UTCTimestamp });
+      }
       window.setTimeout(() => {
         suppressAutoLoadRef.current = false;
       }, 0);
@@ -722,8 +752,9 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   useEffect(() => {
     const chart = chartApiRef.current;
     if (!chart) return;
-    if (!cursorFollowInitRef.current) {
-      cursorFollowInitRef.current = true;
+    const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
+    if (initializedRangeKeyRef.current !== rangeKey || cursorFollowRangeKeyRef.current !== rangeKey) {
+      cursorFollowRangeKeyRef.current = rangeKey;
       return;
     }
     const visible = currentFreeReplayVisibleRange(chart);
@@ -738,7 +769,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     window.setTimeout(() => {
       suppressAutoLoadRef.current = false;
     }, 0);
-  }, [replay.cursorTime]);
+  }, [replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
 
   useEffect(() => {
     const chart = chartApiRef.current;
@@ -896,6 +927,17 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     setSelectedDrawingId('');
   }
 
+  function resetPriceScale() {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    setPriceScaleMode(PriceScaleMode.Normal);
+    resetChartPriceScale(chart);
+  }
+
+  function toggleLogPriceScale() {
+    setPriceScaleMode((current) => current === PriceScaleMode.Logarithmic ? PriceScaleMode.Normal : PriceScaleMode.Logarithmic);
+  }
+
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
     if (!drawingTool) {
       setSelectedDrawingId('');
@@ -965,6 +1007,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
         <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="Horizontal line" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
         <button className={drawingTool === 'segment' ? 'selected' : ''} title="Segment" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
         <button title="Delete selected drawing" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
+        <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
+        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
       </div>
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
@@ -991,9 +1035,11 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const idleTimerRef = useRef<number | null>(null);
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const activeKeyRef = useRef('');
+  const previousChartKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
   const dragRef = useRef<DrawingDrag | null>(null);
   const [status, setStatus] = useState('加载 K 线');
+  const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Normal);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string>('');
@@ -1029,6 +1075,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     chartApiRef.current = chart;
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
+    resetChartPriceScale(chart);
     const refreshOverlay = () => setOverlayVersion((version) => version + 1);
     const updateActiveCandle = (param: MouseEventParams) => {
       setActiveCandle(candlestickAtTime(renderedCandlesRef.current, param.time));
@@ -1037,6 +1084,12 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     chart.subscribeCrosshairMove(updateActiveCandle);
     return () => chart.remove();
   }, []);
+
+  useEffect(() => {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    applyChartPriceScaleMode(chart, priceScaleMode);
+  }, [priceScaleMode]);
 
   useEffect(() => {
     setSelectedDrawingId('');
@@ -1049,6 +1102,15 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   useEffect(() => {
     setStatus('加载 K 线');
     const key = `${trade.id}:${timeframe}`;
+    const chart = chartApiRef.current;
+    const previousKey = previousChartKeyRef.current;
+    const visible = chart ? currentVisibleRange(chart) : null;
+    const isTimeframeSwitch = Boolean(previousKey && previousKey !== key && previousKey.startsWith(`${trade.id}:`) && visible && chart);
+    const preservedCenterTime = isTimeframeSwitch && visible ? visibleRangeCenter(visible) : null;
+    const preservedVisibleBars = isTimeframeSwitch && chart ? visibleBarsForChart(chart, chartRef.current) : null;
+    previousChartKeyRef.current = key;
+    if (chart) resetChartPriceScale(chart);
+    setPriceScaleMode(PriceScaleMode.Normal);
     activeKeyRef.current = key;
     candlesRef.current = [];
     renderedCandlesRef.current = [];
@@ -1068,10 +1130,21 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         if (!series || !chart) return;
         candlesRef.current = mergeCandles(candles);
         renderedCandlesRef.current = candlesRef.current;
-        const entryRange = entryVisibleRange(trade.entryTime, timeframe);
+        const entryRange = preservedCenterTime !== null && preservedVisibleBars !== null
+          ? centeredTimeRange(preservedCenterTime, timeframeMs(timeframe) / 1000, preservedVisibleBars)
+          : entryVisibleRange(trade.entryTime, timeframe);
         suppressAutoLoadRef.current = true;
         renderCandles(trade, timeframe, candlesRef.current, series, markersRef.current);
-        chart.timeScale().setVisibleRange(entryRange);
+        if (preservedCenterTime !== null && preservedVisibleBars !== null) {
+          const centerIndex = chart.timeScale().timeToIndex(preservedCenterTime as UTCTimestamp, true);
+          if (centerIndex != null) {
+            chart.timeScale().setVisibleLogicalRange(centeredLogicalRange(Number(centerIndex), preservedVisibleBars));
+          } else {
+            chart.timeScale().setVisibleRange(entryRange as { from: UTCTimestamp; to: UTCTimestamp });
+          }
+        } else {
+          chart.timeScale().setVisibleRange(entryRange as { from: UTCTimestamp; to: UTCTimestamp });
+        }
         window.setTimeout(() => {
           suppressAutoLoadRef.current = false;
         }, 0);
@@ -1223,6 +1296,17 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     setSelectedDrawingId('');
   }
 
+  function resetPriceScale() {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    setPriceScaleMode(PriceScaleMode.Normal);
+    resetChartPriceScale(chart);
+  }
+
+  function toggleLogPriceScale() {
+    setPriceScaleMode((current) => current === PriceScaleMode.Logarithmic ? PriceScaleMode.Normal : PriceScaleMode.Logarithmic);
+  }
+
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
     if (!drawingTool) {
       setSelectedDrawingId('');
@@ -1282,6 +1366,8 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
         <button className={drawingTool === 'segment' ? 'selected' : ''} title="线段" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
+        <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
+        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
       </div>
       <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
       <div ref={chartRef} className="chart" />
@@ -1396,6 +1482,19 @@ function moveDrawing(drawing: ChartDrawing, target: DrawingDragTarget, startPoin
     return shouldMove ? { time: currentPoint.time, price: currentPoint.price } : point;
   });
   return { ...drawing, points };
+}
+
+function visibleBarsForChart(chart: IChartApi, element: HTMLElement | null): number {
+  const timeScale = chart.timeScale();
+  const logicalRange = typeof timeScale.getVisibleLogicalRange === 'function' ? timeScale.getVisibleLogicalRange() : null;
+  const width = element?.getBoundingClientRect().width;
+  const barSpacing = timeScale.options().barSpacing;
+  const fallback = visibleBarCountForWidth(width, barSpacing);
+  return visibleBarCountForLogicalRange(logicalRange, fallback);
+}
+
+function visibleRangeCenter(range: NumericVisibleRange): number {
+  return (range.from + range.to) / 2;
 }
 
 function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'Candlestick'>): { x: number; y: number } | null {

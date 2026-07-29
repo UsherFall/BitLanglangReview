@@ -8,6 +8,7 @@ vi.mock('lightweight-charts', () => ({
   CandlestickSeries: 'Candlestick',
   ColorType: { Solid: 'solid' },
   CrosshairMode: { Normal: 0 },
+  PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
     addSeries: () => ({
       setData: vi.fn(),
@@ -15,14 +16,19 @@ vi.mock('lightweight-charts', () => ({
       coordinateToPrice: vi.fn(() => 100),
     }),
     remove: vi.fn(),
+    priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: vi.fn(),
     timeScale: () => ({
       coordinateToTime: vi.fn(() => 1716256800),
+      getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
       getVisibleRange: vi.fn(() => ({ from: 1716256500, to: 1716257100 })),
+      options: vi.fn(() => ({ barSpacing: 6 })),
+      setVisibleLogicalRange: vi.fn(),
       setVisibleRange: vi.fn(),
       subscribeVisibleLogicalRangeChange: vi.fn(),
       subscribeVisibleTimeRangeChange: vi.fn(),
       timeToCoordinate: vi.fn(() => 200),
+      timeToIndex: vi.fn(() => 150),
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleTimeRangeChange: vi.fn(),
     }),
