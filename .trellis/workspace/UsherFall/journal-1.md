@@ -71,3 +71,36 @@ Implemented exact Free Replay progressTime with no-future display cursor across 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Chart scale reset and timeframe zoom
+
+**Date**: 2026-07-29
+**Task**: Chart scale reset and timeframe zoom
+**Branch**: `master`
+
+### Summary
+
+Implemented chart price scale reset/log toggle and logical-range timeframe switching for Trade Review and Free Replay.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6843999` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
