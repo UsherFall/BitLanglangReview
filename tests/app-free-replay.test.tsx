@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/ui/App';
 
 const chartMocks = vi.hoisted(() => ({
+  barsInLogicalRange: vi.fn(() => ({ barsBefore: 100, barsAfter: 100 })),
   coordinateToPrice: vi.fn(() => 110),
   getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
   getVisibleRange: vi.fn(),
@@ -12,6 +13,7 @@ const chartMocks = vi.hoisted(() => ({
   setMarkers: vi.fn(),
   setVisibleLogicalRange: vi.fn(),
   setVisibleRange: vi.fn(),
+  subscribeVisibleLogicalRangeChange: vi.fn(),
   timeToIndex: vi.fn(() => 150),
   timeScaleOptions: vi.fn(() => ({ barSpacing: 6 })),
 }));
@@ -22,7 +24,7 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), coordinateToPrice: chartMocks.coordinateToPrice }),
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
     subscribeCrosshairMove: vi.fn(),
@@ -33,7 +35,7 @@ vi.mock('lightweight-charts', () => ({
       options: chartMocks.timeScaleOptions,
       setVisibleLogicalRange: chartMocks.setVisibleLogicalRange,
       setVisibleRange: chartMocks.setVisibleRange,
-      subscribeVisibleLogicalRangeChange: vi.fn(),
+      subscribeVisibleLogicalRangeChange: chartMocks.subscribeVisibleLogicalRangeChange,
       subscribeVisibleTimeRangeChange: vi.fn(),
       timeToIndex: chartMocks.timeToIndex,
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
@@ -45,6 +47,8 @@ vi.mock('lightweight-charts', () => ({
 
 describe('App Free Replay', () => {
   beforeEach(() => {
+    chartMocks.barsInLogicalRange.mockClear();
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 100 });
     chartMocks.coordinateToPrice.mockClear();
     chartMocks.coordinateToPrice.mockReturnValue(110);
     chartMocks.getVisibleRange.mockReturnValue({ from: 1000, to: 2000 });
@@ -54,6 +58,7 @@ describe('App Free Replay', () => {
     chartMocks.setMarkers.mockClear();
     chartMocks.setVisibleLogicalRange.mockClear();
     chartMocks.setVisibleRange.mockClear();
+    chartMocks.subscribeVisibleLogicalRangeChange.mockClear();
     chartMocks.timeToIndex.mockClear();
     chartMocks.timeToIndex.mockReturnValue(150);
     chartMocks.timeScaleOptions.mockClear();
@@ -466,6 +471,104 @@ describe('App Free Replay', () => {
     const fiveMinuteCursor = Date.parse('2024-05-21T11:55:00+08:00') / 1000;
     void fiveMinuteCursor;
     await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
+  });
+
+  it('backfills earlier history after switching timeframe with a preserved zoomed-out viewport', async () => {
+    const candleRequests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        const params = new URL(`http://localhost${url}`).searchParams;
+        const timeframe = params.get('timeframe');
+        const mode = params.get('mode');
+        if (timeframe === '15m' && mode === 'earlier') {
+          const anchor = Number(params.get('anchor'));
+          const firstInitial = Date.parse('2024-05-21T09:45:00+08:00');
+          return new Response(JSON.stringify({
+            candles: anchor === firstInitial ? [
+              makeCandle('2024-05-21T09:00:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T09:15:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T09:30:00+08:00', { timeframe: '15m' }),
+            ] : [],
+          }));
+        }
+        const candles = timeframe === '15m'
+          ? [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:15:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:30:00+08:00', { timeframe: '15m' }),
+            ]
+          : [
+              makeCandle('2024-05-21T10:20:00+08:00'),
+              makeCandle('2024-05-21T10:25:00+08:00'),
+              makeCandle('2024-05-21T10:30:00+08:00'),
+              makeCandle('2024-05-21T10:35:00+08:00'),
+            ];
+        return new Response(JSON.stringify({ candles }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:35' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+
+    chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 260 });
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+
+    await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: -100, to: 160 }));
+    await waitFor(() => expect(candleRequests.some((url) => url.includes('timeframe=15m') && url.includes('mode=earlier'))).toBe(true));
+    const earlierRequest = candleRequests.find((url) => url.includes('timeframe=15m') && url.includes('mode=earlier')) ?? '';
+    const earlierParams = new URL(`http://localhost${earlierRequest}`).searchParams;
+    expect(Number(earlierParams.get('anchor'))).toBe(Date.parse('2024-05-21T09:45:00+08:00'));
+  });
+
+  it('loads earlier history on left scroll without restoring an old visible time range', async () => {
+    const candleRequests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        const candles = mode === 'earlier'
+          ? [makeCandle('2024-05-21T09:40:00+08:00'), makeCandle('2024-05-21T09:45:00+08:00')]
+          : [makeCandle('2024-05-21T09:50:00+08:00'), makeCandle('2024-05-21T09:55:00+08:00'), makeCandle('2024-05-21T10:00:00+08:00')];
+        return new Response(JSON.stringify({ candles }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:05' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    await waitFor(() => expect(candleRequests.some((url) => url.includes('mode=initial'))).toBe(true));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    const handler = chartMocks.subscribeVisibleLogicalRangeChange.mock.calls.at(-1)?.[0];
+    expect(handler).toBeTypeOf('function');
+
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 5, barsAfter: 100 });
+    chartMocks.setVisibleRange.mockClear();
+    handler?.({ from: 0, to: 160 });
+
+    await waitFor(() => expect(candleRequests.some((url) => url.includes('mode=earlier'))).toBe(true));
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+
+    expect(chartMocks.setVisibleRange).not.toHaveBeenCalled();
   });
 });
 

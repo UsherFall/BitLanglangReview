@@ -85,9 +85,11 @@ export function FreeReplayPanel({ timeframe, onStart, onReveal, onRewind }: { ti
           value={startTime}
           onInput={(event) => {
             setStartTime(event.currentTarget.value);
-            startPickerRef.current?.close();
           }}
           onChange={(event) => setStartTime(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') startPickerRef.current?.close();
+          }}
         />
       </label>
       <button className="save-button" disabled={!selectedInstrument || !startTime} onClick={() => {

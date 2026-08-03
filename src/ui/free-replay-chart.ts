@@ -39,3 +39,10 @@ export function shouldPrefetchFutureCandles(candles: Candlestick[], cursorTime: 
   if (cursorIndex < 0) return false;
   return ordered.length - cursorIndex - 1 <= threshold;
 }
+
+export function shouldBackfillFreeReplayHistory(candles: Candlestick[], cursorTime: number, visibleBars: number, rightPaddingBars = 10): boolean {
+  if (!Number.isFinite(visibleBars) || visibleBars <= rightPaddingBars) return false;
+  const visibleThroughCursor = visibleCandlesForFreeReplay(candles, cursorTime);
+  const requiredCandlesThroughCursor = Math.max(1, Math.round(visibleBars) - Math.max(1, Math.round(rightPaddingBars)));
+  return visibleThroughCursor.length > 0 && visibleThroughCursor.length < requiredCandlesThroughCursor;
+}

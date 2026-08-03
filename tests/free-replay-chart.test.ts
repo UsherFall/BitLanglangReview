@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
-import { nextFreeReplayCursor, nextFreeReplayProgress, previousFreeReplayCursor, previousFreeReplayProgress, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from '../src/ui/free-replay-chart';
+import { nextFreeReplayCursor, nextFreeReplayProgress, previousFreeReplayCursor, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from '../src/ui/free-replay-chart';
 
 describe('Free Replay Chart', () => {
   it('shows candlesticks through the free replay cursor and hides future candlesticks', () => {
@@ -77,6 +77,18 @@ describe('Free Replay Chart', () => {
     ];
 
     expect(shouldPrefetchFutureCandles(candles, Date.parse('2024-05-21T10:05:30+08:00') / 1000, 1)).toBe(true);
+  });
+
+  it('backfills history when preserved zoom needs more candles before the cursor', () => {
+    const candles = [
+      makeCandle('2024-05-21T09:50:00+08:00'),
+      makeCandle('2024-05-21T09:55:00+08:00'),
+      makeCandle('2024-05-21T10:00:00+08:00'),
+      makeCandle('2024-05-21T10:05:00+08:00'),
+    ];
+
+    expect(shouldBackfillFreeReplayHistory(candles, Date.parse('2024-05-21T10:00:00+08:00') / 1000, 20, 10)).toBe(true);
+    expect(shouldBackfillFreeReplayHistory(candles, Date.parse('2024-05-21T10:00:00+08:00') / 1000, 13, 10)).toBe(false);
   });
 });
 

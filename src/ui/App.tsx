@@ -6,15 +6,15 @@ import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput 
 import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
-import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
-import { visibleRangeForAnchor, visibleRangeForLatestAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
+import { isSameVisibleRange, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
+import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
-import { nextFreeReplayProgress, previousFreeReplayProgress, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
+import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
   cancelPendingOrder,
   closeMarket,
@@ -647,13 +647,12 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const initializedRangeKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
   const pointerRef = useRef<{ inside: boolean; x: number; y: number }>({ inside: false, x: 0, y: 0 });
-  const pendingRenderRef = useRef(false);
-  const idleTimerRef = useRef<number | null>(null);
-  const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const loadedCandlesRef = useRef<Candlestick[]>([]);
   const dragRef = useRef<DrawingDrag | null>(null);
   const cursorFollowRangeKeyRef = useRef('');
   const pendingSwitchVisibleBarsRef = useRef<number | null>(null);
+  const historyBackfillVisibleBarsRef = useRef<number | null>(null);
+  const historyBackfillKeyRef = useRef('');
   const previousRangeKeyRef = useRef('');
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
@@ -663,6 +662,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState('');
   const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
+  const [draftEndPoint, setDraftEndPoint] = useState<ChartPoint | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [hoverPercentage, setHoverPercentage] = useState<number | null>(null);
   const [markersVisible, setMarkersVisible] = useState(true);
@@ -710,6 +710,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   useEffect(() => {
     setSelectedDrawingId('');
     setDraftPoint(null);
+    setDraftEndPoint(null);
     fetch(`/api/drawings?${new URLSearchParams({ instrument: replay.instrument })}`)
       .then((response) => response.json())
       .then(({ drawings: next }: { drawings?: ChartDrawing[] }) => setDrawings(next ?? []));
@@ -720,10 +721,14 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     const chart = chartApiRef.current;
     const previousRangeKey = previousRangeKeyRef.current;
     if (previousRangeKey && previousRangeKey !== rangeKey && chart) {
-      pendingSwitchVisibleBarsRef.current = visibleBarsForChart(chart, chartRef.current);
+      const visibleBars = visibleBarsForChart(chart, chartRef.current);
+      pendingSwitchVisibleBarsRef.current = visibleBars;
+      historyBackfillVisibleBarsRef.current = visibleBars;
     } else {
       pendingSwitchVisibleBarsRef.current = null;
+      historyBackfillVisibleBarsRef.current = null;
     }
+    historyBackfillKeyRef.current = '';
     previousRangeKeyRef.current = rangeKey;
     if (chart) resetChartPriceScale(chart);
     setPriceScaleMode(PriceScaleMode.Normal);
@@ -732,9 +737,6 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
     initializedRangeKeyRef.current = '';
-    pendingRenderRef.current = false;
-    latestAnchorRef.current = null;
-    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
     const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial' });
     fetch(`/api/candles?${params}`)
       .then((response) => response.json())
@@ -784,6 +786,22 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     setRenderedCandles(loadedCandlesRef.current);
   }, [replay.cursorTime]);
 
+  useEffect(() => {
+    const visibleBars = historyBackfillVisibleBarsRef.current;
+    if (!visibleBars || loadingEarlierRef.current || !loadedCandles.length) return;
+    if (loadedCandles[0].timeframe !== timeframe) return;
+    if (!shouldBackfillFreeReplayHistory(loadedCandles, replay.cursorTime, visibleBars)) {
+      historyBackfillVisibleBarsRef.current = null;
+      historyBackfillKeyRef.current = '';
+      return;
+    }
+    const first = loadedCandles[0].timestamp;
+    const key = `${replay.instrument}:${replay.startTime}:${timeframe}:${visibleBars}:${first}`;
+    if (historyBackfillKeyRef.current === key) return;
+    historyBackfillKeyRef.current = key;
+    void loadEarlierFreeReplayCandles();
+  }, [loadedCandles, renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
+
   // Cursor follow effect: scroll viewport to keep cursor 10 steps from right edge.
   useEffect(() => {
     const chart = chartApiRef.current;
@@ -810,19 +828,14 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   useEffect(() => {
     const chart = chartApiRef.current;
     if (!chart) return;
-    const handler = (_range: LogicalRange | null) => {
+    const handler = (range: LogicalRange | null) => {
       if (suppressAutoLoadRef.current) return;
-      const visible = chart.timeScale().getVisibleRange();
-      if (!visible || loadedCandles.length < 2) return;
-      latestAnchorRef.current = captureFreeReplayNavigationAnchor(chart) ?? latestAnchorRef.current;
-      const visibleRange = { from: Number(visible.from), to: Number(visible.to) };
-      if (!Number.isFinite(visibleRange.from) || !Number.isFinite(visibleRange.to)) return;
-      const first = loadedCandles[0].timestamp / 1000;
-      const last = loadedCandles[loadedCandles.length - 1].timestamp / 1000;
-      const span = visibleRange.to - visibleRange.from;
-      const threshold = Math.max(span * 0.35, inferCandleStep(loadedCandles) / 1000 * 20);
-      if (shouldLoadEarlier(visibleRange, { first, last }, threshold) && !isSameVisibleRange(lastLoadEarlierRangeRef.current, visibleRange)) {
-        lastLoadEarlierRangeRef.current = visibleRange;
+      const series = seriesRef.current;
+      if (!series || !range || loadedCandles.length < 2) return;
+      const logicalRange = { from: Number(range.from), to: Number(range.to) };
+      if (!Number.isFinite(logicalRange.from) || !Number.isFinite(logicalRange.to)) return;
+      if (shouldLoadEarlierByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadEarlierRangeRef.current, logicalRange)) {
+        lastLoadEarlierRangeRef.current = logicalRange;
         void loadEarlierFreeReplayCandles();
       }
     };
@@ -875,14 +888,11 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     try {
       const { candles } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };
       if (candles.length) {
-        setLoadedCandles((current) => {
-          const merged = mergeCandles([...current, ...candles]);
-          loadedCandlesRef.current = merged;
-          onCandlesLoaded(merged);
-          return merged;
-        });
-        pendingRenderRef.current = true;
-        scheduleFreeReplayPendingRender();
+        const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
+        loadedCandlesRef.current = merged;
+        setLoadedCandles(merged);
+        setRenderedCandles(merged);
+        onCandlesLoaded(merged);
       }
       setStatus('');
     } catch {
@@ -896,46 +906,6 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     loadedCandlesRef.current = candles;
     setLoadedCandles(candles);
     onCandlesLoaded(candles);
-  }
-
-  function scheduleFreeReplayPendingRender() {
-    if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
-    idleTimerRef.current = window.setTimeout(() => {
-      idleTimerRef.current = null;
-      applyFreeReplayPendingCandles();
-    }, 250);
-  }
-
-  function applyFreeReplayPendingCandles() {
-    if (!pendingRenderRef.current) return;
-    const chart = chartApiRef.current;
-    if (!chart) return;
-    const visible = currentFreeReplayVisibleRange(chart);
-    if (!visible) return;
-    const anchor = latestAnchorRef.current ?? captureFreeReplayNavigationAnchor(chart);
-    pendingRenderRef.current = false;
-    suppressAutoLoadRef.current = true;
-    setRenderedCandles(loadedCandlesRef.current);
-    if (anchor) {
-      chart.timeScale().setVisibleRange(visibleRangeForLatestAnchor(visible, anchor) as { from: UTCTimestamp; to: UTCTimestamp });
-    } else {
-      chart.timeScale().setVisibleRange(visible as { from: UTCTimestamp; to: UTCTimestamp });
-    }
-    window.setTimeout(() => {
-      suppressAutoLoadRef.current = false;
-    }, 0);
-  }
-
-  function captureFreeReplayNavigationAnchor(chart: IChartApi): NavigationAnchor | null {
-    const visible = currentFreeReplayVisibleRange(chart);
-    if (!visible) return null;
-    const rect = chartRef.current?.getBoundingClientRect();
-    if (pointerRef.current.inside && rect && rect.width > 0) {
-      const x = Math.min(Math.max(pointerRef.current.x - rect.left, 0), rect.width);
-      const time = chart.timeScale().coordinateToTime(x);
-      if (typeof time === 'number') return { time, ratio: x / rect.width };
-    }
-    return { time: (visible.from + visible.to) / 2, ratio: 0.5 };
   }
 
   function currentFreeReplayVisibleRange(chart: IChartApi): NumericVisibleRange | null {
@@ -999,10 +969,12 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     }
     if (!draftPoint) {
       setDraftPoint(point);
+      setDraftEndPoint(point);
       return;
     }
     void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: 'segment', points: [draftPoint, point] });
     setDraftPoint(null);
+    setDraftEndPoint(null);
   }
 
   function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
@@ -1019,9 +991,12 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
 
   function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
-    if (!drag) return;
     const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
     if (!point) return;
+    if (!drag) {
+      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(point);
+      return;
+    }
     event.preventDefault();
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
@@ -1063,7 +1038,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
+        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
     </div>
@@ -1095,6 +1070,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string>('');
   const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
+  const [draftEndPoint, setDraftEndPoint] = useState<ChartPoint | null>(null);
   const [activeCandle, setActiveCandle] = useState<Candlestick | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [markersVisible, setMarkersVisible] = useState(true);
@@ -1150,6 +1126,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   useEffect(() => {
     setSelectedDrawingId('');
     setDraftPoint(null);
+    setDraftEndPoint(null);
     fetch(`/api/drawings?${new URLSearchParams({ instrument: trade.instrument })}`)
       .then((response) => response.json())
       .then(({ drawings: next }: { drawings: ChartDrawing[] }) => setDrawings(next));
@@ -1218,20 +1195,22 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     if (!chart) return;
     const handler = (range: LogicalRange | null) => {
       if (suppressAutoLoadRef.current) return;
+      const series = seriesRef.current;
       const visible = chart.timeScale().getVisibleRange();
-      if (!range || !visible || candlesRef.current.length < 2) return;
+      if (!series || !range || !visible || candlesRef.current.length < 2) return;
       latestAnchorRef.current = captureNavigationAnchor(chart) ?? latestAnchorRef.current;
-      schedulePendingRender();
       const first = candlesRef.current[0].timestamp / 1000;
       const last = candlesRef.current[candlesRef.current.length - 1].timestamp / 1000;
       const visibleRange = { from: Number(visible.from), to: Number(visible.to) };
       const span = Number(visible.to) - Number(visible.from);
       const threshold = Math.max(span * 0.35, inferCandleStep(candlesRef.current) / 1000 * 20);
-      if (shouldLoadEarlier(visibleRange, { first, last }, threshold) && !isSameVisibleRange(lastLoadRangeRef.current.earlier, visibleRange)) {
-        lastLoadRangeRef.current.earlier = visibleRange;
+      const logicalRange = { from: Number(range.from), to: Number(range.to) };
+      if (shouldLoadEarlierByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadRangeRef.current.earlier, logicalRange)) {
+        lastLoadRangeRef.current.earlier = logicalRange;
         void loadMore('earlier');
       }
       if (shouldLoadLater(visibleRange, { first, last }, threshold) && !isSameVisibleRange(lastLoadRangeRef.current.later, visibleRange)) {
+        schedulePendingRender();
         lastLoadRangeRef.current.later = visibleRange;
         void loadMore('later');
       }
@@ -1328,8 +1307,19 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       const { candles } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };
       if (candles.length) {
         candlesRef.current = mergeCandles([...candlesRef.current, ...candles]);
-        pendingRenderRef.current = true;
-        schedulePendingRender();
+        if (direction === 'earlier') {
+          const series = seriesRef.current;
+          if (!series) return;
+          renderedCandlesRef.current = candlesRef.current;
+          suppressAutoLoadRef.current = true;
+          renderCandles(trade, timeframe, renderedCandlesRef.current, series, markersRef.current, markersVisibleRef.current);
+          window.setTimeout(() => {
+            suppressAutoLoadRef.current = false;
+          }, 0);
+        } else {
+          pendingRenderRef.current = true;
+          schedulePendingRender();
+        }
       }
       setStatus('');
     } catch {
@@ -1380,10 +1370,12 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     }
     if (!draftPoint) {
       setDraftPoint(point);
+      setDraftEndPoint(point);
       return;
     }
     void saveDrawing({ tradeId: trade.id, instrument: trade.instrument, timeframe, kind: 'segment', points: [draftPoint, point] });
     setDraftPoint(null);
+    setDraftEndPoint(null);
   }
 
   function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
@@ -1400,9 +1392,12 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
 
   function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
-    if (!drag) return;
     const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
     if (!point) return;
+    if (!drag) {
+      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(point);
+      return;
+    }
     event.preventDefault();
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
@@ -1434,7 +1429,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
+        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
     </div>
@@ -1457,10 +1452,11 @@ function CandlestickReadout({ candle, timeframe }: { candle: Candlestick | null;
   );
 }
 
-function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
+function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
   drawings: ChartDrawing[];
   selectedDrawingId: string;
   draftPoint: ChartPoint | null;
+  draftEndPoint: ChartPoint | null;
   chart: IChartApi | null;
   series: ISeriesApi<'Candlestick'> | null;
   timeframe: ReviewTimeframe;
@@ -1474,7 +1470,7 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, chart, series
   return (
     <>
       {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} onPointerDown={onPointerDown} />)}
-      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: 'segment', points: [draftPoint, draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
+      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
     </>
   );
 }
@@ -1493,7 +1489,7 @@ function DrawingShape({ drawing, selected, chart, series, timeframe, candles, on
       </g>
     );
   }
-  const points = drawing.points.map((point) => pointToScreen({ ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
+  const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
   if (points.some((point) => !point)) return null;
   return (
     <g>
@@ -1552,6 +1548,11 @@ function visibleBarsForChart(chart: IChartApi, element: HTMLElement | null): num
   const barSpacing = timeScale.options().barSpacing;
   const fallback = visibleBarCountForWidth(width, barSpacing);
   return visibleBarCountForLogicalRange(logicalRange, fallback);
+}
+
+function shouldLoadEarlierByLogicalRange(series: ISeriesApi<'Candlestick'>, range: NumericVisibleRange, threshold = 50): boolean {
+  const barsInfo = series.barsInLogicalRange(range);
+  return barsInfo !== null && barsInfo.barsBefore < threshold;
 }
 
 function visibleRangeCenter(range: NumericVisibleRange): number {

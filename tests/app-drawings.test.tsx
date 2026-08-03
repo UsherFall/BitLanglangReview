@@ -19,7 +19,7 @@ vi.mock('lightweight-charts', () => ({
     priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: vi.fn(),
     timeScale: () => ({
-      coordinateToTime: vi.fn(() => 1716256800),
+      coordinateToTime: vi.fn((x: number) => 1716256800 + x),
       getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
       getVisibleRange: vi.fn(() => ({ from: 1716256500, to: 1716257100 })),
       options: vi.fn(() => ({ barSpacing: 6 })),
@@ -27,7 +27,7 @@ vi.mock('lightweight-charts', () => ({
       setVisibleRange: vi.fn(),
       subscribeVisibleLogicalRangeChange: vi.fn(),
       subscribeVisibleTimeRangeChange: vi.fn(),
-      timeToCoordinate: vi.fn(() => 200),
+      timeToCoordinate: vi.fn((time: number) => time - 1716256800),
       timeToIndex: vi.fn(() => 150),
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleTimeRangeChange: vi.fn(),
@@ -58,6 +58,24 @@ describe('App drawings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '1D' }));
     await waitFor(() => expect(line).toHaveAttribute('stroke-width', '2'));
+  });
+
+  it('previews a segment from the first point to the current pointer before the second click', async () => {
+    render(<App />);
+
+    await drawingLine();
+    const toolbarButtons = document.querySelectorAll('.drawing-toolbar button');
+    fireEvent.click(toolbarButtons[1]);
+
+    const overlay = document.querySelector('svg.drawing-overlay')!;
+    fireEvent.click(overlay, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(overlay, { clientX: 30, clientY: 20 });
+
+    await waitFor(() => {
+      const draft = Array.from(document.querySelectorAll('line.drawing-shape')).at(-1) as SVGLineElement;
+      expect(draft).toHaveAttribute('x1', '10');
+      expect(draft).toHaveAttribute('x2', '30');
+    });
   });
 });
 

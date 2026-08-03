@@ -1,10 +1,24 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FreeReplayPanel } from '../src/ui/FreeReplayPanel';
 
+const pickerMocks = vi.hoisted(() => ({
+  close: vi.fn(),
+  destroy: vi.fn(),
+}));
+
+vi.mock('flatpickr', () => ({
+  default: vi.fn(() => ({ close: pickerMocks.close, destroy: pickerMocks.destroy })),
+}));
+
 describe('FreeReplayPanel', () => {
+  beforeEach(() => {
+    pickerMocks.close.mockClear();
+    pickerMocks.destroy.mockClear();
+  });
+
   it('loads selectable OKX SWAP instruments', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP', 'ETH-USDT-SWAP'] }))));
 
@@ -51,5 +65,18 @@ describe('FreeReplayPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
 
     expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ instrument: 'ETH-USDT-SWAP' }));
+  });
+
+  it('keeps the time picker open while editing time and closes it on Enter', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }))));
+
+    render(<FreeReplayPanel timeframe="5m" />);
+
+    const input = screen.getByLabelText('Start time');
+    fireEvent.input(input, { target: { value: '2024-05-21 10:07' } });
+    expect(pickerMocks.close).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(pickerMocks.close).toHaveBeenCalledTimes(1);
   });
 });
