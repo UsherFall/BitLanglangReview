@@ -24,6 +24,7 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 | `ratioThreshold` | number | 0.7 | `> 0` |
 | `consecutive` | number | 3 | `>= 1` |
 | `window` | number | 20 | `>= 1` |
+| `minQuoteVolume24h` | number | 10_000_000 | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
 
 Non-numeric params fall back to the default (see `parseScanParam`). Invalid final values → 400.
 
@@ -34,7 +35,7 @@ type ScanRow = {
   instrument: string;          // BTC-USDT-SWAP
   lastPrice: number;           // from OKX ticker `last`
   change24h: number;           // percent, (last - open24h) / open24h * 100
-  lastCandleTime: number;      // ms, newest completed candle open time (forming bar excluded)
+  quoteVolume24h: number;      // 24h quote volume in USDT = `volCcy24h` (base coins) * `last`
   currentVolume: number;       // last completed candle volume
   averageVolume: number;       // mean of the `window` candles before it
   ratio: number;               // currentVolume / averageVolume

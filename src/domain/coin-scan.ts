@@ -10,13 +10,14 @@ export type ShrinkScanParams = {
   ratioThreshold: number;
   consecutive: number;
   window: number;
+  minQuoteVolume24h: number;
 };
 
 export type ScanRow = {
   instrument: string;
   lastPrice: number;
   change24h: number;
-  lastCandleTime: number;
+  quoteVolume24h: number;
   currentVolume: number;
   averageVolume: number;
   ratio: number;

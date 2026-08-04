@@ -249,3 +249,41 @@ New 选币 (Coin Scan) module as a third review mode alongside Trade Review and 
 
 - Separate task: translate existing English UI (Trade Review / Free Replay) to Chinese.
 - Future coin scan methods (放量/突破) plug into the existing method dispatch.
+
+**Date**: 2026-08-04
+**Task**: 选币模块优化-复制币名与流动性筛选
+**Branch**: `master`
+
+### Summary
+
+Reworked 选币 result interactions per user feedback. Removed row-click → Free Replay jump (it polluted Free Replay session history); each row now has a copy button that copies the lowercase short name (BTC-USDT-SWAP → btc) with a 已复制 confirmation. Added a liquidity floor: new `minQuoteVolume24h` param (default 10M USDT) filters the universe before Top-N selection, plus a 成交额 column. While verifying, discovered OKX ticker `volCcy24h` is base-coin volume (not USDT) — confirmed via XLM ratio 100 = contract multiplier — so 24h USDT turnover is now computed as `volCcy24h * last` for both ranking and the floor. Cleaned up now-unused openScanReplay / formatReviewInputTime / lastCandleTime. 126 tests green.
+
+### Main Changes
+
+- `src/domain/coin-scan.ts` — add `minQuoteVolume24h`; add `quoteVolume24h`; remove `lastCandleTime`.
+- `src/server/coin-scan-service.ts` — USDT turnover = volCcy24h * last; floor filter before Top-N.
+- `src/server/app-plugin.ts` — parse `minQuoteVolume24h` (default 10M).
+- `src/ui/CoinScanPanel.tsx` — 最低成交额 input, 成交额 column, copy button (lowercase short + feedback); no row onClick.
+- `src/ui/App.tsx` — remove openScanReplay + unused imports.
+- `src/ui/chart-time.ts` — remove formatReviewInputTime.
+- Specs: `server/coin-scan.md` + `server/market-data.md` (USDT turnover semantics).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (see git log) | feat: coin scan copy button and liquidity floor |
+
+### Testing
+
+- [OK] `npm test` — 126 tests green.
+- [OK] `tsc --noEmit` clean.
+- [OK] Playwright: scan 50/9 qualified; USDT-ordered 成交额 column; copy → 已复制; row click stays on 选币 (no Free Replay session).
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None

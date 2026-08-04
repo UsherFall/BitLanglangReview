@@ -13,11 +13,12 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
   const [ratioThreshold, setRatioThreshold] = useState('0.7');
   const [consecutive, setConsecutive] = useState('3');
   const [avgWindow, setAvgWindow] = useState('20');
+  const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function scan() {
-    const inputs = [topN, ratioThreshold, consecutive, avgWindow];
+    const inputs = [topN, ratioThreshold, consecutive, avgWindow, minQuoteVolume24h];
     if (!scanTimeframes.includes(timeframe) || inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
       return;
@@ -32,6 +33,7 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
         ratioThreshold,
         consecutive,
         window: avgWindow,
+        minQuoteVolume24h,
       });
       const response = await fetch(`/api/scan?${query.toString()}`);
       const payload = (await response.json()) as ScanResponse & { error?: string };
@@ -75,6 +77,10 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
           均量窗口
           <input type="number" min="1" value={avgWindow} onChange={(event) => setAvgWindow(event.target.value)} />
         </label>
+        <label>
+          最低成交额
+          <input type="number" min="0" value={minQuoteVolume24h} onChange={(event) => setMinQuoteVolume24h(event.target.value)} />
+        </label>
       </div>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
@@ -86,10 +92,23 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
 
 export type CoinScanResultsProps = {
   result: ScanResponse | null;
-  onOpenReplay: (instrument: string, timeframe: ReviewTimeframe, lastCandleTime: number) => void;
 };
 
-export function CoinScanResults({ result, onOpenReplay }: CoinScanResultsProps) {
+export function CoinScanResults({ result }: CoinScanResultsProps) {
+  const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
+
+  function copyInstrument(instrument: string) {
+    const copyText = shortInstrument(instrument).toLowerCase();
+    navigator.clipboard.writeText(copyText).then(() => {
+      setCopiedInstrument(instrument);
+      window.setTimeout(() => {
+        setCopiedInstrument((current) => (current === instrument ? null : current));
+      }, 1500);
+    }).catch(() => {
+      setCopiedInstrument(null);
+    });
+  }
+
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
@@ -109,31 +128,39 @@ export function CoinScanResults({ result, onOpenReplay }: CoinScanResultsProps) 
               <th>币</th>
               <th>最新价</th>
               <th>24h 涨跌</th>
+              <th>成交额</th>
               <th>当前量</th>
               <th>均量</th>
               <th>量比</th>
               <th>强度分</th>
               <th>连续缩量</th>
               <th>状态</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {ordered.map((row) => (
-              <tr
-                key={row.instrument}
-                className={row.qualified ? 'qualified' : ''}
-                title={`${row.instrument} · 点击进入复盘`}
-                onClick={() => onOpenReplay(row.instrument, result.params.timeframe, row.lastCandleTime)}
-              >
+              <tr key={row.instrument} className={row.qualified ? 'qualified' : ''}>
                 <td>{shortInstrument(row.instrument)}</td>
                 <td>{formatPrice(row.lastPrice)}</td>
                 <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
+                <td>{formatVolume(row.quoteVolume24h)}</td>
                 <td>{formatVolume(row.currentVolume)}</td>
                 <td>{formatVolume(row.averageVolume)}</td>
                 <td>{row.ratio.toFixed(2)}</td>
                 <td>{row.intensity.toFixed(2)}</td>
                 <td>{row.consecutiveShrunk}</td>
                 <td>{row.qualified ? '合格' : '—'}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="coin-scan-copy"
+                    title={`复制 ${shortInstrument(row.instrument).toLowerCase()}`}
+                    onClick={() => copyInstrument(row.instrument)}
+                  >
+                    {copiedInstrument === row.instrument ? '已复制' : '复制'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

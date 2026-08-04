@@ -29,9 +29,9 @@ Do not preload all history. The product contract is On-Demand Candlestick Loadin
 
 ## OKX Tickers For Coin Scan
 
-`src/server/coin-scan-service.ts` calls `GET /api/v5/market/tickers?instType=SWAP` once per scan to rank the universe. It filters to instruments whose `instId` ends with `-USDT-SWAP`, sorts by `volCcy24h` (24h quote-volume in USDT) descending, and takes the top `topN` before fetching candlesticks.
+`src/server/coin-scan-service.ts` calls `GET /api/v5/market/tickers?instType=SWAP` once per scan to rank the universe. It filters to instruments whose `instId` ends with `-USDT-SWAP`, applies the `minQuoteVolume24h` floor, sorts by 24h quote-volume in USDT descending, and takes the top `topN` before fetching candlesticks.
 
-`lastPrice` comes from ticker `last`; `change24h` is `(last - open24h) / open24h * 100`.
+OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins), not USDT. The 24h quote-volume in USDT is therefore `volCcy24h * last`; the scan uses that product for both ranking and the liquidity floor. `lastPrice` comes from ticker `last`; `change24h` is `(last - open24h) / open24h * 100`.
 
 ## Error Handling
 

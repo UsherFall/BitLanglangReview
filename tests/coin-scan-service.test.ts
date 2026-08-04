@@ -32,6 +32,7 @@ const params: ShrinkScanParams = {
   ratioThreshold: 0.7,
   consecutive: 2,
   window: 2,
+  minQuoteVolume24h: 0,
 };
 
 // Five candles where the newest (forming) one has a huge volume. When it is
@@ -63,8 +64,10 @@ describe('CoinScanService', () => {
     for (const row of result.scanned) {
       expect(row.qualified).toBe(true);
       expect(row.intensity).toBeCloseTo((0.2 + 0.25) / 2);
-      expect(row.lastCandleTime).toBe(4000); // newest completed bar, forming 5000 dropped
     }
+    // quoteVolume24h is 24h quote-volume in USDT = volCcy24h * last.
+    expect(result.scanned.find((row) => row.instrument === 'BTC-USDT-SWAP')?.quoteVolume24h).toBe(150000000 * 60000);
+    expect(result.scanned.find((row) => row.instrument === 'ETH-USDT-SWAP')?.quoteVolume24h).toBe(90000000 * 3500);
     expect(result.qualifiedCount).toBe(2);
     // BTC-USDT-SWAP first in the fetch order (150M quote volume), ETH second.
     expect(result.scanned[0].instrument).toBe('BTC-USDT-SWAP');
@@ -104,5 +107,13 @@ describe('CoinScanService', () => {
     const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
     const result = await service.scanShrink(params);
     expect(result.scanned.map((row) => row.instrument)).toEqual(['ETH-USDT-SWAP', 'BTC-USDT-SWAP']);
+  });
+
+  it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {
+    const getCandlesticks = vi.fn(async () => fiveCandles);
+    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    // BTC quote-volume = 150M * 60000 = 9e12; ETH = 90M * 3500 = 3.15e11.
+    const result = await service.scanShrink({ ...params, minQuoteVolume24h: 5e11 });
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
   });
 });

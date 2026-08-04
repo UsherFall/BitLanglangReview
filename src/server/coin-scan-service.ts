@@ -29,7 +29,9 @@ export class CoinScanService {
 
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
     const tickers = await this.fetchTickers();
-    const top = tickers.slice(0, params.topN);
+    const top = tickers
+      .filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h)
+      .slice(0, params.topN);
 
     const scanned: ScanRow[] = [];
     for (const ticker of top) {
@@ -44,12 +46,11 @@ export class CoinScanService {
       const completed = candles.slice(0, -1);
       const metrics = computeShrinkMetrics(completed, params);
       if (!metrics) continue;
-      const lastCandleTime = Math.max(...completed.map((candle) => candle.timestamp));
       scanned.push({
         instrument: ticker.instrument,
         lastPrice: ticker.lastPrice,
         change24h: ticker.change24h,
-        lastCandleTime,
+        quoteVolume24h: ticker.quoteVolume24h,
         ...metrics,
       });
     }
@@ -63,12 +64,17 @@ export class CoinScanService {
     const response = (await this.fetchJson('https://www.okx.com/api/v5/market/tickers?instType=SWAP')) as OkxTickersResponse;
     return (response.data ?? [])
       .filter((item) => item.instId?.endsWith('-USDT-SWAP'))
-      .map((item) => ({
-        instrument: item.instId as string,
-        quoteVolume24h: Number(item.volCcy24h),
-        lastPrice: Number(item.last),
-        change24h: change24hPercent(item.last, item.open24h),
-      }))
+      .map((item) => {
+        const lastPrice = Number(item.last);
+        // volCcy24h is the 24h volume in base coin units (e.g. XLM coins), so
+        // the 24h quote-volume in USDT is volCcy24h * last.
+        return {
+          instrument: item.instId as string,
+          quoteVolume24h: Number(item.volCcy24h) * lastPrice,
+          lastPrice,
+          change24h: change24hPercent(item.last, item.open24h),
+        };
+      })
       .filter((ticker) => Number.isFinite(ticker.quoteVolume24h) && Number.isFinite(ticker.lastPrice))
       .sort((a, b) => b.quoteVolume24h - a.quoteVolume24h);
   }

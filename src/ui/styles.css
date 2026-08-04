@@ -1181,3 +1181,19 @@ label,
 .coin-scan-table tbody tr.qualified {
   background: rgba(74, 222, 128, 0.08);
 }
+
+.coin-scan-copy {
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #d6dee7;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.coin-scan-copy:hover {
+  background: #1f2937;
+  border-color: #4b5563;
+}

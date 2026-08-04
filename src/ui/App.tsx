@@ -11,7 +11,7 @@ import { isSameVisibleRange, shouldLoadLater, type VisibleTimeRange } from './ch
 import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
-import { entryVisibleRange, formatChartTime, formatReviewInputTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { CoinScanPanel, CoinScanResults } from './CoinScanPanel';
@@ -345,25 +345,6 @@ export function App() {
     setPaperTrading(initialPaperTradingSession());
   }
 
-  function openScanReplay(instrument: string, replayTimeframe: ReviewTimeframe, lastCandleTime: number) {
-    const startTime = formatReviewInputTime(lastCandleTime);
-    const progressTime = freeReplayProgressTimeForStart(startTime);
-    const cursorTime = freeReplayCursorTimeForProgress(progressTime, replayTimeframe);
-    setTimeframe(replayTimeframe);
-    setFreeReplay({
-      instrument,
-      startTime,
-      dataAnchorTime: startTime,
-      startProgressTime: progressTime,
-      progressTime,
-      startCursorTime: cursorTime,
-      cursorTime,
-    });
-    setFreeReplayCandles([]);
-    setPaperTrading(initialPaperTradingSession());
-    setReviewMode('freeReplay');
-  }
-
   async function handleDeleteSession(instrument: string, startTime: string) {
     const key = sessionKey(instrument, startTime);
     // Mark the key as deleted before the DELETE resolves so an in-flight PUT
@@ -630,7 +611,7 @@ export function App() {
         ) : (
           <div className="empty-state">Choose an instrument and start time to begin Free Replay</div>
         ) : reviewMode === 'scan' ? (
-          <CoinScanResults result={scanResult} onOpenReplay={openScanReplay} />
+          <CoinScanResults result={scanResult} />
         ) : selectedTrade ? (
           <>
             <header className="detail-header">
