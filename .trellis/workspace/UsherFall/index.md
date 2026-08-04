@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-07-29
+- **Total Sessions**: 5
+- **Last Active**: 2026-08-04
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~139 | Active |
+| `journal-1.md` | ~212 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-08-04 | Free Replay session history + progress restore, sidebar collapse | `9271072`, `e333232` | `master` |
 | 4 | 2026-07-29 | Free Replay chart trading tools | `ef6c377` | `master` |
 | 3 | 2026-07-29 | Chart scale reset and timeframe zoom | `6843999` | `master` |
 | 2 | 2026-07-28 | Free Replay no-future progress model | `89a831f` | `master` |

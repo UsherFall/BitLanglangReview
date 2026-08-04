@@ -176,3 +176,37 @@ When a reviewer zooms the Free Replay chart out and switches timeframe, the pres
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Free Replay session history + progress restore, sidebar collapse
+
+**Date**: 2026-08-04
+**Task**: Free Replay session history + progress restore, sidebar collapse
+**Branch**: `master`
+
+### Summary
+
+Add Free Replay session history with progress restore: server store + /api/free-replay/sessions routes, auto-save with debounce+pagehide flush, restore/resume-by-key, delete-active guard, history list UI, explicit sidebar collapse button. Updated CONTEXT.md and specs. 115 tests green.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9271072` | (see git log) |
+| `e333232` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
