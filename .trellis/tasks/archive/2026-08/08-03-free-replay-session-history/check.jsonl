@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Check auto-save effect does not fight existing state: restore sets freeReplay+timeframe+paperTrading atomically; delete-active resets; no re-save loops or stale freeReplaySessions."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify new tests cover AC1-AC5 (save on reveal/paper action, restore, resume-by-key, delete-active) and existing free-replay tests still green."}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "Check /api/free-replay/sessions routes follow existing 405/400 handling, parse params consistently, and share the same sqlite file safely (WAL)."}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Check restored session maps onto Free Replay Cursor semantics: timeframe stored matches switch behavior in switchFreeReplayTimeframe; cursorTime/progressTime consistent on restore."}

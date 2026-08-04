@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "Route addition pattern for /api/free-replay/sessions: middleware style, send/readBody helpers, store instantiation in tradingReviewApiPlugin."}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "SQLite store pattern: better-sqlite3 + WAL, table creation, upsert/delete/list method shapes, same-database review.sqlite coexistence."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "How freeReplay / paperTrading / timeframe state is held in App.tsx and where to attach session list state, auto-save effect, and restore handler."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "FreeReplayPanel new props and collapsible history section; React component conventions for the ui layer."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verification approach: existing app-free-replay.test.tsx mock/assert pattern, fetch stubbing, vitest+jsdom setup to extend for auto-save and restore."}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "ReviewTimeframe type and the domain vocabulary that Free Replay Session history builds on (Free Replay Cursor, Reveal, Rewind)."}
