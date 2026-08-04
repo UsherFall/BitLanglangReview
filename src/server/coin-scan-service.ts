@@ -1,4 +1,4 @@
-import { computeShrinkMetrics, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
+import { computeQuietMetrics, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
 import type { CandlestickService } from './candlestick-service';
 
 type FetchJson = (url: string) => Promise<unknown>;
@@ -44,7 +44,7 @@ export class CoinScanService {
         limit: params.window + params.consecutive + 1,
       });
       const completed = candles.slice(0, -1);
-      const metrics = computeShrinkMetrics(completed, params);
+      const metrics = computeQuietMetrics(completed, params);
       if (!metrics) continue;
       scanned.push({
         instrument: ticker.instrument,

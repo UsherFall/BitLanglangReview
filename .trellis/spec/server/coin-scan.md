@@ -21,7 +21,8 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 | `method` | string | — | must be `shrink`; anything else → 400 |
 | `timeframe` | `ReviewTimeframe` | — | must be in `scanTimeframes` = `['5m','15m','1H','4H','1D']` → 400 otherwise |
 | `topN` | number | 50 | `>= 1` |
-| `ratioThreshold` | number | 0.7 | `> 0` |
+| `ratioThreshold` | number | 0.7 | `> 0`; volume-ratio shrink threshold |
+| `volatilityThreshold` | number | 0.7 | `> 0`; amplitude-ratio shrink threshold |
 | `consecutive` | number | 3 | `>= 1` |
 | `window` | number | 20 | `>= 1` |
 | `minQuoteVolume24h` | number | 10_000_000 | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
@@ -38,10 +39,11 @@ type ScanRow = {
   quoteVolume24h: number;      // 24h quote volume in USDT = `volCcy24h` (base coins) * `last`
   currentVolume: number;       // last completed candle volume
   averageVolume: number;       // mean of the `window` candles before it
-  ratio: number;               // currentVolume / averageVolume
-  intensity: number;           // mean of the last `consecutive` volume ratios
-  consecutiveShrunk: number;   // trailing count of ratios below ratioThreshold
-  qualified: boolean;          // consecutiveShrunk >= consecutive
+  ratio: number;               // volume ratio of last bar = currentVolume / averageVolume
+  amplitudeRatio: number;      // (high-low)/low of last bar over the `window` amplitude mean
+  intensity: number;           // quiet score = mean over last `consecutive` bars of (volumeRatio + amplitudeRatio) / 2
+  consecutiveQuiet: number;    // trailing count of bars that are calm (volumeRatio < ratioThreshold AND amplitudeRatio < volatilityThreshold)
+  qualified: boolean;          // consecutiveQuiet >= consecutive
 };
 type ScanResponse = {
   scanned: ScanRow[];          // sorted by intensity ascending (most shrunk first)
@@ -65,9 +67,9 @@ Instruments whose candles are too few (`< window + consecutive`) or have a zero 
 
 ## 5. Good/Base/Bad Cases
 
-- **Good**: BTC volume ratio 0.2 for 3 consecutive bars, window avg 250 → `ratio 0.2`, `intensity 0.2`, `qualified true`.
-- **Base**: 2 of 3 trailing ratios below threshold → `qualified false`, `intensity` still reported.
-- **Bad**: fewer than `window + consecutive` completed candles → metrics `null`, instrument skipped.
+- **Good**: volume ratio 0.2 and amplitude ratio 0.3 for each of 3 consecutive bars → each bar calm, `consecutiveQuiet 3`, `qualified true`, `intensity` near (0.2+0.3)/2.
+- **Base**: 2 of 3 trailing bars calm (one bar's amplitude ratio above `volatilityThreshold`) → `qualified false`, `intensity` still reported.
+- **Bad**: fewer than `window + consecutive` completed candles, or a zero volume-window average → metrics `null`, instrument skipped.
 
 ## 6. Tests Required
 

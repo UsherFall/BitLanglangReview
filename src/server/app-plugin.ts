@@ -138,12 +138,13 @@ export function tradingReviewApiPlugin(): Plugin {
         const consecutive = parseScanParam(url.searchParams.get('consecutive'), 3);
         const window = parseScanParam(url.searchParams.get('window'), 20);
         const ratioThreshold = parseScanParam(url.searchParams.get('ratioThreshold'), 0.7);
+        const volatilityThreshold = parseScanParam(url.searchParams.get('volatilityThreshold'), 0.7);
         const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
-        if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0 || minQuoteVolume24h < 0) {
+        if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0 || volatilityThreshold <= 0 || minQuoteVolume24h < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         try {
-          const result = await coinScanService.scanShrink({ method: 'shrink', timeframe, topN, ratioThreshold, consecutive, window, minQuoteVolume24h });
+          const result = await coinScanService.scanShrink({ method: 'shrink', timeframe, topN, ratioThreshold, volatilityThreshold, consecutive, window, minQuoteVolume24h });
           send(res, 200, result);
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });

@@ -11,6 +11,7 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [topN, setTopN] = useState('50');
   const [ratioThreshold, setRatioThreshold] = useState('0.7');
+  const [volatilityThreshold, setVolatilityThreshold] = useState('0.7');
   const [consecutive, setConsecutive] = useState('3');
   const [avgWindow, setAvgWindow] = useState('20');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
@@ -18,7 +19,7 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
   const [error, setError] = useState<string | null>(null);
 
   async function scan() {
-    const inputs = [topN, ratioThreshold, consecutive, avgWindow, minQuoteVolume24h];
+    const inputs = [topN, ratioThreshold, volatilityThreshold, consecutive, avgWindow, minQuoteVolume24h];
     if (!scanTimeframes.includes(timeframe) || inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
       return;
@@ -31,6 +32,7 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
         timeframe,
         topN,
         ratioThreshold,
+        volatilityThreshold,
         consecutive,
         window: avgWindow,
         minQuoteVolume24h,
@@ -68,6 +70,10 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
         <label>
           量比阈值
           <input type="number" min="0" step="0.05" value={ratioThreshold} onChange={(event) => setRatioThreshold(event.target.value)} />
+        </label>
+        <label>
+          波动阈值
+          <input type="number" min="0" step="0.05" value={volatilityThreshold} onChange={(event) => setVolatilityThreshold(event.target.value)} />
         </label>
         <label>
           连续根数
@@ -132,8 +138,9 @@ export function CoinScanResults({ result }: CoinScanResultsProps) {
               <th>当前量</th>
               <th>均量</th>
               <th>量比</th>
+              <th>振幅比</th>
               <th>强度分</th>
-              <th>连续缩量</th>
+              <th>连续平静</th>
               <th>状态</th>
               <th>操作</th>
             </tr>
@@ -148,8 +155,9 @@ export function CoinScanResults({ result }: CoinScanResultsProps) {
                 <td>{formatVolume(row.currentVolume)}</td>
                 <td>{formatVolume(row.averageVolume)}</td>
                 <td>{row.ratio.toFixed(2)}</td>
+                <td>{row.amplitudeRatio.toFixed(2)}</td>
                 <td>{row.intensity.toFixed(2)}</td>
-                <td>{row.consecutiveShrunk}</td>
+                <td>{row.consecutiveQuiet}</td>
                 <td>{row.qualified ? '合格' : '—'}</td>
                 <td>
                   <button

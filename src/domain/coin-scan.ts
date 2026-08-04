@@ -8,6 +8,7 @@ export type ShrinkScanParams = {
   timeframe: ReviewTimeframe;
   topN: number;
   ratioThreshold: number;
+  volatilityThreshold: number;
   consecutive: number;
   window: number;
   minQuoteVolume24h: number;
@@ -21,8 +22,9 @@ export type ScanRow = {
   currentVolume: number;
   averageVolume: number;
   ratio: number;
+  amplitudeRatio: number;
   intensity: number;
-  consecutiveShrunk: number;
+  consecutiveQuiet: number;
   qualified: boolean;
 };
 
@@ -33,61 +35,95 @@ export type ScanResponse = {
   scannedAt: string;
 };
 
-export type ShrinkMetrics = {
+export type QuietMetrics = {
   currentVolume: number;
   averageVolume: number;
   ratio: number;
+  amplitudeRatio: number;
   intensity: number;
-  consecutiveShrunk: number;
+  consecutiveQuiet: number;
   qualified: boolean;
 };
 
-export type ShrinkMetricsParams = Pick<ShrinkScanParams, 'ratioThreshold' | 'consecutive' | 'window'>;
+export type QuietMetricsParams = Pick<ShrinkScanParams, 'ratioThreshold' | 'volatilityThreshold' | 'consecutive' | 'window'>;
+
+// Used instead of Infinity so JSON serialization never produces null.
+const LARGE_RATIO = 1_000_000_000;
+
+function amplitudeOf(candle: Candlestick): number {
+  return (candle.high - candle.low) / candle.low;
+}
 
 /**
- * Computes shrink-volume metrics for the last completed candlestick.
+ * Computes quiet-consolidation (缩量盘整) metrics for the last completed
+ * candlestick: volume shrinking and price range narrowing at the same time.
  *
  * The caller must pass only completed candlesticks (the still-forming bar is
  * excluded before this call). Candlesticks may arrive in any order; they are
  * sorted ascending by timestamp here.
  *
- * Returns null when there is not enough history to compute the metrics
- * (fewer than `window + consecutive` candles) or when a window average is
- * zero, which makes the volume ratio undefined.
+ * A candlestick is *calm* when both its volume ratio and its amplitude ratio
+ * are below their thresholds. The candlestick qualifies when the trailing
+ * `consecutive` candlesticks are all calm.
+ *
+ * Returns null when there is not enough history (fewer than
+ * `window + consecutive` candles), when a volume window average is zero, or
+ * when a price is non-positive (amplitude undefined).
  */
-export function computeShrinkMetrics(candles: readonly Candlestick[], params: ShrinkMetricsParams): ShrinkMetrics | null {
-  const { ratioThreshold, consecutive, window } = params;
+export function computeQuietMetrics(candles: readonly Candlestick[], params: QuietMetricsParams): QuietMetrics | null {
+  const { ratioThreshold, volatilityThreshold, consecutive, window } = params;
   const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
   const count = sorted.length;
   if (count < window + consecutive) return null;
+  if (sorted.some((candle) => candle.low <= 0)) return null;
 
-  // Sliding average of the `window` candles before each candle at or after
-  // index `window`; the ratio of candle i is volume[i] / averages[i].
-  const averages: number[] = new Array(count).fill(0);
-  const ratios: number[] = [];
+  // Sliding window means; ratio of candle i is value[i] / mean(window before i).
+  const volumeAverages: number[] = new Array(count).fill(0);
+  const volumeRatios: number[] = [];
+  const amplitudeRatios: number[] = [];
+  const calm: boolean[] = [];
   for (let i = window; i < count; i += 1) {
-    let sum = 0;
-    for (let j = i - window; j < i; j += 1) sum += sorted[j].volume;
-    const average = sum / window;
-    if (average <= 0) return null;
-    averages[i] = average;
-    ratios.push(sorted[i].volume / average);
+    let volumeSum = 0;
+    let amplitudeSum = 0;
+    for (let j = i - window; j < i; j += 1) {
+      volumeSum += sorted[j].volume;
+      amplitudeSum += amplitudeOf(sorted[j]);
+    }
+    const volumeAverage = volumeSum / window;
+    if (volumeAverage <= 0) return null;
+    const amplitudeAverage = amplitudeSum / window;
+    volumeAverages[i] = volumeAverage;
+
+    const volumeRatio = sorted[i].volume / volumeAverage;
+    const currentAmplitude = amplitudeOf(sorted[i]);
+    const amplitudeRatio = amplitudeAverage <= 0
+      ? currentAmplitude === 0 ? 0 : LARGE_RATIO
+      : currentAmplitude / amplitudeAverage;
+
+    volumeRatios.push(volumeRatio);
+    amplitudeRatios.push(amplitudeRatio);
+    calm.push(volumeRatio < ratioThreshold && amplitudeRatio < volatilityThreshold);
   }
 
   const lastIndex = count - 1;
-  const intensity = ratios.slice(-consecutive).reduce((sum, ratio) => sum + ratio, 0) / consecutive;
+  const quietScores: number[] = [];
+  for (let k = volumeRatios.length - consecutive; k < volumeRatios.length; k += 1) {
+    quietScores.push((volumeRatios[k] + amplitudeRatios[k]) / 2);
+  }
+  const intensity = quietScores.reduce((sum, score) => sum + score, 0) / consecutive;
 
-  let consecutiveShrunk = 0;
-  for (let i = ratios.length - 1; i >= 0 && ratios[i] < ratioThreshold; i -= 1) {
-    consecutiveShrunk += 1;
+  let consecutiveQuiet = 0;
+  for (let k = calm.length - 1; k >= 0 && calm[k]; k -= 1) {
+    consecutiveQuiet += 1;
   }
 
   return {
     currentVolume: sorted[lastIndex].volume,
-    averageVolume: averages[lastIndex],
-    ratio: ratios[ratios.length - 1],
+    averageVolume: volumeAverages[lastIndex],
+    ratio: volumeRatios[volumeRatios.length - 1],
+    amplitudeRatio: amplitudeRatios[amplitudeRatios.length - 1],
     intensity,
-    consecutiveShrunk,
-    qualified: consecutiveShrunk >= consecutive,
+    consecutiveQuiet,
+    qualified: consecutiveQuiet >= consecutive,
   };
 }

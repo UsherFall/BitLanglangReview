@@ -30,6 +30,7 @@ const params: ShrinkScanParams = {
   timeframe: '5m',
   topN: 2,
   ratioThreshold: 0.7,
+  volatilityThreshold: 0.7,
   consecutive: 2,
   window: 2,
   minQuoteVolume24h: 0,
@@ -63,7 +64,11 @@ describe('CoinScanService', () => {
     });
     for (const row of result.scanned) {
       expect(row.qualified).toBe(true);
-      expect(row.intensity).toBeCloseTo((0.2 + 0.25) / 2);
+      // Flat candles (amplitude 0) make amplitudeRatio 0, so quiet scores are
+      // volume ratios halved: intensity = mean((0.2/2, 0.25/2)).
+      expect(row.intensity).toBeCloseTo(((0.2 + 0.25) / 2) / 2);
+      expect(row.amplitudeRatio).toBe(0);
+      expect(row.consecutiveQuiet).toBe(2);
     }
     // quoteVolume24h is 24h quote-volume in USDT = volCcy24h * last.
     expect(result.scanned.find((row) => row.instrument === 'BTC-USDT-SWAP')?.quoteVolume24h).toBe(150000000 * 60000);

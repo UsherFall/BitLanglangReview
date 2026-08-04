@@ -287,3 +287,39 @@ Reworked 选币 result interactions per user feedback. Removed row-click → Fre
 ### Next Steps
 
 - None
+
+**Date**: 2026-08-04
+**Task**: 选币模块-缩量盘整规则优化
+**Branch**: `master`
+
+### Summary
+
+Upgraded the 选币 shrink method from volume-only to quiet-consolidation (缩量盘整): a candlestick is now calm only when BOTH its volume ratio (vs its own `window` mean) and its amplitude ratio ((high-low)/low vs its own `window` mean) fall below their thresholds. Qualified = trailing `consecutive` bars all calm. New `volatilityThreshold` param (default 0.7); `intensity` is now the quiet score = mean over last `consecutive` bars of (volumeRatio + amplitudeRatio)/2, ranked ascending (most-quiet first). Results table gained 振幅比 column; 连续缩量 renamed 连续平静. Handled zero-amplitude baseline edge (flat bars stay calm; a moving bar on a flat baseline is not calm). 126 tests green.
+
+### Main Changes
+
+- `src/domain/coin-scan.ts` — `computeQuietMetrics` replacing `computeShrinkMetrics`; params add `volatilityThreshold`; `ScanRow` swaps `consecutiveShrunk` for `amplitudeRatio` + `consecutiveQuiet`.
+- `src/server/coin-scan-service.ts` — calls `computeQuietMetrics`.
+- `src/server/app-plugin.ts` — parses `volatilityThreshold` (default 0.7).
+- `src/ui/CoinScanPanel.tsx` — 波动阈值 input, 振幅比 column, 连续平静 header.
+- Spec: `server/coin-scan.md` contract + cases updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (see git log) | feat: coin scan quiet-consolidation rule (volume + volatility) |
+
+### Testing
+
+- [OK] `npm test` — 126 tests green (algorithm 6 cases, service 5 cases).
+- [OK] `tsc --noEmit` clean.
+- [OK] Playwright: 波动阈值 param; scan 50 / qualified 3 (vs 8 volume-only, stricter as expected); SKHYNIX 量比0.40/振幅比0.41/强度分0.40/连续平静3; ranked ascending by quiet intensity.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None
