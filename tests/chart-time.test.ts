@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import { reviewTimeframes } from '../src/domain/trade';
-import { formatChartTime, freeReplayCandleCompletionTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
+import { formatChartTime, formatReviewInputTime, freeReplayCandleCompletionTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
 
 describe('Chart Time', () => {
+  it('formats a review input time that parses back to the same Shanghai timestamp', () => {
+    const timestamp = Date.parse('2024-05-21T10:07:00+08:00');
+    expect(formatReviewInputTime(timestamp)).toBe('2024-05-21 10:07');
+    expect(freeReplayProgressTimeForStart(formatReviewInputTime(timestamp)) * 1000).toBe(timestamp);
+  });
+
   it('supports 1m as the first review timeframe', () => {
     expect(reviewTimeframes[0]).toBe('1m');
     expect(timeframeMs('1m')).toBe(60_000);

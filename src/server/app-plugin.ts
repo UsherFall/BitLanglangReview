@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
+import { scanTimeframes } from '../domain/coin-scan';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { CandlestickService } from './candlestick-service';
+import { CoinScanService } from './coin-scan-service';
 import { CandlestickStore } from './candlestick-store';
 import { DrawingStore } from './drawing-store';
 import { freeReplayInstrumentPayload } from './free-replay-instruments';
@@ -24,6 +26,7 @@ export function tradingReviewApiPlugin(): Plugin {
       const reviewStore = new ReviewStore(path.resolve('data/review.sqlite'));
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
       const candleService = new CandlestickService(candleStore);
+      const coinScanService = new CoinScanService(candleService);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
       const instrumentService = new OkxInstrumentService();
@@ -120,8 +123,38 @@ export function tradingReviewApiPlugin(): Plugin {
         }
         return send(res, 405, { error: 'Method not allowed' });
       });
+
+      server.middlewares.use('/api/scan', async (req, res) => {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        const url = new URL(req.url ?? '', 'http://local');
+        if (url.searchParams.get('method') !== 'shrink') {
+          return send(res, 400, { error: 'Unsupported scan method' });
+        }
+        const timeframe = url.searchParams.get('timeframe') as ReviewTimeframe | null;
+        if (!timeframe || !scanTimeframes.includes(timeframe)) {
+          return send(res, 400, { error: 'timeframe must be one of 5m, 15m, 1H, 4H, 1D' });
+        }
+        const topN = parseScanParam(url.searchParams.get('topN'), 50);
+        const consecutive = parseScanParam(url.searchParams.get('consecutive'), 3);
+        const window = parseScanParam(url.searchParams.get('window'), 20);
+        const ratioThreshold = parseScanParam(url.searchParams.get('ratioThreshold'), 0.7);
+        if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        try {
+          const result = await coinScanService.scanShrink({ method: 'shrink', timeframe, topN, ratioThreshold, consecutive, window });
+          send(res, 200, result);
+        } catch (error) {
+          send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
+        }
+      });
     },
   };
+}
+
+function parseScanParam(value: string | null, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 async function getCandlesForMode(input: {

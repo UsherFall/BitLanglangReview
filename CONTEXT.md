@@ -132,6 +132,22 @@ _Avoid_: journal entry, review note
 The reviewer-chosen local date and minute where a **Free Replay** begins. The start time is placed on the containing **Candlestick** in the active **Review Timeframe**.
 _Avoid_: second-level timestamp, exchange server time, exact tick
 
+**Coin Scan** (选币):
+A review mode for finding **Instruments** from the OKX swap market using pluggable scan methods. V1 ships only the **Shrink Method**; the module is built so future find-coin methods can be added. A **Coin Scan** is a parameterized panel: choose a method and its parameters, scan, then read a ranked result list.
+_Avoid_: market screener, strategy backtest
+
+**Shrink Method** (缩量方法):
+The first **Coin Scan** method. It scans the top instruments by 24h quote volume (USDT-settled swaps only) and ranks them by how much their recent volume has shrunk relative to each instrument's own recent average.
+_Avoid_: volume drop filter, low volume watch
+
+**Volume Ratio** (量比):
+For a completed **Candlestick**, its volume divided by the mean volume of the `window` candles immediately before it. The still-forming candlestick is excluded before any computation.
+_Avoid_: raw volume, absolute volume delta
+
+**Shrink Intensity** (缩量强度分):
+The mean of the trailing `consecutive` **Volume Ratio** values for an **Instrument**. A coin qualifies for the **Shrink Method** when that many consecutive ratios are all below the chosen `ratioThreshold`.
+_Avoid_: lowest volume, volume percentage change
+
 ## Example Dialogue
 
 Reviewer: Show me the BTC-USDT-SWAP trade from 2022-05-24 on the candlestick chart.
@@ -215,3 +231,11 @@ Developer: The free replay start time is selected as a local date and minute, th
 Reviewer: Do not show my historical trade entry and exit markers during free replay.
 
 Developer: Free replay chart context excludes trade markers so the reviewer can judge the market without seeing past trade decisions.
+
+Reviewer: I want to find instruments whose volume is shrinking on the five-minute chart.
+
+Developer: That is the coin scan's shrink method: it ranks top instruments by 24h quote volume, then by how much their recent volume shrank against each coin's own average.
+
+Reviewer: One of the scanned coins looks worth replaying.
+
+Developer: Clicking a coin scan result row starts a free replay on that instrument from its newest completed candlestick, in the timeframe that was scanned.

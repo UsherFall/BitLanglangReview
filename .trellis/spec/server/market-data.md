@@ -27,6 +27,12 @@ Coverage is in `tests/candlestick-cache.test.ts`.
 
 Do not preload all history. The product contract is On-Demand Candlestick Loading with cache reuse.
 
+## OKX Tickers For Coin Scan
+
+`src/server/coin-scan-service.ts` calls `GET /api/v5/market/tickers?instType=SWAP` once per scan to rank the universe. It filters to instruments whose `instId` ends with `-USDT-SWAP`, sorts by `volCcy24h` (24h quote-volume in USDT) descending, and takes the top `topN` before fetching candlesticks.
+
+`lastPrice` comes from ticker `last`; `change24h` is `(last - open24h) / open24h * 100`.
+
 ## Error Handling
 
 `defaultFetchJson` aborts OKX requests after 12 seconds and throws when the response is not OK. Route handlers convert service failures to HTTP 502 so the UI can show loading failure status without crashing.

@@ -196,10 +196,16 @@ body.sidebar-resizing {
 
 .mode-switch {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   padding: 12px;
   border-bottom: 1px solid #2d333b;
+}
+
+.mode-switch button {
+  font-size: 12px;
+  white-space: nowrap;
+  padding: 0 4px;
 }
 
 .mode-switch button {
@@ -1100,4 +1106,78 @@ label,
     top: 50px;
     left: 10px;
   }
+}
+
+/* Coin scan (选币) */
+.coin-scan-panel {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+}
+
+.coin-scan-panel label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #8b949e;
+}
+
+.coin-scan-panel .save-button {
+  width: 100%;
+}
+
+.coin-scan-params {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.coin-scan-params label {
+  grid-template-columns: 1fr;
+}
+
+.coin-scan-table-wrap {
+  overflow: auto;
+  min-height: 0;
+  border: 1px solid #2d333b;
+  border-radius: 8px;
+}
+
+.coin-scan-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.coin-scan-table th,
+.coin-scan-table td {
+  border-bottom: 1px solid #2d333b;
+  padding: 7px 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.coin-scan-table th {
+  color: #8b949e;
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+  background: #0b1017;
+}
+
+.coin-scan-table td:first-child {
+  text-align: left;
+  font-weight: 600;
+}
+
+.coin-scan-table tbody tr {
+  cursor: pointer;
+}
+
+.coin-scan-table tbody tr:hover {
+  background: #1f2937;
+}
+
+.coin-scan-table tbody tr.qualified {
+  background: rgba(74, 222, 128, 0.08);
 }

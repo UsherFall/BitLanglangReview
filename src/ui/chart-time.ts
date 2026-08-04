@@ -77,6 +77,11 @@ export function timeframeMs(timeframe: ReviewTimeframe): number {
   return map[timeframe];
 }
 
+export function formatReviewInputTime(timestamp: number): string {
+  const parts = shanghaiParts(new Date(timestamp));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+}
+
 export function formatChartTime(time: Time, timeframe: ReviewTimeframe): string {
   const date = new Date(timeToTimestamp(time));
   const parts = shanghaiParts(date);

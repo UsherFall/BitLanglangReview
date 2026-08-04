@@ -9,6 +9,7 @@ Guidance for `src/server`, the local Vite middleware and persistence layer.
 | [API Plugin](./api-plugin.md) | Adding or changing `/api/*` routes |
 | [Persistence And Imports](./persistence-and-imports.md) | Changing SQLite stores or Source Workbook import |
 | [Market Data](./market-data.md) | Changing OKX instruments, candlestick fetching, or cache behavior |
+| [Coin Scan](./coin-scan.md) | Adding or changing the 选币 scan endpoint, service, or shrink algorithm |
 
 ## Scope
 

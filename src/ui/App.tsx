@@ -2,6 +2,7 @@ import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, Crossha
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick } from '../domain/candlestick';
+import type { ScanResponse } from '../domain/coin-scan';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
@@ -10,9 +11,10 @@ import { isSameVisibleRange, shouldLoadLater, type VisibleTimeRange } from './ch
 import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
-import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { entryVisibleRange, formatChartTime, formatReviewInputTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
+import { CoinScanPanel, CoinScanResults } from './CoinScanPanel';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
@@ -52,7 +54,7 @@ const sortLabels: Record<SortField, string> = {
 };
 
 type DrawingDragTarget = 'body' | 'start' | 'end';
-type ReviewMode = 'trade' | 'freeReplay';
+type ReviewMode = 'trade' | 'freeReplay' | 'scan';
 
 const SIDEBAR_CONFIG_KEY = 'sidebar-config';
 const DEFAULT_SIDEBAR_WIDTH = 390;
@@ -125,6 +127,7 @@ export function App() {
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
   const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   const [freeReplaySessions, setFreeReplaySessions] = useState<FreeReplaySession[]>([]);
+  const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   // Keys of sessions deleted since the last matching save. Guards against an
@@ -342,6 +345,25 @@ export function App() {
     setPaperTrading(initialPaperTradingSession());
   }
 
+  function openScanReplay(instrument: string, replayTimeframe: ReviewTimeframe, lastCandleTime: number) {
+    const startTime = formatReviewInputTime(lastCandleTime);
+    const progressTime = freeReplayProgressTimeForStart(startTime);
+    const cursorTime = freeReplayCursorTimeForProgress(progressTime, replayTimeframe);
+    setTimeframe(replayTimeframe);
+    setFreeReplay({
+      instrument,
+      startTime,
+      dataAnchorTime: startTime,
+      startProgressTime: progressTime,
+      progressTime,
+      startCursorTime: cursorTime,
+      cursorTime,
+    });
+    setFreeReplayCandles([]);
+    setPaperTrading(initialPaperTradingSession());
+    setReviewMode('freeReplay');
+  }
+
   async function handleDeleteSession(instrument: string, startTime: string) {
     const key = sessionKey(instrument, startTime);
     // Mark the key as deleted before the DELETE resolves so an in-flight PUT
@@ -456,6 +478,7 @@ export function App() {
         <div className="mode-switch">
           <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>Trade Review</button>
           <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>Free Replay</button>
+          <button className={reviewMode === 'scan' ? 'selected' : ''} onClick={() => setReviewMode('scan')}>选币</button>
         </div>
         {reviewMode === 'trade' ? (
           <>
@@ -556,6 +579,8 @@ export function App() {
           ))}
         </div>
           </>
+        ) : reviewMode === 'scan' ? (
+          <CoinScanPanel onScanned={setScanResult} />
         ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
         )}
@@ -604,6 +629,8 @@ export function App() {
           </>
         ) : (
           <div className="empty-state">Choose an instrument and start time to begin Free Replay</div>
+        ) : reviewMode === 'scan' ? (
+          <CoinScanResults result={scanResult} onOpenReplay={openScanReplay} />
         ) : selectedTrade ? (
           <>
             <header className="detail-header">
