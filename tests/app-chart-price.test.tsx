@@ -86,7 +86,7 @@ function priceFormatterAt(index: number): unknown {
 }
 
 function makeFetch() {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith('/api/trades')) {
       return new Response(JSON.stringify({
         trades: [makeTrade()],
@@ -95,6 +95,11 @@ function makeFetch() {
       }));
     }
     if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['LUNA-USDT-SWAP'] }));
+    if (url.startsWith('/api/free-replay/sessions')) {
+      if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+      if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+      return new Response(JSON.stringify({ sessions: [] }));
+    }
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
     if (url.startsWith('/api/candles')) {
       return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T10:00:00+08:00')] }));

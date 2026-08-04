@@ -13,7 +13,7 @@ import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMod
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
-import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
+import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
   cancelPendingOrder,
@@ -103,6 +103,15 @@ function isNarrowLayout(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_LAYOUT_QUERY).matches;
 }
 
+function upsertSession(sessions: FreeReplaySession[], saved: FreeReplaySession): FreeReplaySession[] {
+  return [...sessions.filter((session) => !(session.instrument === saved.instrument && session.startTime === saved.startTime)), saved]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function sessionKey(instrument: string, startTime: string): string {
+  return `${instrument}:${startTime}`;
+}
+
 export function App() {
   const [filters, setFilters] = useState<ReviewQueueOptions>({ sortField: 'entryTime', sortDirection: 'asc' });
   const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [] });
@@ -115,6 +124,13 @@ export function App() {
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
   const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
+  const [freeReplaySessions, setFreeReplaySessions] = useState<FreeReplaySession[]>([]);
+  const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  // Keys of sessions deleted since the last matching save. Guards against an
+  // already in-flight auto-save PUT response resurrecting a deleted row in the
+  // local list (stale freeReplaySessions).
+  const deletedSessionKeysRef = useRef<Set<string>>(new Set());
   const selectedTrade = data.trades.find((trade) => trade.id === selectedId) ?? data.trades[0] ?? null;
   const progress = reviewProgress(data.trades, selectedTrade?.id ?? '');
   const nextUnreviewedTrade = firstUnreviewedTrade(data.trades);
@@ -148,6 +164,65 @@ export function App() {
         setSelectedId((current) => (next.trades.some((trade) => trade.id === current) ? current : next.trades[0]?.id ?? ''));
       });
   }, [filters]);
+
+  useEffect(() => {
+    fetch('/api/free-replay/sessions')
+      .then((response) => response.json())
+      .then(({ sessions }: { sessions?: FreeReplaySession[] }) => setFreeReplaySessions(sessions ?? []));
+  }, []);
+
+  // Trailing-debounced auto-save: any reveal, rewind, timeframe switch, or
+  // paper trading change persists the active Free Replay session.
+  useEffect(() => {
+    if (reviewMode !== 'freeReplay' || !freeReplay) {
+      // Leaving Free Replay (or stopping it) flushes any still-pending save so
+      // a quick mode switch does not drop the latest action.
+      const pending = pendingSaveRef.current;
+      if (pending) {
+        pendingSaveRef.current = null;
+        if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        void persistFreeReplaySession(pending);
+      }
+      return;
+    }
+    const payload: FreeReplaySessionPayload = {
+      instrument: freeReplay.instrument,
+      startTime: freeReplay.startTime,
+      dataAnchorTime: freeReplay.dataAnchorTime,
+      startCursorTime: freeReplay.startCursorTime,
+      startProgressTime: freeReplay.startProgressTime,
+      progressTime: freeReplay.progressTime,
+      cursorTime: freeReplay.cursorTime,
+      timeframe,
+      paperTrading,
+    };
+    pendingSaveRef.current = payload;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      void persistFreeReplaySession(payload);
+    }, 500);
+    return () => {
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    };
+  }, [freeReplay, paperTrading, timeframe, reviewMode]);
+
+  useEffect(() => {
+    const flush = () => {
+      const payload = pendingSaveRef.current;
+      if (!payload) return;
+      fetch('/api/free-replay/sessions', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, []);
 
   function handleReviewSaved(review: TradeReview) {
     setData((current) => ({
@@ -215,6 +290,81 @@ export function App() {
       startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe),
       cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe),
     } : current);
+  }
+
+  async function persistFreeReplaySession(payload: FreeReplaySessionPayload) {
+    const key = sessionKey(payload.instrument, payload.startTime);
+    if (deletedSessionKeysRef.current.has(key)) return;
+    const saved = (await fetch('/api/free-replay/sessions', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).then((response) => response.json())) as FreeReplaySession;
+    if (deletedSessionKeysRef.current.has(key)) return;
+    setFreeReplaySessions((current) => upsertSession(current, saved));
+  }
+
+  function restoreFreeReplaySession(payload: FreeReplaySessionPayload) {
+    // Flush the outgoing session's still-pending save before switching so its
+    // last reveal/rewind/paper-trading action is not dropped by the debounce.
+    const pending = pendingSaveRef.current;
+    if (pending) {
+      pendingSaveRef.current = null;
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      void persistFreeReplaySession(pending);
+    }
+    setFreeReplay({
+      instrument: payload.instrument,
+      startTime: payload.startTime,
+      dataAnchorTime: payload.dataAnchorTime,
+      startCursorTime: payload.startCursorTime,
+      startProgressTime: payload.startProgressTime,
+      progressTime: payload.progressTime,
+      cursorTime: payload.cursorTime,
+    });
+    setTimeframe(payload.timeframe);
+    setPaperTrading(payload.paperTrading);
+    setFreeReplayCandles([]);
+  }
+
+  function handleFreeReplayStart(next: FreeReplayStart) {
+    const existing = freeReplaySessions.find((session) => session.instrument === next.instrument && session.startTime === next.startTime);
+    if (existing) {
+      restoreFreeReplaySession(existing);
+      return;
+    }
+    // A deleted key can be legitimately re-created by a fresh start; clear the
+    // deleted marker so the auto-save PUT for the new session is not dropped.
+    deletedSessionKeysRef.current.delete(sessionKey(next.instrument, next.startTime));
+    setFreeReplay(next);
+    setFreeReplayCandles([]);
+    setPaperTrading(initialPaperTradingSession());
+  }
+
+  async function handleDeleteSession(instrument: string, startTime: string) {
+    const key = sessionKey(instrument, startTime);
+    // Mark the key as deleted before the DELETE resolves so an in-flight PUT
+    // response for the same session cannot resurrect it in the local list.
+    deletedSessionKeysRef.current.add(key);
+    if (pendingSaveRef.current && pendingSaveRef.current.instrument === instrument && pendingSaveRef.current.startTime === startTime) {
+      // Deleting the session that is currently being auto-saved: cancel the
+      // pending PUT so the deleted row is not resurrected.
+      pendingSaveRef.current = null;
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    try {
+      await fetch(`/api/free-replay/sessions?${new URLSearchParams({ instrument, startTime })}`, { method: 'DELETE' });
+    } catch (error) {
+      deletedSessionKeysRef.current.delete(key);
+      throw error;
+    }
+    setFreeReplaySessions((current) => current.filter((session) => !(session.instrument === instrument && session.startTime === startTime)));
+    if (freeReplay && freeReplay.instrument === instrument && freeReplay.startTime === startTime) {
+      setFreeReplay(null);
+      setPaperTrading(initialPaperTradingSession());
+    }
   }
 
   function setFilterCollapsed(filterCollapsed: boolean) {
@@ -298,6 +448,11 @@ export function App() {
           </div>
         ) : (
           <>
+        <div className="sidebar-header">
+          <button type="button" className="sidebar-collapse" aria-label="收起侧边栏" title="收起侧边栏" onClick={() => setSidebarCollapsed(true)}>
+            <ChevronLeft size={16} />
+          </button>
+        </div>
         <div className="mode-switch">
           <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>Trade Review</button>
           <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>Free Replay</button>
@@ -401,7 +556,7 @@ export function App() {
           ))}
         </div>
           </>
-        ) : <FreeReplayPanel timeframe={timeframe} onStart={(next) => { setFreeReplay(next); setFreeReplayCandles([]); setPaperTrading(initialPaperTradingSession()); }} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} />}
+        ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
         )}
       </aside>

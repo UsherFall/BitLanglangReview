@@ -8,6 +8,7 @@ import { CandlestickService } from './candlestick-service';
 import { CandlestickStore } from './candlestick-store';
 import { DrawingStore } from './drawing-store';
 import { freeReplayInstrumentPayload } from './free-replay-instruments';
+import { FreeReplaySessionStore, type SaveFreeReplaySessionInput } from './free-replay-session-store';
 import { OkxInstrumentService } from './okx-instrument-service';
 import { ReviewStore } from './review-store';
 import { loadTradesFromWorkbook } from './trade-import';
@@ -24,6 +25,7 @@ export function tradingReviewApiPlugin(): Plugin {
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
       const candleService = new CandlestickService(candleStore);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
+      const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
       const instrumentService = new OkxInstrumentService();
 
       server.middlewares.use('/api/trades', async (req, res) => {
@@ -90,6 +92,30 @@ export function tradingReviewApiPlugin(): Plugin {
           const id = url.searchParams.get('id') ?? '';
           if (!id) return send(res, 400, { error: 'id is required' });
           drawingStore.deleteDrawing(id);
+          return send(res, 200, { ok: true });
+        }
+        return send(res, 405, { error: 'Method not allowed' });
+      });
+
+      server.middlewares.use('/api/free-replay/sessions', async (req, res) => {
+        const url = new URL(req.url ?? '', 'http://local');
+        if (req.method === 'GET') {
+          return send(res, 200, { sessions: freeReplaySessionStore.listSessions() });
+        }
+        if (req.method === 'PUT') {
+          const parsed = JSON.parse(await readBody(req) || '{}') as SaveFreeReplaySessionInput;
+          if (!parsed.instrument || !parsed.startTime || !reviewTimeframes.includes(parsed.timeframe as ReviewTimeframe)) {
+            return send(res, 400, { error: 'instrument, startTime, and a valid timeframe are required' });
+          }
+          return send(res, 200, freeReplaySessionStore.saveSession(parsed));
+        }
+        if (req.method === 'DELETE') {
+          const instrument = url.searchParams.get('instrument') ?? '';
+          const startTime = url.searchParams.get('startTime') ?? '';
+          if (!instrument || !startTime) {
+            return send(res, 400, { error: 'instrument and startTime are required' });
+          }
+          freeReplaySessionStore.deleteSession(instrument, startTime);
           return send(res, 200, { ok: true });
         }
         return send(res, 405, { error: 'Method not allowed' });

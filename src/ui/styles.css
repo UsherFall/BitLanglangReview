@@ -61,6 +61,29 @@ textarea {
   padding: 8px 5px;
 }
 
+.sidebar-header {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 6px 0;
+}
+
+.sidebar-collapse {
+  border: 0;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+
+.sidebar-collapse:hover {
+  color: #ffffff;
+  background: #1f2937;
+}
+
 .sidebar-expand,
 .resize-handle {
   border: 0;
@@ -229,6 +252,102 @@ body.sidebar-resizing {
 
 .panel-status {
   font-size: 13px;
+}
+
+.free-replay-history {
+  border-top: 1px solid #2d333b;
+  display: grid;
+  gap: 4px;
+}
+
+.history-header {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #d6dee7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.history-header:hover {
+  background: #111827;
+}
+
+.history-list {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.history-empty {
+  font-size: 13px;
+  color: #8b949e;
+  margin: 0;
+  padding: 4px 8px;
+}
+
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #0d1117;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.history-row:hover {
+  background: #1f2937;
+  border-color: #4b5563;
+}
+
+.history-row.active {
+  border-color: #3b82f6;
+  background: #161b22;
+}
+
+.history-row-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  color: #d6dee7;
+}
+
+.history-row-main strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-time {
+  color: #8b949e;
+}
+
+.history-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: #8b949e;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.history-delete:hover {
+  background: #303844;
+  color: #f87171;
 }
 
 .search-block,

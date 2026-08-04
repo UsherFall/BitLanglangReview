@@ -66,9 +66,14 @@ describe('App Free Replay', () => {
   });
 
   it('keeps the workspace rendered after starting Free Replay', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -96,10 +101,40 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
   });
 
-  it('supports a paper trading market open and close during Free Replay', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  it('collapses the whole sidebar via the explicit collapse button', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T10:00:00+08:00')] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByLabelText('收起侧边栏'));
+    expect(container.querySelector('.sidebar.collapsed')).not.toBeNull();
+    expect(screen.queryByLabelText('收起侧边栏')).not.toBeInTheDocument();
+
+    window.localStorage.clear();
+  });
+
+  it('supports a paper trading market open and close during Free Replay', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -131,9 +166,14 @@ describe('App Free Replay', () => {
   });
 
   it('scrolls the Free Replay viewport without changing zoom when advancing the cursor', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -167,9 +207,14 @@ describe('App Free Replay', () => {
   });
 
   it('starts Free Replay with the cursor visible and right-side padding', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -199,9 +244,14 @@ describe('App Free Replay', () => {
   });
 
   it('toggles Free Replay paper trade entry and exit markers', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -247,9 +297,14 @@ describe('App Free Replay', () => {
   });
 
   it('sets a stop loss and closes automatically when the next revealed candle touches it', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -285,9 +340,14 @@ describe('App Free Replay', () => {
   });
 
   it('shows Free Replay hover percentage from the latest revealed candle close', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         return new Response(JSON.stringify({
@@ -320,9 +380,14 @@ describe('App Free Replay', () => {
   });
 
   it('toggles log scale and resets the Free Replay price scale to normal autoscale', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:55:00+08:00')] }));
       return new Response(JSON.stringify({}));
@@ -346,9 +411,14 @@ describe('App Free Replay', () => {
   });
 
   it('remaps Free Replay paper trade markers after switching timeframe', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         const timeframe = new URL(`http://localhost${url}`).searchParams.get('timeframe');
@@ -399,9 +469,14 @@ describe('App Free Replay', () => {
 
   it('keeps Free Replay progress across large timeframe switches without revealing unfinished candles', async () => {
     const candleRequests: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         candleRequests.push(url);
@@ -475,9 +550,14 @@ describe('App Free Replay', () => {
 
   it('backfills earlier history after switching timeframe with a preserved zoomed-out viewport', async () => {
     const candleRequests: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         candleRequests.push(url);
@@ -533,9 +613,14 @@ describe('App Free Replay', () => {
 
   it('loads earlier history on left scroll without restoring an old visible time range', async () => {
     const candleRequests: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
       if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
       if (url.startsWith('/api/candles')) {
         candleRequests.push(url);
@@ -570,6 +655,208 @@ describe('App Free Replay', () => {
 
     expect(chartMocks.setVisibleRange).not.toHaveBeenCalled();
   });
+
+  it('auto-saves the session with the advanced cursor after a reveal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+            makeCandle('2024-05-21T10:05:00+08:00'),
+            makeCandle('2024-05-21T10:10:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next candle' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+
+    const revealedCursor = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
+    await waitFor(() => {
+      const bodies = sessionPutBodies();
+      expect(bodies.length).toBeGreaterThan(0);
+      expect(bodies.at(-1)?.cursorTime).toBe(revealedCursor);
+      expect(bodies.at(-1)?.timeframe).toBe('5m');
+    });
+  });
+
+  it('auto-saves the paper trading session after a paper trading action', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+            makeCandle('2024-05-21T10:05:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
+
+    await waitFor(() => {
+      const bodies = sessionPutBodies();
+      expect(bodies.at(-1)?.paperTrading).toMatchObject({ active: true, startedAtCursorTime: expect.any(Number) });
+    });
+  });
+
+  it('restores a saved session from history with timeframe, cursor, and paper trading state', async () => {
+    const seeded = [makeSeededSession()];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: seeded }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        const timeframe = new URL(`http://localhost${url}`).searchParams.get('timeframe');
+        const candles = timeframe === '15m'
+          ? [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+            ]
+          : [makeCandle('2024-05-21T09:55:00+08:00')];
+        return new Response(JSON.stringify({ candles }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+
+    fireEvent.click(screen.getByRole('button', { name: /^BTC-USDT-SWAP/ }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '15m' }).className).toContain('selected');
+    expect(screen.getByLabelText('Market open')).toBeInTheDocument();
+
+    const restoredCursor = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
+    await waitFor(() => {
+      const bodies = sessionPutBodies();
+      expect(bodies.at(-1)?.cursorTime).toBe(restoredCursor);
+      expect(bodies.at(-1)?.timeframe).toBe('15m');
+    });
+  });
+
+  it('resumes an existing session when starting the same instrument and start time', async () => {
+    const seeded = [makeSeededSession()];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: seeded }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        const timeframe = new URL(`http://localhost${url}`).searchParams.get('timeframe');
+        const candles = timeframe === '15m'
+          ? [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+            ]
+          : [makeCandle('2024-05-21T09:55:00+08:00')];
+        return new Response(JSON.stringify({ candles }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '15m' }).className).toContain('selected');
+    expect(screen.getByLabelText('Market open')).toBeInTheDocument();
+  });
+
+  it('deletes the active session, stops replay, and does not re-save it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+            makeCandle('2024-05-21T10:05:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next candle' })).toBeInTheDocument());
+
+    await waitFor(() => expect(screen.getByLabelText('Delete session BTC-USDT-SWAP 2024-05-21 10:00')).toBeInTheDocument());
+
+    const beforeDelete = sessionPutBodies().length;
+    fireEvent.click(screen.getByLabelText('Delete session BTC-USDT-SWAP 2024-05-21 10:00'));
+
+    await waitFor(() => expect(screen.getByText('Choose an instrument and start time to begin Free Replay')).toBeInTheDocument());
+    expect(screen.queryByLabelText('Start paper trading')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Delete session BTC-USDT-SWAP 2024-05-21 10:00')).not.toBeInTheDocument();
+
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+    expect(sessionPutBodies().length).toBe(beforeDelete);
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {
@@ -584,4 +871,36 @@ function makeCandle(time: string, overrides = {}) {
     volume: 10,
     ...overrides,
   };
+}
+
+function makeSeededSession() {
+  const cursorTime = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
+  return {
+    instrument: 'BTC-USDT-SWAP',
+    startTime: '2024-05-21 10:00',
+    dataAnchorTime: '2024-05-21 10:00',
+    startCursorTime: Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+    startProgressTime: Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+    progressTime: Date.parse('2024-05-21T10:10:00+08:00') / 1000,
+    cursorTime,
+    timeframe: '15m',
+    paperTrading: {
+      active: true,
+      startedAtCursorTime: cursorTime,
+      nextId: 1,
+      pendingEntry: null,
+      pendingExit: null,
+      pendingStopLoss: null,
+      position: null,
+      trades: [],
+    },
+    updatedAt: '2024-05-21T12:00:00+08:00',
+  };
+}
+
+function sessionPutBodies(): Array<Record<string, unknown>> {
+  const fetchMock = fetch as unknown as { mock: { calls: Array<[unknown, RequestInit | undefined]> } };
+  return fetchMock.mock.calls
+    .filter(([, callInit]) => callInit?.method === 'PUT')
+    .map(([, callInit]) => JSON.parse(String(callInit?.body)) as Record<string, unknown>);
 }
