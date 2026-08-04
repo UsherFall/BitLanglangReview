@@ -22,6 +22,7 @@ Server data is fetched through these routes from `src/server/app-plugin.ts`:
 - `/api/candles` returns cached/fetched candlesticks for initial, earlier, or later modes.
 - `/api/drawings` lists, saves, and deletes instrument-level chart drawings.
 - `/api/free-replay/instruments` returns OKX SWAP instruments.
+- `/api/free-replay/sessions` lists saved Free Replay sessions; PUT upserts one on `(instrument, startTime)`, DELETE removes one.
 
 After saving a review, update local `data` state in place like `handleReviewSaved` does: merge new tags into the tag list and replace only the matching trade review.
 
@@ -35,8 +36,8 @@ Keep derived state close to the consumer and prefer pure helpers:
 
 ## Domain Rules
 
-Review Progress counts a trade as reviewed only when it has at least one Review Tag. Review Notes alone do not mark a trade as reviewed. Free Replay session state is intentionally temporary; only chart drawings are saved across sessions.
+Review Progress counts a trade as reviewed only when it has at least one Review Tag. Review Notes alone do not mark a trade as reviewed. Free Replay sessions auto-save to SQLite and restore the reveal cursor and paper trading state; starting the same instrument + start time resumes the saved session instead of creating a new one.
 
 ## Common Mistakes
 
-Do not duplicate queue filtering or sorting in the frontend. The authoritative queue comes from `buildReviewQueue` through `/api/trades`. Do not persist Free Replay cursor/session state unless the product requirement changes. Do not mutate candle arrays in place; merge by timestamp and sort before rendering.
+Do not duplicate queue filtering or sorting in the frontend. The authoritative queue comes from `buildReviewQueue` through `/api/trades`. Keep Free Replay auto-save additive: the auto-save effect must never PUT on first render or on the restore path, and a deleted session must not be re-added by an in-flight save response. Do not mutate candle arrays in place; merge by timestamp and sort before rendering.

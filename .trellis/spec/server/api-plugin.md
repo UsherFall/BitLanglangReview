@@ -9,6 +9,7 @@ Current routes:
 - `GET /api/trades` builds the Review Queue and returns `trades`, source workbook `instruments`, and saved `tags`.
 - `POST /api/reviews` saves tags and one note for a Trade.
 - `GET /api/free-replay/instruments` returns OKX SWAP instruments.
+- `GET /api/free-replay/sessions` lists saved Free Replay sessions (`updated_at` desc); `PUT` upserts one keyed by `instrument` + `startTime`; `DELETE` removes one keyed by `instrument` + `startTime`.
 - `GET /api/candles` returns initial, earlier, or later candlesticks.
 - `GET /api/drawings`, `POST /api/drawings`, and `DELETE /api/drawings` manage instrument-level Chart Drawings.
 

@@ -12,6 +12,12 @@ Keep tag cleanup in the store boundary. `uniqueCleanTags` trims tags, removes em
 
 Use `tests/drawing-store.test.ts` when changing drawing save/list/delete behavior.
 
+## Free Replay Session Store
+
+`src/server/free-replay-session-store.ts` persists Free Replay sessions in `free_replay_sessions`. It enables SQLite WAL mode and shares the same `data/review.sqlite` file as the other stores. Upsert key is `(instrument, start_time)`; the payload is stored as opaque JSON in `paper_trading_json`, with `updated_at` written by the server so history sorts deterministically.
+
+When the product requirement is to save Free Replay state, sessions keyed by the same instrument + start time overwrite rather than duplicate. Use `tests/free-replay-session-store.test.ts` when changing save/list/delete behavior.
+
 ## Candlestick Store
 
 `src/server/candlestick-store.ts` is the local Candlestick Cache. It is not the authoritative market archive; OKX remains the Market Data Source. Cache keys must include Instrument, Review Timeframe, and timestamp.

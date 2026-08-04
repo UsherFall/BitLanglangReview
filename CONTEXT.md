@@ -125,8 +125,8 @@ The chart content shown during a **Free Replay**: candlesticks and instrument-le
 _Avoid_: trade hints, entry marker, exit marker
 
 **Free Replay Session**:
-The temporary in-page state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, and **Free Replay Cursor**. The first version does not save free replay sessions between page visits.
-_Avoid_: saved replay, review note, journal entry
+The saved state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, **Free Replay Cursor**, and paper trading session. Free Replay sessions auto-save as history and can be restored so the reviewer resumes from where they left off.
+_Avoid_: journal entry, review note
 
 **Free Replay Start Time**:
 The reviewer-chosen local date and minute where a **Free Replay** begins. The start time is placed on the containing **Candlestick** in the active **Review Timeframe**.
@@ -204,9 +204,9 @@ Reviewer: If I press the left arrow, hide the latest candlestick and go back one
 
 Developer: Free replay rewind removes only the latest revealed candlestick from view and cannot rewind before the starting candlestick.
 
-Reviewer: If I close the page, the free replay progress does not need to come back.
+Reviewer: If I close the page, can I continue the same free replay later?
 
-Developer: Free replay session state is temporary; only chart drawings remain saved across sessions.
+Developer: Free replay sessions auto-save as history and can be restored, including the reveal cursor and paper trading state, so the review continues where it left off.
 
 Reviewer: I want to choose the free replay start time from a picker.
 
