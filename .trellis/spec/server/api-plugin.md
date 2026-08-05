@@ -13,6 +13,13 @@ Current routes:
 - `GET /api/candles` returns initial, earlier, or later candlesticks.
 - `GET /api/scan` runs a coin scan (选币). V1 supports only `method=shrink`; full contract in `coin-scan.md`.
 - `GET /api/drawings`, `POST /api/drawings`, and `DELETE /api/drawings` manage instrument-level Chart Drawings.
+- `GET /api/alerts` returns `{ alerts, config: { notifierConfigured, monitorIntervalMs } }`; `POST /api/alerts` creates a price alert; `DELETE /api/alerts?id=…` deletes one; `POST /api/alerts/reactivate?id=…` reactivates a triggered alert. Full contract in `price-alert.md` (domain) and the Alert Store section of `persistence-and-imports.md`.
+
+## Gotcha: Connect middleware strips the mount prefix
+
+`/api/alerts` is mounted via connect middleware (Vite's `configureServer`), which strips the mount prefix from `req.url`. Inside the handler the pathname is therefore `/reactivate`, **not** `/api/alerts/reactivate`. Checking `url.pathname === '/api/alerts/reactivate'` is always false and the request falls through to the create-alert branch, returning `400` instead of `200`. Match sub-route pathnames against the stripped form (`url.pathname === '/reactivate'`).
+
+This bug shipped in the initial watchlist-notify implementation and was only caught by a live dev-server request after unit tests all passed — route behavior has no automated HTTP-level test (see Tests). When adding a sub-route under a mounted prefix, verify the stripped pathname.
 
 ## Request Parsing
 

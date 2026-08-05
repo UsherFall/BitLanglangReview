@@ -27,9 +27,9 @@ Coverage is in `tests/candlestick-cache.test.ts`.
 
 Do not preload all history. The product contract is On-Demand Candlestick Loading with cache reuse.
 
-## OKX Tickers For Coin Scan
+## OKX Tickers (Shared)
 
-`src/server/coin-scan-service.ts` calls `GET /api/v5/market/tickers?instType=SWAP` once per scan to rank the universe. It filters to instruments whose `instId` ends with `-USDT-SWAP`, applies the `minQuoteVolume24h` floor, sorts by 24h quote-volume in USDT descending, and takes the top `topN` before fetching candlesticks.
+`src/server/okx-tickers.ts` owns the single full-market ticker fetch: `fetchOkxTickers(fetchJson)` calls `GET /api/v5/market/tickers?instType=SWAP` once, filters to instruments whose `instId` ends with `-USDT-SWAP`, sorts by 24h quote-volume in USDT descending, and returns `OkxTicker[]`. It is shared by the coin scan (`CoinScanService.scanShrink`, which applies the `minQuoteVolume24h` floor and takes the top `topN`) and by `AlertMonitor.tick`, which looks up one live price per active alert. Keep it a pure module function; do not re-embed the fetch in service or monitor classes.
 
 OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins), not USDT. The 24h quote-volume in USDT is therefore `volCcy24h * last`; the scan uses that product for both ranking and the liquidity floor. `lastPrice` comes from ticker `last`; `change24h` is `(last - open24h) / open24h * 100`.
 

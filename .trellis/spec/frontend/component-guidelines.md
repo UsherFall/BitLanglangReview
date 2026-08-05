@@ -46,6 +46,16 @@ After a Free Replay timeframe switch, the preserved visible candle count can be 
 
 Free Replay must keep `progressTime` separate from `cursorTime`. Switching Review Timeframes preserves `progressTime` and recomputes the derived cursor; it must not floor and store the old cursor as the new true progress. For example, `progressTime = 10:35` maps to `10:30` on `5m` and `04:00` on `4H` so the unfinished `08:00-12:00` candle is not shown.
 
+## Coin Scan Panel Alert Area
+
+`CoinScanPanel.tsx` owns the 选币 scan UI plus the price-alert area. Contract:
+
+- Each scan result row has a 「设警报」 button that pre-fills the manual alert form with that instrument and raises focus into the alert area (callback to the panel's form state, not a separate popup).
+- The alert area = manual add form (instrument + direction dropdown 上破/下破 + target price) + alert list, each row showing 币 / 方向 / 目标价 / 状态 (已触发) with 重新启用 and 删除 actions.
+- Notification config status is read from `GET /api/alerts` → `config.notifierConfigured` (已配置 ✓ / 未配置 ✗) and `config.monitorIntervalMs`.
+- CRUD goes through `/api/alerts`; after each mutation re-fetch the list. Direction labels map `above` → 上破, `below` → 下破.
+- Styles reuse the `.coin-scan-*` naming and color palette in `src/ui/styles.css`.
+
 ## Styling And Accessibility
 
 Use existing class names and extend `src/ui/styles.css`. Buttons that contain icons should use `lucide-react`, as shown by `Save`, `ChevronDown`, `ChevronUp`, `Minus`, `Slash`, and `Eraser`.

@@ -29,6 +29,8 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 
 Non-numeric params fall back to the default (see `parseScanParam`). Invalid final values → 400.
 
+> **Warning (known defect, pre-existing)**: `parseScanParam` treats an omitted param as `Number(null) === 0`, which is finite, so a missing `topN`/`window`/etc. yields `0` instead of the spec default and then trips the `400 Invalid scan parameters` guard. The UI always sends every param, so this is latent. If default-fallback for absent params matters, fix `parseScanParam` to distinguish `null` from a parsed value.
+
 ### Response (`ScanResponse`)
 
 ```ts

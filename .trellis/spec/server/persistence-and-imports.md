@@ -18,6 +18,26 @@ Use `tests/drawing-store.test.ts` when changing drawing save/list/delete behavio
 
 When the product requirement is to save Free Replay state, sessions keyed by the same instrument + start time overwrite rather than duplicate. Use `tests/free-replay-session-store.test.ts` when changing save/list/delete behavior.
 
+## Alert Store
+
+`src/server/alert-store.ts` persists price alerts in the `price_alerts` table. It enables SQLite WAL mode and shares the same `data/review.sqlite` file as the other stores.
+
+Schema:
+
+```sql
+create table if not exists price_alerts (
+  id           integer primary key autoincrement,
+  instrument   text    not null,
+  direction    text    not null,   -- 'above' | 'below'
+  target_price real    not null,
+  status       text    not null default 'active',  -- 'active' | 'triggered'
+  created_at   text    not null,
+  triggered_at text
+);
+```
+
+Expose `listAlerts` / `saveAlert` / `deleteAlert` / `markTriggered` / `reactivate`. Status flow is one-way forward on trigger (`active` → `triggered`, setting `triggered_at`); `reactivate` resets status to `active` and clears `triggered_at`. Use `tests/alert-store.test.ts` (temporary SQLite file, cleaned up after) when changing alert persistence. The table has no foreign keys and is owned entirely by this store.
+
 ## Candlestick Store
 
 `src/server/candlestick-store.ts` is the local Candlestick Cache. It is not the authoritative market archive; OKX remains the Market Data Source. Cache keys must include Instrument, Review Timeframe, and timestamp.
