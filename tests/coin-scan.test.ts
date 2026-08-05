@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
-import { computeQuietMetrics, DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO } from '../src/domain/coin-scan';
+import {
+  computeQuietMetrics,
+  DEFAULT_BOX_WINDOW,
+  DEFAULT_MAX_BOX_RATIO,
+  DEFAULT_MAX_COMPRESSION,
+  DEFAULT_MAX_LATEST_TREND,
+  DEFAULT_TREND_WINDOW,
+} from '../src/domain/coin-scan';
 
 // amplitude = (high - low) / low, controlled by the `amplitude` argument.
 function makeCandle(iso: string, volume: number, amplitude: number): Candlestick {
@@ -40,8 +47,9 @@ function iso(offset: number): string {
 }
 
 // Params for the small (4-candle) ratio tests: boxWindow is lowered so the few
-// candles still satisfy the box-window history guard.
-const params = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, maxBoxRatio: 0.9 };
+// candles still satisfy the box-window history guard; trendWindow is lowered to
+// 2 so the latest-trend windows also fit in 4 candles.
+const params = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, maxBoxRatio: 0.9, trendWindow: 2 };
 const t = [
   '2024-05-21T00:00:00+08:00',
   '2024-05-21T00:05:00+08:00',
@@ -91,8 +99,8 @@ describe('Coin Scan quiet-consolidation metrics', () => {
     ]), params)).toBeNull();
   });
 
-  it('returns null with fewer than boxWindow candlesticks even when volume ratios exist', () => {
-    // count = 6 >= window + consecutive (4) but < boxWindow (12).
+  it('returns null with fewer than 2 * boxWindow candlesticks even when volume ratios exist', () => {
+    // count = 6 >= window + consecutive (4) but < 2 * boxWindow (24).
     const many = Array.from({ length: 6 }, (_, i) => [iso(i), 100, 0.005] as [string, number, number]);
     expect(computeQuietMetrics(candles(many), { ...params, boxWindow: 12 })).toBeNull();
   });
@@ -139,10 +147,14 @@ describe('Coin Scan quiet-consolidation metrics', () => {
 });
 
 describe('Coin Scan boxTightness (v2)', () => {
-  // A 16-bar suite: 4 pre-box bars (volume 100, `preAmplitude`) followed by 12
-  // box bars. The box bars alternate lean-low / lean-high so their union spans
-  // [100 - band/2, 100 + band/2] and each bar spans `span`. The trailing 3 box
-  // bars (the `consecutive` streak) drop volume to 30 unless shrink is false.
+  // A 36-bar suite: 24 pre-box bars (volume 100, `preAmplitude`) followed by 12
+  // box bars. The 24 pre-box bars cover the prior compression window (the
+  // boxWindow bars right before the trailing box), and their default amplitude
+  // (2%) is higher than the box span (0.5%), so the suite's compression < 1 and
+  // a tight box qualifies under DEFAULT_MAX_COMPRESSION. The box bars alternate
+  // lean-low / lean-high so their union spans [100 - band/2, 100 + band/2] and
+  // each bar spans `span`. The trailing 3 box bars (the `consecutive` streak)
+  // drop volume to 30 unless shrink is false.
   function boxSuite(options: {
     band?: number;
     scale?: number;
@@ -150,10 +162,11 @@ describe('Coin Scan boxTightness (v2)', () => {
     shrink?: boolean;
     preAmplitude?: number;
   } = {}): Candlestick[] {
-    const { band = 1.5, scale = 1, lastSpan, shrink = true, preAmplitude = 0.005 } = options;
+    const { band = 1.5, scale = 1, lastSpan, shrink = true, preAmplitude = 0.02 } = options;
     const span = 0.5 * scale;
+    const preCount = 2 * 12; // 2 * boxWindow, so the prior window is fully covered
     const bars: Candlestick[] = [];
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < preCount; i += 1) {
       bars.push(makeCandle(iso(i), 100, preAmplitude * scale));
     }
     for (let i = 0; i < 12; i += 1) {
@@ -161,12 +174,15 @@ describe('Coin Scan boxTightness (v2)', () => {
       const volume = i >= 9 && shrink ? 30 : 100;
       const low = i % 2 === 0 ? 100 - (band * scale) / 2 : 100 + (band * scale) / 2 - barSpan;
       const high = low + barSpan;
-      bars.push(makeOhlc(iso(4 + i), volume, low, high, low, high));
+      bars.push(makeOhlc(iso(preCount + i), volume, low, high, low, high));
     }
     return bars;
   }
 
-  const boxParams = { ratioThreshold: 0.7, consecutive: 3, window: 3, boxWindow: 12, maxBoxRatio: 0.9 };
+  // maxLatestTrend is set permissively (1.1) so the uniform box's latestTrend ≈ 1.0
+  // does not interfere: this block isolates the boxTightness gate. The default 0.9
+  // rejects a uniform box, which is the intended latestTrend behavior.
+  const boxParams = { ratioThreshold: 0.7, consecutive: 3, window: 3, boxWindow: 12, maxBoxRatio: 0.9, maxLatestTrend: 1.1 };
 
   it('qualifies a real box: boxTightness under maxBoxRatio', () => {
     const result = computeQuietMetrics(boxSuite({}), boxParams);
@@ -241,16 +257,259 @@ describe('Coin Scan boxTightness (v2)', () => {
     expect(result!.qualified).toBe(true);
   });
 
-  it('falls back to DEFAULT_BOX_WINDOW and DEFAULT_MAX_BOX_RATIO when omitted', () => {
+  it('falls back to DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO, and DEFAULT_MAX_COMPRESSION when omitted', () => {
     const result = computeQuietMetrics(boxSuite({}), {
       ratioThreshold: 0.7,
       consecutive: 3,
       window: 3,
+      // The uniform box has latestTrend ≈ 1.0; a permissive threshold keeps this
+      // test focused on the three box defaults (the latestTrend default is covered
+      // in the v4 block).
+      maxLatestTrend: 1.1,
     });
     expect(result).not.toBeNull();
     expect(DEFAULT_BOX_WINDOW).toBe(12);
     expect(DEFAULT_MAX_BOX_RATIO).toBe(0.9);
+    expect(DEFAULT_MAX_COMPRESSION).toBe(0.8);
     expect(result!.boxTightness).toBeLessThan(DEFAULT_MAX_BOX_RATIO);
+    expect(result!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
+    expect(result!.qualified).toBe(true);
+  });
+});
+
+describe('Coin Scan volatility compression (v3)', () => {
+  // boxWindow 2 → 4 bars satisfy the 2 * boxWindow history guard. prior = bars
+  // [0, 1], recent = bars [2, 3]. The trailing two bars shrink volume so the
+  // volume gate stays green and the compression gate decides the verdict.
+  const compressionParams = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, maxBoxRatio: 0.9, maxCompression: 0.8, trendWindow: 2 };
+
+  it('qualifies when the recent mean amplitude is clearly below the prior window', () => {
+    const result = computeQuietMetrics(candles([
+      [t[0], 100, 0.02],
+      [t[1], 100, 0.02],
+      [t[2], 30, 0.006], // amp ratio 0.006 / 0.02 = 0.3
+      [t[3], 20, 0.006],
+    ]), compressionParams);
+    expect(result).not.toBeNull();
+    expect(result!.compression).toBeCloseTo(0.3);
+    expect(result!.consecutiveQuiet).toBe(2);
+    expect(result!.boxTightness).toBeLessThan(compressionParams.maxBoxRatio);
+    expect(result!.qualified).toBe(true);
+  });
+
+  it('rejects when the recent amplitude is about the same as the prior window', () => {
+    const result = computeQuietMetrics(candles([
+      [t[0], 100, 0.02],
+      [t[1], 100, 0.02],
+      [t[2], 30, 0.018], // amp ratio 0.018 / 0.02 = 0.9 > 0.8
+      [t[3], 20, 0.018],
+    ]), compressionParams);
+    expect(result).not.toBeNull();
+    expect(result!.compression).toBeCloseTo(0.9);
+    expect(result!.boxTightness).toBeLessThan(compressionParams.maxBoxRatio);
+    expect(result!.qualified).toBe(false);
+  });
+
+  it('rejects a prior-window-is-flat coin that woke up (compression LARGE_RATIO)', () => {
+    const result = computeQuietMetrics(candles([
+      [t[0], 100, 0],
+      [t[1], 100, 0],
+      [t[2], 30, 0.006],
+      [t[3], 20, 0.006],
+    ]), compressionParams);
+    expect(result).not.toBeNull();
+    expect(result!.compression).toBeGreaterThan(compressionParams.maxCompression);
+    expect(result!.qualified).toBe(false);
+  });
+
+  it('passes when both windows are flat (compression 0, volume gate carries the verdict)', () => {
+    const result = computeQuietMetrics(candles([
+      [t[0], 100, 0],
+      [t[1], 100, 0],
+      [t[2], 30, 0],
+      [t[3], 20, 0],
+    ]), compressionParams);
+    expect(result).not.toBeNull();
+    expect(result!.compression).toBe(0);
+    expect(result!.consecutiveQuiet).toBe(2);
+    expect(result!.qualified).toBe(true);
+  });
+
+  it('is scale-free: 0.5%/bar and 2%/bar compress with the same ratio', () => {
+    const small = computeQuietMetrics(candles([
+      [t[0], 100, 0.02],
+      [t[1], 100, 0.02],
+      [t[2], 30, 0.006],
+      [t[3], 20, 0.006],
+    ]), compressionParams);
+    const large = computeQuietMetrics(candles([
+      [t[0], 100, 0.08],
+      [t[1], 100, 0.08],
+      [t[2], 30, 0.024],
+      [t[3], 20, 0.024],
+    ]), compressionParams);
+    expect(small).not.toBeNull();
+    expect(large).not.toBeNull();
+    expect(small!.compression).toBeCloseTo(large!.compression);
+    expect(small!.compression).toBeCloseTo(0.3);
+    expect(large!.compression).toBeCloseTo(0.3);
+    expect(small!.qualified).toBe(true);
+    expect(large!.qualified).toBe(true);
+  });
+
+  it('rejects a box whose recent window is flat but prior window has volume (guard uses 2 * boxWindow)', () => {
+    // 3 candles only: enough for the old boxWindow-only guard but short of
+    // 2 * boxWindow, so metrics are null rather than half-computed.
+    expect(computeQuietMetrics(candles([
+      [t[0], 100, 0.02],
+      [t[1], 100, 0.02],
+      [t[2], 30, 0.006],
+    ]), compressionParams)).toBeNull();
+  });
+});
+
+describe('Coin Scan latest trend (v4)', () => {
+  // boxWindow 4 → 8 bars satisfy the 2 * boxWindow history guard. prior = bars
+  // 0..3 (compression), middle = bars 4..5, latest = bars 6..7. The trailing two
+  // bars shrink volume so the volume gate stays green; middle/latest amplitudes
+  // decide the latestTrend verdict while recent/prior amplitudes keep compression
+  // green.
+  const trendParams = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 4, maxBoxRatio: 0.9, maxCompression: 0.8, maxLatestTrend: 0.9, trendWindow: 2 };
+
+  it('qualifies when the latest window keeps narrowing against the middle window', () => {
+    const result = computeQuietMetrics(candles([
+      [iso(0), 100, 0.02],
+      [iso(1), 100, 0.02],
+      [iso(2), 100, 0.02],
+      [iso(3), 100, 0.02],
+      [iso(4), 100, 0.008], // middle
+      [iso(5), 100, 0.008],
+      [iso(6), 30, 0.0056], // latest = 0.7 × middle
+      [iso(7), 20, 0.0056],
+    ]), trendParams);
+    expect(result).not.toBeNull();
+    expect(result!.latestTrend).toBeCloseTo(0.0056 / 0.008); // 0.7
+    expect(result!.compression).toBeLessThan(trendParams.maxCompression);
+    expect(result!.boxTightness).toBeLessThan(trendParams.maxBoxRatio);
+    expect(result!.qualified).toBe(true);
+  });
+
+  it('rejects when the latest window has flattened out (latest ≈ middle)', () => {
+    const result = computeQuietMetrics(candles([
+      [iso(0), 100, 0.02],
+      [iso(1), 100, 0.02],
+      [iso(2), 100, 0.02],
+      [iso(3), 100, 0.02],
+      [iso(4), 100, 0.006], // middle
+      [iso(5), 100, 0.006],
+      [iso(6), 30, 0.00558], // latest = 0.93 × middle
+      [iso(7), 20, 0.00558],
+    ]), trendParams);
+    expect(result).not.toBeNull();
+    expect(result!.latestTrend).toBeCloseTo(0.00558 / 0.006); // 0.93
+    expect(result!.compression).toBeLessThan(trendParams.maxCompression);
+    expect(result!.boxTightness).toBeLessThan(trendParams.maxBoxRatio);
+    expect(result!.latestTrend).toBeGreaterThan(trendParams.maxLatestTrend);
+    expect(result!.qualified).toBe(false);
+  });
+
+  it('rejects when the latest window is widening (latest > middle)', () => {
+    const result = computeQuietMetrics(candles([
+      [iso(0), 100, 0.02],
+      [iso(1), 100, 0.02],
+      [iso(2), 100, 0.02],
+      [iso(3), 100, 0.02],
+      [iso(4), 100, 0.006], // middle
+      [iso(5), 100, 0.006],
+      [iso(6), 30, 0.0084], // latest = 1.4 × middle
+      [iso(7), 20, 0.0084],
+    ]), trendParams);
+    expect(result).not.toBeNull();
+    expect(result!.latestTrend).toBeCloseTo(0.0084 / 0.006); // 1.4
+    expect(result!.latestTrend).toBeGreaterThan(trendParams.maxLatestTrend);
+    expect(result!.qualified).toBe(false);
+  });
+
+  it('rejects a middle-window-is-flat coin that woke up (latestTrend LARGE_RATIO)', () => {
+    const result = computeQuietMetrics(candles([
+      [iso(0), 100, 0.02],
+      [iso(1), 100, 0.02],
+      [iso(2), 100, 0.02],
+      [iso(3), 100, 0.02],
+      [iso(4), 100, 0], // middle flat
+      [iso(5), 100, 0],
+      [iso(6), 30, 0.006], // latest active
+      [iso(7), 20, 0.006],
+    ]), trendParams);
+    expect(result).not.toBeNull();
+    expect(result!.latestTrend).toBeGreaterThanOrEqual(1e9);
+    expect(result!.qualified).toBe(false);
+  });
+
+  it('passes when both trend windows are flat (latestTrend 0, other gates carry the verdict)', () => {
+    const result = computeQuietMetrics(candles([
+      [iso(0), 100, 0],
+      [iso(1), 100, 0],
+      [iso(2), 100, 0],
+      [iso(3), 100, 0],
+      [iso(4), 100, 0],
+      [iso(5), 100, 0],
+      [iso(6), 30, 0],
+      [iso(7), 20, 0],
+    ]), trendParams);
+    expect(result).not.toBeNull();
+    expect(result!.latestTrend).toBe(0);
+    expect(result!.consecutiveQuiet).toBe(2);
+    expect(result!.qualified).toBe(true);
+  });
+
+  it('is scale-free: 0.5%/bar and 2%/bar narrow with the same latestTrend ratio', () => {
+    const small = computeQuietMetrics(candles([
+      [iso(0), 100, 0.02],
+      [iso(1), 100, 0.02],
+      [iso(2), 100, 0.02],
+      [iso(3), 100, 0.02],
+      [iso(4), 100, 0.008],
+      [iso(5), 100, 0.008],
+      [iso(6), 30, 0.0056],
+      [iso(7), 20, 0.0056],
+    ]), trendParams);
+    const large = computeQuietMetrics(candles([
+      [iso(0), 100, 0.08],
+      [iso(1), 100, 0.08],
+      [iso(2), 100, 0.08],
+      [iso(3), 100, 0.08],
+      [iso(4), 100, 0.032],
+      [iso(5), 100, 0.032],
+      [iso(6), 30, 0.0224],
+      [iso(7), 20, 0.0224],
+    ]), trendParams);
+    expect(small).not.toBeNull();
+    expect(large).not.toBeNull();
+    expect(small!.latestTrend).toBeCloseTo(large!.latestTrend);
+    expect(small!.latestTrend).toBeCloseTo(0.7);
+    expect(small!.qualified).toBe(true);
+    expect(large!.qualified).toBe(true);
+  });
+
+  it('falls back to DEFAULT_TREND_WINDOW and DEFAULT_MAX_LATEST_TREND when omitted', () => {
+    // boxWindow 4 and the default trendWindow 4 align the windows: latest = bars
+    // 4..7, middle = bars 0..3, so a recent-vs-prior amplitude 0.3 also narrows.
+    const result = computeQuietMetrics(candles([
+      [iso(0), 100, 0.02],
+      [iso(1), 100, 0.02],
+      [iso(2), 100, 0.02],
+      [iso(3), 100, 0.02],
+      [iso(4), 100, 0.006],
+      [iso(5), 100, 0.006],
+      [iso(6), 30, 0.006],
+      [iso(7), 20, 0.006],
+    ]), { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 4, maxBoxRatio: 0.9, maxCompression: 0.8 });
+    expect(result).not.toBeNull();
+    expect(DEFAULT_TREND_WINDOW).toBe(4);
+    expect(DEFAULT_MAX_LATEST_TREND).toBe(0.9);
+    expect(result!.latestTrend).toBeCloseTo(0.006 / 0.02); // 0.3
+    expect(result!.latestTrend).toBeLessThan(DEFAULT_MAX_LATEST_TREND);
     expect(result!.qualified).toBe(true);
   });
 });

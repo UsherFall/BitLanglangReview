@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
-import { DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO, scanTimeframes } from '../domain/coin-scan';
+import { DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO, DEFAULT_MAX_COMPRESSION, DEFAULT_MAX_LATEST_TREND, DEFAULT_TREND_WINDOW, scanTimeframes } from '../domain/coin-scan';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
@@ -159,6 +159,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         // them with an optional parser that maps null/empty/NaN → undefined.
         const boxWindow = parseOptionalNumber(url.searchParams.get('boxWindow'));
         const maxBoxRatio = parseOptionalNumber(url.searchParams.get('maxBoxRatio'));
+        const maxCompression = parseOptionalNumber(url.searchParams.get('maxCompression'));
+        const maxLatestTrend = parseOptionalNumber(url.searchParams.get('maxLatestTrend'));
+        const trendWindow = parseOptionalNumber(url.searchParams.get('trendWindow'));
         if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0 || minQuoteVolume24h < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
@@ -166,6 +169,15 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (maxBoxRatio !== undefined && maxBoxRatio <= 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (maxCompression !== undefined && maxCompression <= 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (maxLatestTrend !== undefined && maxLatestTrend <= 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (trendWindow !== undefined && (trendWindow < 1 || trendWindow > (boxWindow ?? DEFAULT_BOX_WINDOW))) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         try {
@@ -179,6 +191,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
             minQuoteVolume24h,
             boxWindow: boxWindow ?? DEFAULT_BOX_WINDOW,
             maxBoxRatio: maxBoxRatio ?? DEFAULT_MAX_BOX_RATIO,
+            maxCompression: maxCompression ?? DEFAULT_MAX_COMPRESSION,
+            maxLatestTrend: maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND,
+            trendWindow: trendWindow ?? DEFAULT_TREND_WINDOW,
           });
           send(res, 200, result);
         } catch (error) {

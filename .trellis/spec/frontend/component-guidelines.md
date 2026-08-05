@@ -46,10 +46,12 @@ After a Free Replay timeframe switch, the preserved visible candle count can be 
 
 Free Replay must keep `progressTime` separate from `cursorTime`. Switching Review Timeframes preserves `progressTime` and recomputes the derived cursor; it must not floor and store the old cursor as the new true progress. For example, `progressTime = 10:35` maps to `10:30` on `5m` and `04:00` on `4H` so the unfinished `08:00-12:00` candle is not shown.
 
-## Coin Scan Panel Alert Area
+## Coin Scan Panel
 
-`CoinScanPanel.tsx` owns the 选币 scan UI plus the price-alert area. Contract:
+`CoinScanPanel.tsx` owns the 选币 scan UI (parameter area + results table) plus the price-alert area. Contract:
 
+- The parameter area always sends every scan param (`topN`, `ratioThreshold`, `boxWindow`, `maxBoxRatio`, `maxCompression`, `maxLatestTrend`, `trendWindow`, `consecutive`, `window`, `minQuoteVolume24h`) as a number input, pre-filled with the current defaults (e.g. `maxCompression` prefills `0.8`, `maxLatestTrend` prefills `0.9`, `trendWindow` prefills `4`, step `0.05` for the ratio thresholds), and validates all inputs are non-empty finite numbers before scanning.
+- The results table renders one row per `ScanRow`. Columns include 量比 (`ratio`), 振幅比 (`amplitudeRatio`), 强度分 (`intensity`), 连续平静 (`consecutiveQuiet`), 箱体度 (`boxTightness`), 压缩比 (`compression`), and 收窄趋势 (`latestTrend`). The 压缩比 and 收窄趋势 columns use `formatCompression` / `formatLatestTrend`, which show `—` for the `LARGE_RATIO` flat-window sentinel (>= 1e9) and otherwise `toFixed(2)`, so the user can calibrate `maxCompression` and `maxLatestTrend` by eye. Qualified rows get the `.qualified` class.
 - Each scan result row has a 「设警报」 button that pre-fills the manual alert form with that instrument and raises focus into the alert area (callback to the panel's form state, not a separate popup).
 - The alert area = manual add form (instrument + direction dropdown 上破/下破 + target price) + alert list, each row showing 币 / 方向 / 目标价 / 状态 (已触发) with 重新启用 and 删除 actions.
 - Notification config status is read from `GET /api/alerts` → `config.notifierConfigured` (已配置 ✓ / 未配置 ✗) and `config.monitorIntervalMs`.

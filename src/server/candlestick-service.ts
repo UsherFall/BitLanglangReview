@@ -103,7 +103,7 @@ async function defaultFetchJson(url: string): Promise<unknown> {
   return response.json();
 }
 
-function timeframeMs(timeframe: ReviewTimeframe): number {
+export function timeframeMs(timeframe: ReviewTimeframe): number {
   const map: Record<ReviewTimeframe, number> = {
     '1m': 60_000,
     '5m': 5 * 60_000,

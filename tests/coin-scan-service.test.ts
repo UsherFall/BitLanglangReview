@@ -16,6 +16,16 @@ function makeCandle(timestamp: number, volume: number): Candlestick {
   };
 }
 
+const STEP = 5 * 60_000; // 5m
+const now = Date.now();
+// Start of the current (still-forming) 5m bar; the scan drops bars that have not
+// closed (timestamp + STEP > now), so only periodStart is dropped.
+const periodStart = now - (now % STEP);
+// completedBars(k, volume) is a bar that closed k periods ago.
+const completedBar = (barsBack: number, volume: number) => makeCandle(periodStart - barsBack * STEP, volume);
+// formingBar(volume) is the still-forming current bar.
+const formingBar = (volume: number) => makeCandle(periodStart, volume);
+
 const tickerPayload = {
   data: [
     { instId: 'ETH-USDT-SWAP', last: '3500', open24h: '3400', volCcy24h: '90000000' },
@@ -35,17 +45,20 @@ const params: ShrinkScanParams = {
   minQuoteVolume24h: 0,
   boxWindow: 2,
   maxBoxRatio: 0.9,
+  maxCompression: 0.8,
+  maxLatestTrend: 0.9,
+  trendWindow: 2,
 };
 
 // Five candles where the newest (forming) one has a huge volume. When it is
 // dropped before computing, the last two completed ratios stay below 0.7 and
 // the coin qualifies; when it is kept, the streak breaks.
 const fiveCandles = [
-  makeCandle(1000, 100),
-  makeCandle(2000, 100),
-  makeCandle(3000, 20), // ratio 0.2
-  makeCandle(4000, 15), // ratio 0.25
-  makeCandle(5000, 500), // forming bar, must be dropped
+  completedBar(4, 100),
+  completedBar(3, 100),
+  completedBar(2, 20), // ratio 0.2
+  completedBar(1, 15), // ratio 0.25
+  formingBar(500), // still-forming bar, must be dropped
 ];
 
 describe('CoinScanService', () => {
@@ -81,6 +94,28 @@ describe('CoinScanService', () => {
     // The response echoes the effective scan parameters.
     expect(result.params.boxWindow).toBe(2);
     expect(result.params.maxBoxRatio).toBe(0.9);
+    expect(result.params.maxCompression).toBe(0.8);
+    expect(result.params.maxLatestTrend).toBe(0.9);
+    expect(result.params.trendWindow).toBe(2);
+    // Flat candles make compression 0 and latestTrend 0 (both windows flat), so
+    // the row carries them.
+    for (const row of result.scanned) {
+      expect(row.compression).toBe(0);
+      expect(row.latestTrend).toBe(0);
+    }
+  });
+
+  it('keeps the newest completed bar when the source has no forming bar', async () => {
+    // Four completed bars, no forming bar present. Slicing the newest element
+    // unconditionally (the old behavior) dropped the newest COMPLETED bar, leaving
+    // only 3 bars → insufficient history → coin skipped. The time-based filter
+    // keeps all four, so the coin qualifies.
+    const candles = [completedBar(4, 100), completedBar(3, 100), completedBar(2, 20), completedBar(1, 15)];
+    const getCandlesticks = vi.fn(async () => candles);
+    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const result = await service.scanShrink(params);
+    expect(result.scanned.length).toBe(2);
+    for (const row of result.scanned) expect(row.qualified).toBe(true);
   });
 
   it('computes the 24h change percentage from last and open24h', async () => {
@@ -94,7 +129,7 @@ describe('CoinScanService', () => {
   });
 
   it('skips instruments without enough candle history', async () => {
-    const getCandlesticks = vi.fn(async () => [makeCandle(1000, 100), makeCandle(2000, 100)]);
+    const getCandlesticks = vi.fn(async () => [completedBar(2, 100), completedBar(1, 100)]);
     const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
     const result = await service.scanShrink(params);
     expect(result.scanned).toEqual([]);
@@ -107,11 +142,11 @@ describe('CoinScanService', () => {
       .mockResolvedValueOnce(fiveCandles) // BTC: intensity 0.225
       .mockResolvedValueOnce(
         [
-          makeCandle(1000, 100),
-          makeCandle(2000, 100),
-          makeCandle(3000, 10), // ratio 0.1
-          makeCandle(4000, 5), // ratio 0.05
-          makeCandle(5000, 500), // forming
+          completedBar(4, 100),
+          completedBar(3, 100),
+          completedBar(2, 10), // ratio 0.1
+          completedBar(1, 5), // ratio 0.05
+          formingBar(500), // still-forming, dropped
         ],
       ); // ETH: intensity 0.075
     const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
@@ -127,23 +162,18 @@ describe('CoinScanService', () => {
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
   });
 
-  it('pulls max(window + consecutive, boxWindow) + 1 bars so the box window is covered', async () => {
-    const candles = [
-      makeCandle(1000, 100),
-      makeCandle(2000, 100),
-      makeCandle(3000, 100),
-      makeCandle(4000, 100),
-      makeCandle(5000, 20), // ratio 0.2
-      makeCandle(6000, 15), // ratio 0.25
-      makeCandle(7000, 500), // forming bar, must be dropped
-    ];
+  it('pulls max(window + consecutive, 2 * boxWindow) + 1 bars so both compression windows are covered', async () => {
+    const candles: Candlestick[] = [];
+    for (let i = 1; i <= 12; i += 1) candles.push(completedBar(i, 100));
+    candles.push(formingBar(500)); // still-forming bar, must be dropped
     const getCandlesticks = vi.fn(async () => candles);
     const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
     const result = await service.scanShrink({ ...params, boxWindow: 6 });
-    // window + consecutive = 4, boxWindow = 6 → limit = 7.
-    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 7 }));
-    // The 6 completed bars cover the boxWindow, so metrics are computed.
+    // window + consecutive = 4, 2 * boxWindow = 12 → limit = 13.
+    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 13 }));
+    // The 12 completed bars cover recent + prior windows, so metrics are computed.
     expect(result.scanned.length).toBeGreaterThan(0);
     expect(result.scanned[0].boxTightness).toBe(0);
+    expect(result.scanned[0].compression).toBe(0);
   });
 });

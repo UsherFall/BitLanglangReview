@@ -1,4 +1,5 @@
 import { computeQuietMetrics, DEFAULT_BOX_WINDOW, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
+import { timeframeMs } from './candlestick-service';
 import type { CandlestickService } from './candlestick-service';
 import { defaultFetchJson, type FetchJson } from './http';
 import { fetchOkxTickers } from './okx-tickers';
@@ -18,18 +19,25 @@ export class CoinScanService {
       .slice(0, params.topN);
 
     const scanned: ScanRow[] = [];
+    const step = timeframeMs(params.timeframe);
+    const anchor = Date.now();
     for (const ticker of top) {
       const candles = await this.candleSource.getCandlesticks({
         instrument: ticker.instrument,
         timeframe: params.timeframe,
-        anchor: Date.now(),
+        anchor,
         direction: 'earlier',
         // One extra bar for the still-forming candle, which is dropped below.
-        // boxWindow is independent of the volume-ratio window, so the pull must
-        // satisfy both `window + consecutive` completed bars and `boxWindow`.
-        limit: Math.max(params.window + params.consecutive, params.boxWindow ?? DEFAULT_BOX_WINDOW) + 1,
+        // compression needs 2 * boxWindow completed bars (recent + prior) and the
+        // latest-trend windows need 2 * trendWindow, which is covered because the
+        // route enforces trendWindow <= boxWindow. The pull must satisfy both
+        // `window + consecutive` and `2 * boxWindow`.
+        limit: Math.max(params.window + params.consecutive, 2 * (params.boxWindow ?? DEFAULT_BOX_WINDOW)) + 1,
       });
-      const completed = candles.slice(0, -1);
+      // Drop the still-forming bar by time (timestamp + step > now). The candle
+      // cache may or may not contain the forming bar, so slicing the newest
+      // element unconditionally wrongly dropped the newest COMPLETED bar.
+      const completed = candles.filter((candle) => candle.timestamp + step <= anchor);
       const metrics = computeQuietMetrics(completed, params);
       if (!metrics) continue;
       scanned.push({
