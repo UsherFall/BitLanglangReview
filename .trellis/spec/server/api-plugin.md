@@ -35,6 +35,16 @@ Use the local `send` helper so JSON responses consistently set `content-type: ap
 
 On server configuration, create `data/`, load trades once from the Source Workbook, and instantiate stores/services against `data/review.sqlite`. Do not modify the Source Workbook; review data belongs in SQLite.
 
+### ServerChan notifier config
+
+`SERVERCHAN_KEY` (`.env`, read via vite `loadEnv`) configures the price-alert notifier. `ServerChanNotifier` (`src/server/notify.ts`) accepts three formats via `resolveSendUrl`:
+
+- **Full send URL** (`http` prefix) → used verbatim (ServerChan³ `sctp` 推送通道 / self-hosted), e.g. `https://12345.push.ft07.com/send/sctp...send`.
+- **Bare `sctp{uid}t...` SendKey** → uid extracted via `/^sctp(\d+)t/`, URL built as `https://{uid}.push.ft07.com/send/{key}.send`.
+- **Bare `SCT...` SendKey** (Server酱 Turbo, pushes to WeChat) → `https://sctapi.ftqq.com/{key}.send`.
+
+Note: ServerChan³ (`sctp`) and Turbo (`SCT`) are separate systems with incompatible SendKeys; `sctp` pushes to the SC3 app, `SCT` to WeChat 测试号/服务号. Absent/empty → `NoopNotifier` (monitor still runs, no push).
+
 ## Tests
 
 App-level route behavior is covered indirectly by React tests and server service tests. When adding a route, prefer focused tests for parsing and behavior rather than broad end-to-end tests unless the route crosses several layers.

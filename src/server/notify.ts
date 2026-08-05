@@ -18,18 +18,23 @@ type ServerChanResponse = {
 };
 
 /**
- * Pushes a WeChat notification through Server酱 (sctapi.ftqq.com). `key` is
- * the SendKey from https://sct.ftqq.com/. Other notification channels (email,
- * QQ) can follow the same `Notifier` contract later.
+ * Pushes a notification through Server酱. `keyOrUrl` is one of three formats:
+ * - a full send URL (ServerChan³ `sctp` 推送通道 or self-hosted) → used as-is,
+ *   e.g. `https://12345.push.ft07.com/send/sctp...send`;
+ * - a bare ServerChan³ `sctp{uid}t...` SendKey → built into `https://{uid}.push.ft07.com/send/{key}.send`
+ *   (uid extracted per the official regex `/^sctp(\d+)t/`);
+ * - a bare Server酱 Turbo `SCT...` SendKey → built into `https://sctapi.ftqq.com/{key}.send`
+ *   (WeChat 测试号/服务号).
+ * Other notification channels (email, QQ) can follow the same `Notifier` contract later.
  */
 export class ServerChanNotifier implements Notifier {
   constructor(
-    private readonly key: string,
+    private readonly keyOrUrl: string,
     private readonly fetchFn: FetchLike = fetch,
   ) {}
 
   async send(title: string, message: string): Promise<void> {
-    const url = `https://sctapi.ftqq.com/${encodeURIComponent(this.key)}.send`;
+    const url = resolveSendUrl(this.keyOrUrl);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12_000);
     try {
@@ -50,6 +55,19 @@ export class ServerChanNotifier implements Notifier {
       clearTimeout(timeout);
     }
   }
+}
+
+/**
+ * Maps the configured Server酱 value to its send endpoint. Full URLs are used
+ * verbatim; bare `sctp{uid}t...` keys (ServerChan³ 推送通道) get the uid-specific
+ * `{uid}.push.ft07.com` host; anything else (Server酱 Turbo `SCT...`) hits the
+ * `sctapi.ftqq.com` endpoint.
+ */
+function resolveSendUrl(config: string): string {
+  if (config.startsWith('http')) return config;
+  const sctp = /^sctp(\d+)t/.exec(config);
+  if (sctp) return `https://${sctp[1]}.push.ft07.com/send/${encodeURIComponent(config)}.send`;
+  return `https://sctapi.ftqq.com/${encodeURIComponent(config)}.send`;
 }
 
 /**

@@ -24,6 +24,28 @@ describe('ServerChanNotifier', () => {
     expect(init.body).toContain('desp=');
   });
 
+  it('uses a full send URL as-is when the config value starts with http', async () => {
+    const fetchFn = vi.fn(async () => mockResponse({ ok: true, status: 200, json: { code: 0, message: '' } }));
+    const notifier = new ServerChanNotifier('https://12345.push.ft07.com/send/sctp12345tabcd.send', fetchFn);
+
+    await notifier.send('t', 'm');
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [url] = fetchFn.mock.calls[0] as unknown as [string];
+    expect(url).toBe('https://12345.push.ft07.com/send/sctp12345tabcd.send');
+  });
+
+  it('builds the uid-specific push.ft07.com URL from a bare sctp SendKey', async () => {
+    const fetchFn = vi.fn(async () => mockResponse({ ok: true, status: 200, json: { code: 0, message: '' } }));
+    const notifier = new ServerChanNotifier('sctp12345tabcd', fetchFn);
+
+    await notifier.send('t', 'm');
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const [url] = fetchFn.mock.calls[0] as unknown as [string];
+    expect(url).toBe('https://12345.push.ft07.com/send/sctp12345tabcd.send');
+  });
+
   it('throws when Server酱 returns a non-zero code', async () => {
     const fetchFn = vi.fn(async () => mockResponse({ ok: true, status: 200, json: { code: 40015, message: 'bad key' } }));
     const notifier = new ServerChanNotifier('bad-key', fetchFn);
