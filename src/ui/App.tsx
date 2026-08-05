@@ -128,6 +128,7 @@ export function App() {
   const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   const [freeReplaySessions, setFreeReplaySessions] = useState<FreeReplaySession[]>([]);
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
+  const [alertInstrument, setAlertInstrument] = useState('');
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   // Keys of sessions deleted since the last matching save. Guards against an
@@ -561,7 +562,7 @@ export function App() {
         </div>
           </>
         ) : reviewMode === 'scan' ? (
-          <CoinScanPanel onScanned={setScanResult} />
+          <CoinScanPanel onScanned={setScanResult} alertInstrument={alertInstrument} onAlertInstrumentChange={setAlertInstrument} />
         ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
         )}
@@ -611,7 +612,7 @@ export function App() {
         ) : (
           <div className="empty-state">Choose an instrument and start time to begin Free Replay</div>
         ) : reviewMode === 'scan' ? (
-          <CoinScanResults result={scanResult} />
+          <CoinScanResults result={scanResult} onSetAlertInstrument={setAlertInstrument} />
         ) : selectedTrade ? (
           <>
             <header className="detail-header">
