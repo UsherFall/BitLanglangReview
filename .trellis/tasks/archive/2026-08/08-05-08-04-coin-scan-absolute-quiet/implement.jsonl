@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "scan 契约/参数现状(HEAD 版),v2 扩展 boxWindow/maxBoxRatio、移除 volatilityThreshold。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CoinScanPanel 参数输入模式,新增 boxWindow/maxBoxRatio 输入遵循既有风格。"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "回归:v2 quiet metrics 契约、boxWindow 窗口、maxBoxRatio 阈值、volatilityThreshold 移除后无残留。"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "检查 /api/scan 参数解析(optional 解析避免 Number(null)===0),volatilityThreshold 移除同步。"}
