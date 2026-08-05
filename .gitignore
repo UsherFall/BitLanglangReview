@@ -3,6 +3,11 @@ dist/
 .vite/
 coverage/
 
+# Secrets. SERVERCHAN_KEY lives here (vite loadEnv reads it).
+.env
+.env.*
+!.env.example
+
 *.log
 .playwright-mcp/
 
