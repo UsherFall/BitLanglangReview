@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "现有选币模块契约:method 分派、ScanResponse、缩量参数;新增警报功能不能破坏既有 /api/scan 行为。"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "路由约定:URL 解析、send 帮助函数、405/400/502 错误矩阵、初始化模式;新增 /api/alerts 必须遵守。"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "SQLite store 模式(better-sqlite3、WAL、data/review.sqlite);AlertStore 仿照既有 store 实现。"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "OKX 数据获取约定(fetchJson、超时、错误处理);ticker 提取重构与 monitor 拉价遵循同一模式。"}
