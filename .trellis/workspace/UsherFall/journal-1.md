@@ -323,3 +323,38 @@ Upgraded the 选币 shrink method from volume-only to quiet-consolidation (缩�
 ### Next Steps
 
 - None
+
+
+## Session 6: 选币价格警报 + Server酱通知 + spec 更新
+
+**Date**: 2026-08-05
+**Task**: 选币价格警报 + Server酱通知 + spec 更新
+**Branch**: `master`
+
+### Summary
+
+watchlist-notify 完成:PriceAlert 域模型、okx-tickers 提取共享、AlertStore、ServerChanNotifier、AlertMonitor(60s 防抖)、/api/alerts CRUD+reactivate、SERVERCHAN_KEY via .env、CoinScanPanel 警报区。check 修了 reactivate 路由前缀 bug(connect strip prefix)。spec 补 price-alert/alert-store/shared tickers。.env gitignore。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e41315a` | (see git log) |
+| `b9df17d` | (see git log) |
+| `9c8e00b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
