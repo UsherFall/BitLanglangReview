@@ -358,3 +358,38 @@ watchlist-notify 完成:PriceAlert 域模型、okx-tickers 提取共享、AlertS
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 扫描极致收敛规则 + ServerChan 通知修复
+
+**Date**: 2026-08-05
+**Task**: 扫描极致收敛规则 + ServerChan 通知修复
+**Branch**: `master`
+
+### Summary
+
+v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 scale-free boxTightness(boxWindow=12, maxBoxRatio=0.9),boxWindow 天然排除近期大蜡烛;UI 可调。ServerChan:官方文档确认 sctp=SC3 APP推送、SCT=微信,notify.ts resolveSendUrl 三格式支持;测试用假 key(真 key 曾误入测试,已清理)。用户验证扫描结果 OK。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b20b7d6` | (see git log) |
+| `f8e9c08` | (see git log) |
+| `5cf4600` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
