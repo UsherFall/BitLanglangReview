@@ -1113,6 +1113,9 @@ label,
   display: grid;
   gap: 12px;
   padding: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .coin-scan-panel label {
