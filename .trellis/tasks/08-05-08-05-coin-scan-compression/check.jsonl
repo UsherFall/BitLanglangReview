@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "回归:v3 quiet metrics 契约、compression 公式/边界/哨兵、maxCompression 可选回落、既有门不回归。"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "检查 /api/scan 可选参数解析(optional,非 parseScanParam),maxCompression 增补。"}

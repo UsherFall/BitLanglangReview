@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "v2 收敛契约现状,要扩展 compression 公式/阈值/守卫/错误矩阵。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CoinScanPanel 参数输入与结果列模式,新增 maxCompression 输入 + 压缩比列。"}

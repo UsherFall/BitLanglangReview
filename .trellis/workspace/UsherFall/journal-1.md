@@ -393,3 +393,38 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 扫描收敛 v3/v3.5 + 成型bar修复 + UI滚动修复
+
+**Date**: 2026-08-05
+**Task**: 扫描收敛 v3/v3.5 + 成型bar修复 + UI滚动修复
+**Branch**: `master`
+
+### Summary
+
+压缩任务进行中(checkpoint)。v3 加 compression 门(最近/之前均幅比<=0.8);v3.5 加 latestTrend 门(最近4/再前4<=0.9)拦走平/放大;修成型bar误删:按时间戳过滤 timestamp+step>anchor 而非无脑 slice(扫描曾落后一根)。UI:侧栏面板滚动+警报列表滚动。待续:CRCL 合格(0.63)但用户眼判不够极致,需确认「太平还是波动大」方向(最小波动下限 vs 绝对上限)。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `33a3f7d` | (see git log) |
+| `87ddb27` | (see git log) |
+| `3d964a4` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
