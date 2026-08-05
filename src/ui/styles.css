@@ -1249,6 +1249,8 @@ label,
   padding: 0;
   display: grid;
   gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .coin-scan-alert-list li {
