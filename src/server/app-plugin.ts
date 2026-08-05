@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
-import { scanTimeframes } from '../domain/coin-scan';
+import { DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO, scanTimeframes } from '../domain/coin-scan';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
@@ -153,13 +153,33 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         const consecutive = parseScanParam(url.searchParams.get('consecutive'), 3);
         const window = parseScanParam(url.searchParams.get('window'), 20);
         const ratioThreshold = parseScanParam(url.searchParams.get('ratioThreshold'), 0.7);
-        const volatilityThreshold = parseScanParam(url.searchParams.get('volatilityThreshold'), 0.7);
         const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
-        if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0 || volatilityThreshold <= 0 || minQuoteVolume24h < 0) {
+        // boxWindow/maxBoxRatio are optional. parseScanParam's Number(null) === 0
+        // defect would turn an absent param into 0 and trip the guard, so parse
+        // them with an optional parser that maps null/empty/NaN → undefined.
+        const boxWindow = parseOptionalNumber(url.searchParams.get('boxWindow'));
+        const maxBoxRatio = parseOptionalNumber(url.searchParams.get('maxBoxRatio'));
+        if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0 || minQuoteVolume24h < 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (boxWindow !== undefined && boxWindow <= 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (maxBoxRatio !== undefined && maxBoxRatio <= 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         try {
-          const result = await coinScanService.scanShrink({ method: 'shrink', timeframe, topN, ratioThreshold, volatilityThreshold, consecutive, window, minQuoteVolume24h });
+          const result = await coinScanService.scanShrink({
+            method: 'shrink',
+            timeframe,
+            topN,
+            ratioThreshold,
+            consecutive,
+            window,
+            minQuoteVolume24h,
+            boxWindow: boxWindow ?? DEFAULT_BOX_WINDOW,
+            maxBoxRatio: maxBoxRatio ?? DEFAULT_MAX_BOX_RATIO,
+          });
           send(res, 200, result);
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
@@ -212,6 +232,12 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
 function parseScanParam(value: string | null, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseOptionalNumber(value: string | null): number | undefined {
+  if (value === null || value.trim() === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 async function getCandlesForMode(input: {

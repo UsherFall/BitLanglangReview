@@ -30,10 +30,11 @@ const params: ShrinkScanParams = {
   timeframe: '5m',
   topN: 2,
   ratioThreshold: 0.7,
-  volatilityThreshold: 0.7,
   consecutive: 2,
   window: 2,
   minQuoteVolume24h: 0,
+  boxWindow: 2,
+  maxBoxRatio: 0.9,
 };
 
 // Five candles where the newest (forming) one has a huge volume. When it is
@@ -59,15 +60,16 @@ describe('CoinScanService', () => {
       instrument: 'BTC-USDT-SWAP',
       timeframe: '5m',
       direction: 'earlier',
-      limit: 5, // window + consecutive + 1 forming bar
+      limit: 5, // max(window + consecutive, boxWindow) + 1 forming bar
       anchor: expect.any(Number),
     });
     for (const row of result.scanned) {
       expect(row.qualified).toBe(true);
-      // Flat candles (amplitude 0) make amplitudeRatio 0, so quiet scores are
-      // volume ratios halved: intensity = mean((0.2/2, 0.25/2)).
+      // Flat candles make amplitudeRatio 0 and boxTightness 0, so quiet scores
+      // are volume ratios halved: intensity = mean((0.2/2, 0.25/2)).
       expect(row.intensity).toBeCloseTo(((0.2 + 0.25) / 2) / 2);
       expect(row.amplitudeRatio).toBe(0);
+      expect(row.boxTightness).toBe(0);
       expect(row.consecutiveQuiet).toBe(2);
     }
     // quoteVolume24h is 24h quote-volume in USDT = volCcy24h * last.
@@ -76,6 +78,9 @@ describe('CoinScanService', () => {
     expect(result.qualifiedCount).toBe(2);
     // BTC-USDT-SWAP first in the fetch order (150M quote volume), ETH second.
     expect(result.scanned[0].instrument).toBe('BTC-USDT-SWAP');
+    // The response echoes the effective scan parameters.
+    expect(result.params.boxWindow).toBe(2);
+    expect(result.params.maxBoxRatio).toBe(0.9);
   });
 
   it('computes the 24h change percentage from last and open24h', async () => {
@@ -120,5 +125,25 @@ describe('CoinScanService', () => {
     // BTC quote-volume = 150M * 60000 = 9e12; ETH = 90M * 3500 = 3.15e11.
     const result = await service.scanShrink({ ...params, minQuoteVolume24h: 5e11 });
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
+  });
+
+  it('pulls max(window + consecutive, boxWindow) + 1 bars so the box window is covered', async () => {
+    const candles = [
+      makeCandle(1000, 100),
+      makeCandle(2000, 100),
+      makeCandle(3000, 100),
+      makeCandle(4000, 100),
+      makeCandle(5000, 20), // ratio 0.2
+      makeCandle(6000, 15), // ratio 0.25
+      makeCandle(7000, 500), // forming bar, must be dropped
+    ];
+    const getCandlesticks = vi.fn(async () => candles);
+    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const result = await service.scanShrink({ ...params, boxWindow: 6 });
+    // window + consecutive = 4, boxWindow = 6 → limit = 7.
+    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 7 }));
+    // The 6 completed bars cover the boxWindow, so metrics are computed.
+    expect(result.scanned.length).toBeGreaterThan(0);
+    expect(result.scanned[0].boxTightness).toBe(0);
   });
 });

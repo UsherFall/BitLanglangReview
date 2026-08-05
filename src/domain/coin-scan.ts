@@ -3,15 +3,23 @@ import type { ReviewTimeframe } from './trade';
 
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
+/** Number of trailing completed bars used to compute boxTightness. */
+export const DEFAULT_BOX_WINDOW = 12;
+/** Scale-free box-shape threshold: boxTightness <= maxBoxRatio to qualify. */
+export const DEFAULT_MAX_BOX_RATIO = 0.9;
+
 export type ShrinkScanParams = {
   method: 'shrink';
   timeframe: ReviewTimeframe;
   topN: number;
   ratioThreshold: number;
-  volatilityThreshold: number;
   consecutive: number;
   window: number;
   minQuoteVolume24h: number;
+  /** Box-shape window; absent falls back to DEFAULT_BOX_WINDOW. */
+  boxWindow?: number;
+  /** Box-shape tightness threshold; absent falls back to DEFAULT_MAX_BOX_RATIO. */
+  maxBoxRatio?: number;
 };
 
 export type ScanRow = {
@@ -25,6 +33,7 @@ export type ScanRow = {
   amplitudeRatio: number;
   intensity: number;
   consecutiveQuiet: number;
+  boxTightness: number;
   qualified: boolean;
 };
 
@@ -42,10 +51,14 @@ export type QuietMetrics = {
   amplitudeRatio: number;
   intensity: number;
   consecutiveQuiet: number;
+  boxTightness: number;
   qualified: boolean;
 };
 
-export type QuietMetricsParams = Pick<ShrinkScanParams, 'ratioThreshold' | 'volatilityThreshold' | 'consecutive' | 'window'>;
+export type QuietMetricsParams = Pick<
+  ShrinkScanParams,
+  'ratioThreshold' | 'consecutive' | 'window' | 'boxWindow' | 'maxBoxRatio'
+>;
 
 // Used instead of Infinity so JSON serialization never produces null.
 const LARGE_RATIO = 1_000_000_000;
@@ -62,19 +75,39 @@ function amplitudeOf(candle: Candlestick): number {
  * excluded before this call). Candlesticks may arrive in any order; they are
  * sorted ascending by timestamp here.
  *
- * A candlestick is *calm* when both its volume ratio and its amplitude ratio
- * are below their thresholds. The candlestick qualifies when the trailing
- * `consecutive` candlesticks are all calm.
+ * A candlestick is *calm* when its volume ratio is below `ratioThreshold`
+ * (volume shrinking against its own trailing `window` mean). Amplitude no
+ * longer gates calm: a coin that has been quiet for a long time has an
+ * amplitude ratio near 1 (current ≈ its own mean) and must not be rejected
+ * for not being "freshly" quiet. The shape requirement is carried by
+ * `boxTightness` instead: the trailing `boxWindow` completed bars must form a
+ * tight box (`boxTightness <= maxBoxRatio`). A large candle anywhere inside
+ * the last `boxWindow` bars stretches the box range and pushes `boxTightness`
+ * over the threshold, which is what keeps fresh flags (a big candle followed
+ * by a small consolidation) out.
+ *
+ * boxTightness is a scale-free shape measure over the trailing `boxWindow`
+ * completed bars: R / (m * sqrt(boxWindow)), where R is the total range
+ * (maxHigh - minLow) / minLow and m is the mean per-bar amplitude
+ * (high - low) / low. A genuine box oscillates in place so R ≈ m * sqrt(N)
+ * → boxTightness ≈ 1; a one-sided trend accumulates drift so R ≈ m * N
+ * → boxTightness ≈ sqrt(N); a large candle inside the window makes R large
+ * relative to m, so boxTightness climbs well above 1. Because it is divided
+ * by sqrt(N) and normalized to the instrument's own amplitude, one threshold
+ * works for every N, timeframe, and absolute volatility level. m <= 0
+ * (all-flat bars) yields boxTightness 0 (a perfect box).
  *
  * Returns null when there is not enough history (fewer than
- * `window + consecutive` candles), when a volume window average is zero, or
- * when a price is non-positive (amplitude undefined).
+ * `window + consecutive` candles, or fewer than `boxWindow` candles), when a
+ * volume window average is zero, or when a price is non-positive.
  */
 export function computeQuietMetrics(candles: readonly Candlestick[], params: QuietMetricsParams): QuietMetrics | null {
-  const { ratioThreshold, volatilityThreshold, consecutive, window } = params;
+  const { ratioThreshold, consecutive, window } = params;
+  const boxWindow = params.boxWindow ?? DEFAULT_BOX_WINDOW;
+  const maxBoxRatio = params.maxBoxRatio ?? DEFAULT_MAX_BOX_RATIO;
   const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
   const count = sorted.length;
-  if (count < window + consecutive) return null;
+  if (count < window + consecutive || count < boxWindow) return null;
   if (sorted.some((candle) => candle.low <= 0)) return null;
 
   // Sliding window means; ratio of candle i is value[i] / mean(window before i).
@@ -102,7 +135,7 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
 
     volumeRatios.push(volumeRatio);
     amplitudeRatios.push(amplitudeRatio);
-    calm.push(volumeRatio < ratioThreshold && amplitudeRatio < volatilityThreshold);
+    calm.push(volumeRatio < ratioThreshold);
   }
 
   const lastIndex = count - 1;
@@ -117,6 +150,20 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
     consecutiveQuiet += 1;
   }
 
+  // Box-shape tightness over the trailing `boxWindow` completed bars.
+  let maxHigh = -Infinity;
+  let minLow = Infinity;
+  let trailingAmplitudeSum = 0;
+  for (let i = count - boxWindow; i < count; i += 1) {
+    const candle = sorted[i];
+    maxHigh = Math.max(maxHigh, candle.high);
+    minLow = Math.min(minLow, candle.low);
+    trailingAmplitudeSum += amplitudeOf(candle);
+  }
+  const range = (maxHigh - minLow) / minLow;
+  const meanAmplitude = trailingAmplitudeSum / boxWindow;
+  const boxTightness = meanAmplitude > 0 ? range / (meanAmplitude * Math.sqrt(boxWindow)) : 0;
+
   return {
     currentVolume: sorted[lastIndex].volume,
     averageVolume: volumeAverages[lastIndex],
@@ -124,6 +171,7 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
     amplitudeRatio: amplitudeRatios[amplitudeRatios.length - 1],
     intensity,
     consecutiveQuiet,
-    qualified: consecutiveQuiet >= consecutive,
+    boxTightness,
+    qualified: consecutiveQuiet >= consecutive && boxTightness <= maxBoxRatio,
   };
 }

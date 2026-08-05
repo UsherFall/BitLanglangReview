@@ -1,4 +1,4 @@
-import { computeQuietMetrics, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
+import { computeQuietMetrics, DEFAULT_BOX_WINDOW, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
 import type { CandlestickService } from './candlestick-service';
 import { defaultFetchJson, type FetchJson } from './http';
 import { fetchOkxTickers } from './okx-tickers';
@@ -25,7 +25,9 @@ export class CoinScanService {
         anchor: Date.now(),
         direction: 'earlier',
         // One extra bar for the still-forming candle, which is dropped below.
-        limit: params.window + params.consecutive + 1,
+        // boxWindow is independent of the volume-ratio window, so the pull must
+        // satisfy both `window + consecutive` completed bars and `boxWindow`.
+        limit: Math.max(params.window + params.consecutive, params.boxWindow ?? DEFAULT_BOX_WINDOW) + 1,
       });
       const completed = candles.slice(0, -1);
       const metrics = computeQuietMetrics(completed, params);

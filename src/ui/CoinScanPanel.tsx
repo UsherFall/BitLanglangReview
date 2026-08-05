@@ -19,7 +19,8 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [topN, setTopN] = useState('50');
   const [ratioThreshold, setRatioThreshold] = useState('0.7');
-  const [volatilityThreshold, setVolatilityThreshold] = useState('0.7');
+  const [boxWindow, setBoxWindow] = useState('12');
+  const [maxBoxRatio, setMaxBoxRatio] = useState('0.9');
   const [consecutive, setConsecutive] = useState('3');
   const [avgWindow, setAvgWindow] = useState('20');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
@@ -38,7 +39,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   }, []);
 
   async function scan() {
-    const inputs = [topN, ratioThreshold, volatilityThreshold, consecutive, avgWindow, minQuoteVolume24h];
+    const inputs = [topN, ratioThreshold, boxWindow, maxBoxRatio, consecutive, avgWindow, minQuoteVolume24h];
     if (!scanTimeframes.includes(timeframe) || inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
       return;
@@ -51,7 +52,8 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
         timeframe,
         topN,
         ratioThreshold,
-        volatilityThreshold,
+        boxWindow,
+        maxBoxRatio,
         consecutive,
         window: avgWindow,
         minQuoteVolume24h,
@@ -137,8 +139,12 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <input type="number" min="0" step="0.05" value={ratioThreshold} onChange={(event) => setRatioThreshold(event.target.value)} />
         </label>
         <label>
-          波动阈值
-          <input type="number" min="0" step="0.05" value={volatilityThreshold} onChange={(event) => setVolatilityThreshold(event.target.value)} />
+          箱体窗口
+          <input type="number" min="1" value={boxWindow} onChange={(event) => setBoxWindow(event.target.value)} />
+        </label>
+        <label>
+          箱体阈值
+          <input type="number" min="0" step="0.05" value={maxBoxRatio} onChange={(event) => setMaxBoxRatio(event.target.value)} />
         </label>
         <label>
           连续根数
@@ -251,6 +257,7 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
               <th>振幅比</th>
               <th>强度分</th>
               <th>连续平静</th>
+              <th>箱体度</th>
               <th>状态</th>
               <th>操作</th>
             </tr>
@@ -268,6 +275,7 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
                 <td>{row.amplitudeRatio.toFixed(2)}</td>
                 <td>{row.intensity.toFixed(2)}</td>
                 <td>{row.consecutiveQuiet}</td>
+                <td>{row.boxTightness.toFixed(2)}</td>
                 <td>{row.qualified ? '合格' : '—'}</td>
                 <td>
                   <button
