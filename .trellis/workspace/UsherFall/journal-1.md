@@ -462,3 +462,38 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: 选币数据源替换为币安(黄金 XAUUSDT 必检)
+
+**Date**: 2026-08-06
+**Task**: 选币数据源替换为币安(黄金 XAUUSDT 必检)
+**Branch**: `master`
+
+### Summary
+
+用户反馈黄金 8月4日该扫出但没扫到。根因:OKX SWAP 日线边界 UTC16:00 与用户视图(UTC0:00/北京8点)错位,同一日期标签两套 K 线。决策:选币数据源整体替换为币安 USDT-M 永续(fapi),含真黄金 XAUUSDT(qv 27.4亿);接口+两实现(TickerSource/CandleSource),MARKET_DATA_SOURCE 环境变量切换(默认币安,okx 回退);FreeReplay/TradeReview 保持 OKX 不动;警报切币安。实测:币安边界下 4H 黄金收敛(08-03 comp=0.20 quiet=13)QUALIFIED;8月4日横盘成立。端到端验证:币安 tickers 679 个含 XAUUSDT,扫描链路通。176 tests 全绿 + tsc 干净。1D 关卡(量缩差1根+压缩略超)按用户决定验收后再调。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58bd68f` | (see git log) |
+| `f79966e` | (see git log) |
+| `e77c5ad` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
