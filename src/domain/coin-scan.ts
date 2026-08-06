@@ -3,8 +3,6 @@ import type { ReviewTimeframe } from './trade';
 
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
-/** Number of trailing completed bars used for the volatility-compression windows. */
-export const DEFAULT_BOX_WINDOW = 4;
 /**
  * Volatility-compression threshold: compression <= maxCompression to qualify.
  * compression = mean amplitude of the recent boxWindow bars / mean amplitude of
@@ -30,21 +28,51 @@ export const DEFAULT_MAX_LATEST_TREND = 0.9;
  */
 export const DEFAULT_TREND_WINDOW = 3;
 
+/**
+ * Box windows scanned by the plateau convergence gate. A coin converges when it
+ * compresses (compression) and is still narrowing (latestTrend) across at least
+ * `plateauMin` consecutive box windows, which filters isolated one-window noise
+ * and adapts to the natural box length of each instrument.
+ */
+export const PLATEAU_BOX_WINDOWS = [3, 4, 5, 6] as const;
+/** Minimum number of consecutive qualified box windows for a coin to qualify. */
+export const DEFAULT_PLATEAU_MIN = 2;
+
 export type ShrinkScanParams = {
   method: 'shrink';
-  timeframe: ReviewTimeframe;
   topN: number;
   minQuoteVolume24h: number;
   /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */
   anchor?: number;
-  /** Volatility-compression window; absent falls back to DEFAULT_BOX_WINDOW. */
-  boxWindow?: number;
   /** Volatility-compression threshold; absent falls back to DEFAULT_MAX_COMPRESSION. */
   maxCompression?: number;
   /** Latest-trend threshold; absent falls back to DEFAULT_MAX_LATEST_TREND. */
   maxLatestTrend?: number;
   /** Number of trailing bars for the latest-trend windows; absent falls back to DEFAULT_TREND_WINDOW. */
   trendWindow?: number;
+  /** Minimum consecutive qualified plateau windows; absent falls back to DEFAULT_PLATEAU_MIN. */
+  plateauMin?: number;
+};
+
+/**
+ * One timeframe's convergence verdict for a scanned coin. The multi-timeframe
+ * scan (5m/15m/1H/4H/1D) produces one entry per timeframe per coin; the coin is
+ * 收敛 on the timeframes where `qualified` is true.
+ */
+export type ScanTimeframeResult = {
+  timeframe: ReviewTimeframe;
+  /** Compression of the best plateau window (bestBoxWindow). */
+  compression: number;
+  /** Latest-trend of the best plateau window. */
+  latestTrend: number;
+  /** Score of the best plateau window = compression + latestTrend. */
+  score: number;
+  /** Longest run of consecutive qualified plateau windows. */
+  plateauWidth: number;
+  /** Box window of the best plateau window. */
+  bestBoxWindow: number;
+  /** plateauWidth >= plateauMin. */
+  qualified: boolean;
 };
 
 export type ScanRow = {
@@ -52,10 +80,14 @@ export type ScanRow = {
   lastPrice: number;
   change24h: number;
   quoteVolume24h: number;
-  compression: number;
-  latestTrend: number;
-  /** Sort key = compression + latestTrend; lower = converging harder. */
-  score: number;
+  /** All 5 timeframes in scanTimeframes order, each with its own convergence verdict. */
+  timeframes: ScanTimeframeResult[];
+  /** Subset of timeframes where qualified is true (收敛周期 column data). */
+  convergenceTimeframes: ReviewTimeframe[];
+  qualifiedCount: number;
+  /** Min score across qualified timeframes; a row always has >= 1 qualified timeframe. */
+  bestScore: number;
+  /** Always true (scanned rows only include coins with >= 1 qualified timeframe), kept for compatibility. */
   qualified: boolean;
 };
 
@@ -74,10 +106,48 @@ export type QuietMetrics = {
   qualified: boolean;
 };
 
-export type QuietMetricsParams = Pick<
-  ShrinkScanParams,
-  'boxWindow' | 'maxCompression' | 'maxLatestTrend' | 'trendWindow'
->;
+export type QuietMetricsParams = {
+  /** Volatility-compression window. */
+  boxWindow: number;
+  /** Volatility-compression threshold; absent falls back to DEFAULT_MAX_COMPRESSION. */
+  maxCompression?: number;
+  /** Latest-trend threshold; absent falls back to DEFAULT_MAX_LATEST_TREND. */
+  maxLatestTrend?: number;
+  /** Number of trailing bars for the latest-trend windows; absent falls back to DEFAULT_TREND_WINDOW. */
+  trendWindow?: number;
+};
+
+export type PlateauWindow = {
+  boxWindow: number;
+  compression: number;
+  latestTrend: number;
+  score: number;
+  qualified: boolean;
+};
+
+export type PlateauResult = {
+  /** Per-box-window verdicts in PLATEAU_BOX_WINDOWS order. */
+  windows: PlateauWindow[];
+  /** Longest run of consecutive qualified windows. */
+  plateauWidth: number;
+  /** Compression of the best window. */
+  compression: number;
+  /** Latest-trend of the best window. */
+  latestTrend: number;
+  /** Score of the best window. */
+  score: number;
+  /** Box window of the best window. */
+  bestBoxWindow: number;
+  /** plateauWidth >= plateauMin. */
+  qualified: boolean;
+};
+
+export type PlateauParams = {
+  maxCompression: number;
+  maxLatestTrend: number;
+  trendWindow: number;
+  plateauMin: number;
+};
 
 // Used instead of Infinity so JSON serialization never produces null.
 const LARGE_RATIO = 1_000_000_000;
@@ -126,7 +196,7 @@ function amplitudeOf(candle: Candlestick): number {
  * candles so both latest-trend windows exist) or when a price is non-positive.
  */
 export function computeQuietMetrics(candles: readonly Candlestick[], params: QuietMetricsParams): QuietMetrics | null {
-  const boxWindow = params.boxWindow ?? DEFAULT_BOX_WINDOW;
+  const boxWindow = params.boxWindow;
   const maxCompression = params.maxCompression ?? DEFAULT_MAX_COMPRESSION;
   const maxLatestTrend = params.maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND;
   const trendWindow = params.trendWindow ?? DEFAULT_TREND_WINDOW;
@@ -154,9 +224,10 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
 
   // Latest-trend: the trailing `trendWindow` completed bars (latest) vs the
   // `trendWindow` bars immediately before them (middle). Both windows sit inside
-  // the trailing boxWindow bars when trendWindow <= boxWindow, which the route
-  // enforces. A coin still converging scores below 1; a flattened or widening
-  // coin scores >= 1 and is rejected.
+  // the trailing boxWindow bars because trendWindow <= boxWindow, which the
+  // plateau caller enforces via tr(bw) = min(trendWindow, bw - 1). A coin still
+  // converging scores below 1; a flattened or widening coin scores >= 1 and is
+  // rejected.
   let latestAmplitudeSum = 0;
   for (let i = count - trendWindow; i < count; i += 1) {
     latestAmplitudeSum += amplitudeOf(sorted[i]);
@@ -177,5 +248,84 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
     latestTrend,
     score,
     qualified: compression <= maxCompression && latestTrend <= maxLatestTrend,
+  };
+}
+
+/**
+ * Multi-window convergence verdict over the same set of completed candlesticks.
+ * Scans every box window in PLATEAU_BOX_WINDOWS with the pure-price gate
+ * (computeQuietMetrics) and requires `plateauMin` consecutive qualified windows
+ * so an isolated single-window convergence (e.g. a coin that happened to align
+ * with exactly one box length) does not qualify. Each box window uses
+ * tr(bw) = min(trendWindow, bw - 1), which keeps the latest-trend windows inside
+ * the box window and avoids the bw = trendWindow degeneration where the latest
+ * window equals the recent window.
+ *
+ * A box window whose history is insufficient (< 2 * bw completed bars, or fewer
+ * than 2 * tr(bw) bars for its latest-trend windows) or that hits a non-positive
+ * price reports qualified = false and never contributes to a consecutive run —
+ * a freshly listed coin with only small-bw history still qualifies through its
+ * small windows without the null large windows breaking the run.
+ *
+ * Returns null when no box window could be computed at all (fewer than
+ * 2 * PLATEAU_BOX_WINDOWS[0] completed bars or a non-positive price).
+ */
+export function computePlateau(candles: readonly Candlestick[], params: PlateauParams): PlateauResult | null {
+  const windows: PlateauWindow[] = [];
+  let anyComputed = false;
+  for (const boxWindow of PLATEAU_BOX_WINDOWS) {
+    // tr(bw) = min(trendWindow, boxWindow): bw=3 with the default trendWindow
+    // collapses the latest-trend windows onto the box windows (latest == recent,
+    // middle == prior), so compression and latestTrend are the same value and the
+    // compression gate carries bw=3. That matches the case-library plateau
+    // ({3,4} for HYPE 1H, {3,4,5} for ONUSDT 4H): a 2-bar latest window at bw=3
+    // is too twitchy (HYPE 1H lt 0.905 > 0.9, one wider bar flips the verdict).
+    // A null metrics result (insufficient history for this box window) reports a
+    // non-qualified window with an infinite score so it is never selected as the
+    // best window.
+    const metrics = computeQuietMetrics(candles, {
+      boxWindow,
+      maxCompression: params.maxCompression,
+      maxLatestTrend: params.maxLatestTrend,
+      trendWindow: Math.min(params.trendWindow, boxWindow),
+    });
+    if (metrics) {
+      anyComputed = true;
+      windows.push({ boxWindow, ...metrics });
+    } else {
+      windows.push({ boxWindow, compression: 0, latestTrend: 0, score: Number.POSITIVE_INFINITY, qualified: false });
+    }
+  }
+  if (!anyComputed) return null;
+
+  // plateauWidth = longest consecutive run of qualified windows. A null window
+  // resets the run, so a gap in the middle is not merged across.
+  let plateauWidth = 0;
+  let currentRun = 0;
+  for (const window of windows) {
+    currentRun = window.qualified ? currentRun + 1 : 0;
+    plateauWidth = Math.max(plateauWidth, currentRun);
+  }
+
+  // Best window: the qualified window with the smallest score; when no window
+  // qualifies, the computed window with the smallest score (null-window entries
+  // carry an infinite score and never win). `anyComputed` guarantees at least
+  // one finite-score window exists, so `pool[0]` is always defined.
+  const computedWindows = windows.filter((window) => Number.isFinite(window.score));
+  const qualifiedWindows = computedWindows.filter((window) => window.qualified);
+  const pool = qualifiedWindows.length > 0 ? qualifiedWindows : computedWindows;
+  let best = pool[0];
+  for (const window of pool) {
+    if (window.score < best.score) best = window;
+  }
+
+  return {
+    windows,
+    plateauWidth,
+    qualified: plateauWidth >= params.plateauMin,
+    compression: best.compression,
+    latestTrend: best.latestTrend,
+    score: best.score,
+    bestBoxWindow: best.boxWindow,
   };
 }

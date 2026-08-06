@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "回归:全周期+plateau 契约——params 表(删 timeframe/boxWindow 加 plateauMin)、computePlateau 语义、ScanRow/ScanTimeframeResult 字段、服务聚合与排序、validation 矩阵。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "回归:UI 参数/列与全周期契约一致——收敛周期列、展开行明细、连续收敛窗口输入。"}

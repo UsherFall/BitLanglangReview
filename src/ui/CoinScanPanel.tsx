@@ -1,8 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import type { AlertDirection, PriceAlert } from '../domain/price-alert';
 import type { ScanResponse } from '../domain/coin-scan';
-import { scanTimeframes } from '../domain/coin-scan';
-import type { ReviewTimeframe } from '../domain/trade';
 
 export type CoinScanPanelProps = {
   onScanned: (result: ScanResponse) => void;
@@ -16,9 +14,8 @@ type AlertConfig = {
 };
 
 export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentChange }: CoinScanPanelProps) {
-  const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [topN, setTopN] = useState('50');
-  const [boxWindow, setBoxWindow] = useState('4');
+  const [plateauMin, setPlateauMin] = useState('2');
   const [maxCompression, setMaxCompression] = useState('0.8');
   const [maxLatestTrend, setMaxLatestTrend] = useState('0.9');
   const [trendWindow, setTrendWindow] = useState('3');
@@ -40,8 +37,8 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   }, []);
 
   async function scan() {
-    const inputs = [topN, boxWindow, maxCompression, maxLatestTrend, trendWindow, minQuoteVolume24h];
-    if (!scanTimeframes.includes(timeframe) || inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
+    const inputs = [topN, plateauMin, maxCompression, maxLatestTrend, trendWindow, minQuoteVolume24h];
+    if (inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
       return;
     }
@@ -55,9 +52,8 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
     try {
       const query = new URLSearchParams({
         method: 'shrink',
-        timeframe,
         topN,
-        boxWindow,
+        plateauMin,
         maxCompression,
         maxLatestTrend,
         trendWindow,
@@ -129,20 +125,14 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <option value="shrink">缩量</option>
         </select>
       </label>
-      <label>
-        时间周期
-        <select value={timeframe} onChange={(event) => setTimeframe(event.target.value as ReviewTimeframe)}>
-          {scanTimeframes.map((item) => <option key={item} value={item}>{item}</option>)}
-        </select>
-      </label>
       <div className="coin-scan-params">
         <label>
           扫描数量
           <input type="number" min="1" value={topN} onChange={(event) => setTopN(event.target.value)} />
         </label>
         <label>
-          压缩窗口
-          <input type="number" min="1" value={boxWindow} onChange={(event) => setBoxWindow(event.target.value)} />
+          连续收敛窗口
+          <input type="number" min="1" value={plateauMin} onChange={(event) => setPlateauMin(event.target.value)} />
         </label>
         <label>
           压缩阈值
@@ -165,7 +155,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <input type="datetime-local" value={anchorInput} onChange={(event) => setAnchorInput(event.target.value)} />
         </label>
       </div>
-      <p className="panel-status hint">时间点留空 = 现在;填入则扫描「该时刻之前已完成」的 K 线(验证历史收敛用)。</p>
+      <p className="panel-status hint">一次扫描全周期(5m/15m/1H/4H/1D),每币一行。时间点留空 = 现在;填入则扫描「该时刻之前已完成」的 K 线(验证历史收敛用)。</p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
       </button>
@@ -225,6 +215,7 @@ export type CoinScanResultsProps = {
 
 export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
+  const [expandedInstrument, setExpandedInstrument] = useState<string | null>(null);
 
   function copyInstrument(instrument: string) {
     const copyText = shortInstrument(instrument).toLowerCase();
@@ -241,13 +232,14 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  const ordered = [...result.scanned].sort((a, b) => Number(b.qualified) - Number(a.qualified) || a.score - b.score);
+  // The service sorts scanned rows (qualifiedCount desc, then bestScore asc); the
+  // UI renders them as-is.
   return (
     <>
       <header className="detail-header">
         <div>
           <h1>选币结果</h1>
-          <p>扫描 {result.scanned.length} 个 · 合格 {result.qualifiedCount} 个 · 周期 {result.params.timeframe}</p>
+          <p>扫描 {result.scanned.length} 个 · 收敛 {result.qualifiedCount} 个 · 全周期</p>
         </div>
       </header>
       <div className="coin-scan-table-wrap">
@@ -258,41 +250,81 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
               <th>最新价</th>
               <th>24h 涨跌</th>
               <th>成交额</th>
-              <th>压缩比</th>
-              <th>收窄趋势</th>
+              <th>收敛周期</th>
               <th>状态</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {ordered.map((row) => (
-              <tr key={row.instrument} className={row.qualified ? 'qualified' : ''}>
-                <td>{shortInstrument(row.instrument)}</td>
-                <td>{formatPrice(row.lastPrice)}</td>
-                <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
-                <td>{formatVolume(row.quoteVolume24h)}</td>
-                <td>{formatCompression(row.compression)}</td>
-                <td>{formatLatestTrend(row.latestTrend)}</td>
-                <td>{row.qualified ? '合格' : '—'}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="coin-scan-copy"
-                    title={`为 ${shortInstrument(row.instrument)} 设价格警报`}
-                    onClick={() => onSetAlertInstrument(row.instrument)}
-                  >
-                    设警报
-                  </button>
-                  <button
-                    type="button"
-                    className="coin-scan-copy"
-                    title={`复制 ${shortInstrument(row.instrument).toLowerCase()}`}
-                    onClick={() => copyInstrument(row.instrument)}
-                  >
-                    {copiedInstrument === row.instrument ? '已复制' : '复制'}
-                  </button>
-                </td>
-              </tr>
+            {result.scanned.map((row) => (
+              <Fragment key={row.instrument}>
+                <tr className="qualified">
+                  <td>{shortInstrument(row.instrument)}</td>
+                  <td>{formatPrice(row.lastPrice)}</td>
+                  <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
+                  <td>{formatVolume(row.quoteVolume24h)}</td>
+                  <td>{row.convergenceTimeframes.join(', ') || '—'}</td>
+                  <td>合格</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="coin-scan-copy"
+                      title="展开各周期收敛明细"
+                      onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
+                    >
+                      {expandedInstrument === row.instrument ? '收起' : '详情'}
+                    </button>
+                    <button
+                      type="button"
+                      className="coin-scan-copy"
+                      title={`为 ${shortInstrument(row.instrument)} 设价格警报`}
+                      onClick={() => onSetAlertInstrument(row.instrument)}
+                    >
+                      设警报
+                    </button>
+                    <button
+                      type="button"
+                      className="coin-scan-copy"
+                      title={`复制 ${shortInstrument(row.instrument).toLowerCase()}`}
+                      onClick={() => copyInstrument(row.instrument)}
+                    >
+                      {copiedInstrument === row.instrument ? '已复制' : '复制'}
+                    </button>
+                  </td>
+                </tr>
+                {expandedInstrument === row.instrument && (
+                  <tr className="coin-scan-detail-row">
+                    <td colSpan={7}>
+                      <table className="coin-scan-detail-table">
+                        <thead>
+                          <tr>
+                            <th>周期</th>
+                            <th>压缩比</th>
+                            <th>收窄趋势</th>
+                            <th>score</th>
+                            <th>窗口</th>
+                            <th>plateau宽</th>
+                            <th>状态</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {row.timeframes.map((timeframe) => (
+                            <tr key={timeframe.timeframe} className={timeframe.qualified ? 'qualified' : ''}>
+                              <td>{timeframe.timeframe}</td>
+                              <td>{formatCompression(timeframe.compression)}</td>
+                              <td>{formatLatestTrend(timeframe.latestTrend)}</td>
+                              <td>{formatScore(timeframe.score)}</td>
+                              <td>{timeframe.bestBoxWindow}</td>
+                              <td>{timeframe.plateauWidth}</td>
+                              <td>{timeframe.qualified ? '合格' : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -318,6 +350,12 @@ function formatCompression(value: number): string {
 function formatLatestTrend(value: number): string {
   // latestTrend mirrors compression's boundary handling: a flat middle window with
   // an active latest window reports LARGE_RATIO (1e9), shown as a dash.
+  return value >= 1e9 ? '—' : value.toFixed(2);
+}
+
+function formatScore(value: number): string {
+  // A score only goes >= 1e9 when one of its components hit the flat-window
+  // sentinel, which never qualifies; show it as a dash for readability.
   return value >= 1e9 ? '—' : value.toFixed(2);
 }
 

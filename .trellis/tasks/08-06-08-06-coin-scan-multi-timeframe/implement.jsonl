@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "现状契约:纯价格 computeQuietMetrics + anchor、params 表(含 timeframe/boxWindow)、ScanRow 扁平字段。要改全周期+plateau:删 timeframe/boxWindow、加 plateauMin、ScanRow 加 timeframes[]/convergenceTimeframes/qualifiedCount/bestScore。"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "币安 candle/ticker 源契约:getCandlesticks(limit/anchor/direction)、缓存行为。全周期并行拉 K 依赖它,limit=2*max(PLATEAU_BOX_WINDOWS)+1=13。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "CoinScanPanel 参数输入与结果列模式:删时间周期/压缩窗口,加连续收敛窗口(plateauMin);结果表收敛周期列+展开行明细。"}
+{"file": ".trellis/tasks/08-06-08-06-coin-scan-multi-timeframe/research/case-library.md", "reason": "真数据案例 C1~C5:AC1 验证基准。C5(HYPE 15m 拒/1H 出)是核心验收——每币在自然周期显形。"}

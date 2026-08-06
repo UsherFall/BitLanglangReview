@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
-import { DEFAULT_BOX_WINDOW, DEFAULT_MAX_COMPRESSION, DEFAULT_MAX_LATEST_TREND, DEFAULT_TREND_WINDOW, scanTimeframes } from '../domain/coin-scan';
+import { DEFAULT_MAX_COMPRESSION, DEFAULT_MAX_LATEST_TREND, DEFAULT_PLATEAU_MIN, DEFAULT_TREND_WINDOW } from '../domain/coin-scan';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
@@ -155,28 +155,21 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (url.searchParams.get('method') !== 'shrink') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
-        const timeframe = url.searchParams.get('timeframe') as ReviewTimeframe | null;
-        if (!timeframe || !scanTimeframes.includes(timeframe)) {
-          return send(res, 400, { error: 'timeframe must be one of 5m, 15m, 1H, 4H, 1D' });
-        }
         const topN = parseScanParam(url.searchParams.get('topN'), 50);
         const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
-        // anchor/boxWindow/maxCompression/maxLatestTrend/trendWindow are optional.
-        // parseScanParam's Number(null) === 0 defect would turn an absent param
-        // into 0 and trip the guard, so parse them with an optional parser that
-        // maps null/empty/NaN → undefined.
+        // anchor/maxCompression/maxLatestTrend/trendWindow/plateauMin are
+        // optional. parseScanParam's Number(null) === 0 defect would turn an
+        // absent param into 0 and trip the guard, so parse them with an optional
+        // parser that maps null/empty/NaN → undefined.
         const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
-        const boxWindow = parseOptionalNumber(url.searchParams.get('boxWindow'));
         const maxCompression = parseOptionalNumber(url.searchParams.get('maxCompression'));
         const maxLatestTrend = parseOptionalNumber(url.searchParams.get('maxLatestTrend'));
         const trendWindow = parseOptionalNumber(url.searchParams.get('trendWindow'));
+        const plateauMin = parseOptionalNumber(url.searchParams.get('plateauMin'));
         if (topN < 1 || minQuoteVolume24h < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (anchor !== undefined && anchor <= 0) {
-          return send(res, 400, { error: 'Invalid scan parameters' });
-        }
-        if (boxWindow !== undefined && boxWindow <= 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (maxCompression !== undefined && maxCompression <= 0) {
@@ -185,20 +178,22 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (maxLatestTrend !== undefined && maxLatestTrend <= 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
-        if (trendWindow !== undefined && (trendWindow < 1 || trendWindow > (boxWindow ?? DEFAULT_BOX_WINDOW))) {
+        if (trendWindow !== undefined && trendWindow < 1) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (plateauMin !== undefined && plateauMin < 1) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         try {
           const result = await coinScanService.scanShrink({
             method: 'shrink',
-            timeframe,
             topN,
             minQuoteVolume24h,
             anchor,
-            boxWindow: boxWindow ?? DEFAULT_BOX_WINDOW,
             maxCompression: maxCompression ?? DEFAULT_MAX_COMPRESSION,
             maxLatestTrend: maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND,
             trendWindow: trendWindow ?? DEFAULT_TREND_WINDOW,
+            plateauMin: plateauMin ?? DEFAULT_PLATEAU_MIN,
           });
           send(res, 200, result);
         } catch (error) {

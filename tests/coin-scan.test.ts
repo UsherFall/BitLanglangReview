@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import {
+  computePlateau,
   computeQuietMetrics,
-  DEFAULT_BOX_WINDOW,
   DEFAULT_MAX_COMPRESSION,
   DEFAULT_MAX_LATEST_TREND,
+  DEFAULT_PLATEAU_MIN,
   DEFAULT_TREND_WINDOW,
+  PLATEAU_BOX_WINDOWS,
 } from '../src/domain/coin-scan';
 
 // amplitude = (high - low) / low, controlled by the `amplitude` argument.
@@ -342,15 +344,16 @@ describe('Coin Scan score (sort key) and defaults', () => {
     expect(flat!.score).toBeGreaterThan(compressed!.score);
   });
 
-  it('exposes the pure-price defaults', () => {
-    expect(DEFAULT_BOX_WINDOW).toBe(4);
+  it('exposes the pure-price and plateau defaults', () => {
     expect(DEFAULT_MAX_COMPRESSION).toBe(0.8);
     expect(DEFAULT_MAX_LATEST_TREND).toBe(0.9);
     expect(DEFAULT_TREND_WINDOW).toBe(3);
+    expect(DEFAULT_PLATEAU_MIN).toBe(2);
+    expect(PLATEAU_BOX_WINDOWS).toEqual([3, 4, 5, 6]);
   });
 
-  it('falls back to defaults when omitted', () => {
-    // Default boxWindow 4 + trendWindow 3: latest (bars 5..7 = 0.008/0.0056/
+  it('falls back to thresholds and trendWindow when omitted', () => {
+    // Default trendWindow 3: latest (bars 5..7 = 0.008/0.0056/
     // 0.0056, mean 0.0064) narrower than middle (bars 2..4 = 0.02/0.02/0.008,
     // mean 0.016) → latestTrend ≈ 0.4 < 0.9 while compression < 0.8.
     const result = computeQuietMetrics(candles([
@@ -362,7 +365,7 @@ describe('Coin Scan score (sort key) and defaults', () => {
       [iso(5), 100, 0.008],
       [iso(6), 100, 0.0056],
       [iso(7), 100, 0.0056],
-    ]), {});
+    ]), { boxWindow: 4 });
     expect(result).not.toBeNull();
     expect(result!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
     expect(result!.latestTrend).toBeLessThan(DEFAULT_MAX_LATEST_TREND);
@@ -406,5 +409,116 @@ describe('Gold-style 1D convergence (08-01..08-04 horizontal, amplitude narrowin
     expect(result!.compression).toBeCloseTo(0.0045 / 0.012, 5); // 0.375
     expect(result!.latestTrend).toBeCloseTo(0.8, 5);
     expect(result!.qualified).toBe(true);
+  });
+});
+
+describe('Coin Scan plateau (multi-window consecutive convergence)', () => {
+  const plateauParams = { maxCompression: 0.8, maxLatestTrend: 0.9, trendWindow: 3, plateauMin: 2 };
+
+  function ampBars(amplitudes: number[]): Candlestick[] {
+    return candles(amplitudes.map((amplitude, index) => [iso(index), 100, amplitude]));
+  }
+
+  it('qualifies when every plateau window compresses (step-narrowing tail)', () => {
+    // bars 0..5 wide (0.02), 6..8 medium (0.01), 9..11 narrow (0.003). Every box
+    // window 3..6 compresses against its prior and still narrows into the tail.
+    const result = computePlateau(ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.003, 0.003, 0.003]), plateauParams);
+    expect(result).not.toBeNull();
+    expect(result!.windows.map((w) => w.boxWindow)).toEqual([3, 4, 5, 6]);
+    expect(result!.windows.map((w) => w.qualified)).toEqual([true, true, true, true]);
+    expect(result!.plateauWidth).toBe(4);
+    expect(result!.qualified).toBe(true);
+    // Best window = the qualified window with the smallest score. bw=3 is
+    // degenerate (latestTrend == compression = 0.3) and its compression is the
+    // most extreme, so it wins with score 0.6 (bw=4 scores 0.3167 + 0.3).
+    expect(result!.bestBoxWindow).toBe(3);
+    expect(result!.compression).toBeCloseTo(0.3, 5);
+    expect(result!.latestTrend).toBeCloseTo(0.3, 5);
+    expect(result!.score).toBeCloseTo(0.6, 5);
+  });
+
+  it('clamps tr(bw) = min(trendWindow, boxWindow): bw=3 collapses latest onto box', () => {
+    // With the default trendWindow 3, bw=3 uses tr=3: the latest-trend windows
+    // coincide with the box windows (latest == recent, middle == prior), so
+    // latestTrend equals compression at bw=3 and the compression gate carries
+    // it. This matches the case-library plateau ({3,4} for HYPE 1H): a 2-bar
+    // latest window at bw=3 was too twitchy (HYPE 1H lt 0.905 > 0.9 with tr=2,
+    // 0.669 == compression with tr=3).
+    const result = computePlateau(ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.003, 0.003, 0.003]), plateauParams);
+    expect(result).not.toBeNull();
+    const bw3 = result!.windows[0];
+    expect(bw3.boxWindow).toBe(3);
+    expect(bw3.compression).toBeCloseTo(0.3, 5);
+    expect(bw3.latestTrend).toBeCloseTo(bw3.compression, 5);
+    expect(bw3.qualified).toBe(true);
+  });
+
+  it('counts consecutive qualified windows without merging gaps ([T,T,F,T] → width 2)', () => {
+    // A wide blip at bar 7 (0.05) sits inside bw=5's recent window but is diluted
+    // out of bw=6's larger window, so only bw=5 fails compression.
+    const result = computePlateau(ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.05, 0.01, 0.01, 0.003, 0.003]), plateauParams);
+    expect(result).not.toBeNull();
+    expect(result!.windows.map((w) => w.qualified)).toEqual([true, true, false, true]);
+    expect(result!.plateauWidth).toBe(2); // bw 3-4 run; bw 6 is not merged across the gap
+    expect(result!.qualified).toBe(true); // 2 >= plateauMin 2
+  });
+
+  it('requires plateauMin consecutive windows to qualify', () => {
+    const bars = ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.05, 0.01, 0.01, 0.003, 0.003]);
+    const min2 = computePlateau(bars, { ...plateauParams, plateauMin: 2 });
+    const min3 = computePlateau(bars, { ...plateauParams, plateauMin: 3 });
+    expect(min2).not.toBeNull();
+    expect(min3).not.toBeNull();
+    expect(min2!.qualified).toBe(true);
+    expect(min3!.qualified).toBe(false); // width 2 < plateauMin 3
+  });
+
+  it('selects the best window from the qualified windows by min score', () => {
+    const result = computePlateau(ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.05, 0.01, 0.01, 0.003, 0.003]), plateauParams);
+    expect(result).not.toBeNull();
+    // Qualified windows: bw=3 (score 0.4571), bw=4 (0.4886), bw=6 (0.9453).
+    // bw=3 wins: degenerate latestTrend == compression = (0.016/3)/(0.07/3).
+    expect(result!.bestBoxWindow).toBe(3);
+    expect(result!.compression).toBeCloseTo(0.016 / 0.07, 5); // ≈ 0.2286
+    expect(result!.latestTrend).toBeCloseTo(0.016 / 0.07, 5);
+    expect(result!.score).toBeCloseTo(2 * (0.016 / 0.07), 5);
+  });
+
+  it('plateauMin=1 degenerates to a single qualifying window', () => {
+    // Only bw=3 compresses (a wide blip at bar 4 makes bw=4's recent not below
+    // its prior); bw=5/6 lack history (8 bars < 2 * 5). Width is 1, so it only
+    // qualifies when plateauMin = 1.
+    const bars = ampBars([0.01, 0.01, 0.01, 0.01, 0.05, 0.004, 0.004, 0.004]);
+    const min1 = computePlateau(bars, { ...plateauParams, plateauMin: 1 });
+    const min2 = computePlateau(bars, { ...plateauParams, plateauMin: 2 });
+    expect(min1).not.toBeNull();
+    expect(min2).not.toBeNull();
+    expect(min1!.windows.map((w) => w.qualified)).toEqual([true, false, false, false]);
+    expect(min1!.plateauWidth).toBe(1);
+    expect(min1!.qualified).toBe(true);
+    expect(min2!.qualified).toBe(false);
+    expect(min1!.bestBoxWindow).toBe(3);
+  });
+
+  it('lets small box windows qualify when larger ones lack history', () => {
+    // 8 completed bars: bw=3 and bw=4 compute and qualify; bw=5 (needs 10) and
+    // bw=6 (needs 12) are null, and a null window never breaks the run.
+    const result = computePlateau(ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.004, 0.004]), plateauParams);
+    expect(result).not.toBeNull();
+    expect(result!.windows.map((w) => w.qualified)).toEqual([true, true, false, false]);
+    expect(result!.plateauWidth).toBe(2);
+    expect(result!.qualified).toBe(true);
+    expect(result!.bestBoxWindow).toBe(3);
+  });
+
+  it('returns null when no box window can be computed', () => {
+    // 4 bars is fewer than 2 * 3 (the smallest plateau window).
+    expect(computePlateau(ampBars([0.02, 0.02, 0.02, 0.02]), plateauParams)).toBeNull();
+  });
+
+  it('returns null when a price is non-positive', () => {
+    const bars = ampBars([0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.003, 0.003, 0.003]);
+    bars[5] = { ...bars[5], low: 0, high: 0 };
+    expect(computePlateau(bars, plateauParams)).toBeNull();
   });
 });
