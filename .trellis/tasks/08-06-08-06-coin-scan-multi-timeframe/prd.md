@@ -29,11 +29,13 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1:案例库全绿 — C1~C4 行为不变;C5 在 1H(或全周期模式下)应扫出。
-- [ ] AC2:结果每币一行,收敛周期列正确显示(如 C5 应显示 1H)。
-- [ ] AC3:点扫描一次返回全周期聚合结果。
-- [ ] AC4:anchor 在全周期模式下对每个周期生效。
-- [ ] AC5:`npm test` 全绿 + `npx tsc --noEmit` 干净。
+- [x] AC1:案例库全绿 — 真数据回归(`_tmp-case-library.test.ts`,已删):C1/C2 黄金 1D 出、C3 ONUSDT 4H 出(plateau {3,4,5} 宽3)、C4 HYPE 4H now 不出(孤立 bw4,宽1)、C5 15m 拒/1H 出(plateau {3,4}),收敛周期=1H。数值与案例库一致(comp 0.522/0.635/0.669 等)。
+- [x] AC2:结果每币一行,收敛周期列正确显示(C5 显示 1H)。
+- [x] AC3:点扫描一次返回全周期聚合结果(service 聚合 + 服务测试覆盖)。
+- [x] AC4:anchor 在全周期模式下对每个周期生效(服务测试「past anchor applied to every timeframe」)。
+- [x] AC5:`npm test` 181 绿 + `npx tsc --noEmit` 干净。
+
+> 注:`tr(bw)=min(trendWindow, boxWindow)`(bw=3 退化,latest==box,compression 门承载)— 实测修正自设计初稿 `bw-1`(tr=2 太灵敏,HYPE 1H lt 0.905>0.9 险挂)。详见 design.md/spec。
 
 ## Out of Scope
 

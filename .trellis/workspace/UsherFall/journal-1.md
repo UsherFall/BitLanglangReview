@@ -557,3 +557,31 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Status
 
 [OK] v5 **Archived**。剩余:multi-timeframe(planning,待 design/implement)、box-end(planning)。
+
+## Session 13: multi-timeframe 全周期收敛 — 实施 + 验收
+
+**Date**: 2026-08-06
+**Task**: 08-06-08-06-coin-scan-multi-timeframe(in_progress → 待归档)
+**Branch**: `master`
+
+### Summary
+
+单周期扫描替换为**全周期唯一模式**(用户决策):一次点扫描跑 5 周期,每币一行 + 收敛周期列。computePlateau 扫 bw∈{3,4,5,6},plateauMin(2) 连续合格窗口滤孤立误报。service 并行池(并发10)拉 topN×5,limit 13 按时间去 forming,排序 qualifiedCount 降序→bestScore 升序。route 删 timeframe/boxWindow 加 plateauMin。UI 删周期选择器/压缩窗口,加连续收敛窗口 + 展开行每周期明细。
+
+**真数据验证(AC1)**:`_tmp-case-library.test.ts`(已删)重跑 C1~C5 全过,数值与案例库精确一致(comp 0.522/0.635/0.669)。**发现并修正设计缺陷**:`tr(bw)=min(tr, boxWindow)` 而非初稿 `bw-1` —— bw=3 用 tr=2 太灵敏(HYPE 1H lt 0.905>0.9 险挂),tr=3 退化(latest==box,compression 门承载)精确复现案例库。C4 仍正确拒(孤立 bw4)。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e9735bf` | feat(scan): multi-timeframe convergence, one row per coin with 收敛周期 column |
+
+### Testing
+
+- [OK] `npm test`: 181 tests / 34 files 全绿
+- [OK] `npx tsc --noEmit`: 干净
+- [OK] 案例库真数据回归:C1~C5 全过(AC1)
+
+### Status
+
+[OK] 实施 **Committed**;待归档。剩余:box-end(planning)。
