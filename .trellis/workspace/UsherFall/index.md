@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-08-05
+- **Total Sessions**: 9
+- **Last Active**: 2026-08-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~430 | Active |
+| `journal-1.md` | ~464 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-08-06 | 扫描收敛 v3.5:移除箱体门,收敛=压缩+收窄趋势 | `2c21aad`, `fb292ff` | `master` |
 | 8 | 2026-08-05 | 扫描收敛 v3/v3.5 + 成型bar修复 + UI滚动修复 | `33a3f7d`, `87ddb27`, `3d964a4` | `master` |
 | 7 | 2026-08-05 | 扫描极致收敛规则 + ServerChan 通知修复 | `b20b7d6`, `f8e9c08`, `5cf4600` | `master` |
 | 6 | 2026-08-05 | 选币价格警报 + Server酱通知 + spec 更新 | `e41315a`, `b9df17d`, `9c8e00b` | `master` |

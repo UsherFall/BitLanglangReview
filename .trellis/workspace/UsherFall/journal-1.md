@@ -428,3 +428,37 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: 扫描收敛 v3.5:移除箱体门,收敛=压缩+收窄趋势
+
+**Date**: 2026-08-06
+**Task**: 扫描收敛 v3.5:移除箱体门,收敛=压缩+收窄趋势
+**Branch**: `master`
+
+### Summary
+
+用户反馈黄金两天前 4h/日线该扫出但没扫到。回溯实测:黄金 4H 收敛窗口(07-31~08-02)compression 0.18~0.68 达标、量缩达标,但全被 boxTightness 1.13~1.81 拒(缓坡压缩非紧箱体被误杀)。决策:目标'现在在收敛且收敛到极致'由 compression+latestTrend 承担,移除 boxTightness 箱体门(计算/参数/UI 列全删,boxWindow 保留为压缩窗口)。实现后黄金 08-01 收敛窗口 6 bar 全 QUALIFIED。黄金 1D 仍卡量缩门(quiet 不足),与 box 无关,另开任务。168 tests 全绿 + tsc 干净。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c21aad` | (see git log) |
+| `fb292ff` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
