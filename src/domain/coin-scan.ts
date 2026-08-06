@@ -3,10 +3,8 @@ import type { ReviewTimeframe } from './trade';
 
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
-/** Number of trailing completed bars used to compute boxTightness. */
+/** Number of trailing completed bars used for the volatility-compression windows. */
 export const DEFAULT_BOX_WINDOW = 12;
-/** Scale-free box-shape threshold: boxTightness <= maxBoxRatio to qualify. */
-export const DEFAULT_MAX_BOX_RATIO = 0.9;
 /**
  * Volatility-compression threshold: compression <= maxCompression to qualify.
  * compression = mean amplitude of the recent boxWindow bars / mean amplitude of
@@ -34,10 +32,8 @@ export type ShrinkScanParams = {
   consecutive: number;
   window: number;
   minQuoteVolume24h: number;
-  /** Box-shape window; absent falls back to DEFAULT_BOX_WINDOW. */
+  /** Volatility-compression window; absent falls back to DEFAULT_BOX_WINDOW. */
   boxWindow?: number;
-  /** Box-shape tightness threshold; absent falls back to DEFAULT_MAX_BOX_RATIO. */
-  maxBoxRatio?: number;
   /** Volatility-compression threshold; absent falls back to DEFAULT_MAX_COMPRESSION. */
   maxCompression?: number;
   /** Latest-trend threshold; absent falls back to DEFAULT_MAX_LATEST_TREND. */
@@ -57,7 +53,6 @@ export type ScanRow = {
   amplitudeRatio: number;
   intensity: number;
   consecutiveQuiet: number;
-  boxTightness: number;
   compression: number;
   latestTrend: number;
   qualified: boolean;
@@ -77,7 +72,6 @@ export type QuietMetrics = {
   amplitudeRatio: number;
   intensity: number;
   consecutiveQuiet: number;
-  boxTightness: number;
   compression: number;
   latestTrend: number;
   qualified: boolean;
@@ -85,7 +79,7 @@ export type QuietMetrics = {
 
 export type QuietMetricsParams = Pick<
   ShrinkScanParams,
-  'ratioThreshold' | 'consecutive' | 'window' | 'boxWindow' | 'maxBoxRatio' | 'maxCompression' | 'maxLatestTrend' | 'trendWindow'
+  'ratioThreshold' | 'consecutive' | 'window' | 'boxWindow' | 'maxCompression' | 'maxLatestTrend' | 'trendWindow'
 >;
 
 // Used instead of Infinity so JSON serialization never produces null.
@@ -107,23 +101,14 @@ function amplitudeOf(candle: Candlestick): number {
  * (volume shrinking against its own trailing `window` mean). Amplitude no
  * longer gates calm: a coin that has been quiet for a long time has an
  * amplitude ratio near 1 (current ≈ its own mean) and must not be rejected
- * for not being "freshly" quiet. The shape requirement is carried by
- * `boxTightness` instead: the trailing `boxWindow` completed bars must form a
- * tight box (`boxTightness <= maxBoxRatio`). A large candle anywhere inside
- * the last `boxWindow` bars stretches the box range and pushes `boxTightness`
- * over the threshold, which is what keeps fresh flags (a big candle followed
- * by a small consolidation) out.
- *
- * boxTightness is a scale-free shape measure over the trailing `boxWindow`
- * completed bars: R / (m * sqrt(boxWindow)), where R is the total range
- * (maxHigh - minLow) / minLow and m is the mean per-bar amplitude
- * (high - low) / low. A genuine box oscillates in place so R ≈ m * sqrt(N)
- * → boxTightness ≈ 1; a one-sided trend accumulates drift so R ≈ m * N
- * → boxTightness ≈ sqrt(N); a large candle inside the window makes R large
- * relative to m, so boxTightness climbs well above 1. Because it is divided
- * by sqrt(N) and normalized to the instrument's own amplitude, one threshold
- * works for every N, timeframe, and absolute volatility level. m <= 0
- * (all-flat bars) yields boxTightness 0 (a perfect box).
+ * for not being "freshly" quiet. A coin qualifies only when it is 收敛
+ * (converging): its recent volatility compressed against its own past
+ * (`compression <= maxCompression`) and still shrinking toward the present
+ * (`latestTrend <= maxLatestTrend`). There is no box-shape gate: a slow-slope
+ * compression (a coin whose per-bar amplitude keeps narrowing while the price
+ * drifts) is a legitimate 收敛 and must not be rejected for not being a tight
+ * box — that was the v2 boxTightness bug that mis-fired on gold-style
+ * compression.
  *
  * compression is a scale-free volatility-compression measure over the trailing
  * `boxWindow` completed bars (recent) against the `boxWindow` bars immediately
@@ -155,7 +140,6 @@ function amplitudeOf(candle: Candlestick): number {
 export function computeQuietMetrics(candles: readonly Candlestick[], params: QuietMetricsParams): QuietMetrics | null {
   const { ratioThreshold, consecutive, window } = params;
   const boxWindow = params.boxWindow ?? DEFAULT_BOX_WINDOW;
-  const maxBoxRatio = params.maxBoxRatio ?? DEFAULT_MAX_BOX_RATIO;
   const maxCompression = params.maxCompression ?? DEFAULT_MAX_COMPRESSION;
   const maxLatestTrend = params.maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND;
   const trendWindow = params.trendWindow ?? DEFAULT_TREND_WINDOW;
@@ -204,27 +188,19 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
     consecutiveQuiet += 1;
   }
 
-  // Box-shape tightness and volatility compression both use the trailing
-  // `boxWindow` completed bars (recent) and the `boxWindow` bars immediately
-  // before them (prior). The box range and recent mean amplitude feed
-  // boxTightness; the recent/prior mean amplitudes feed compression.
-  let maxHigh = -Infinity;
-  let minLow = Infinity;
+  // Volatility compression: the trailing `boxWindow` completed bars (recent)
+  // vs the `boxWindow` bars immediately before them (prior). Mean amplitudes
+  // feed the compression ratio.
   let recentAmplitudeSum = 0;
   for (let i = count - boxWindow; i < count; i += 1) {
-    const candle = sorted[i];
-    maxHigh = Math.max(maxHigh, candle.high);
-    minLow = Math.min(minLow, candle.low);
-    recentAmplitudeSum += amplitudeOf(candle);
+    recentAmplitudeSum += amplitudeOf(sorted[i]);
   }
   let priorAmplitudeSum = 0;
   for (let i = count - 2 * boxWindow; i < count - boxWindow; i += 1) {
     priorAmplitudeSum += amplitudeOf(sorted[i]);
   }
-  const range = (maxHigh - minLow) / minLow;
   const meanRecentAmplitude = recentAmplitudeSum / boxWindow;
   const meanPriorAmplitude = priorAmplitudeSum / boxWindow;
-  const boxTightness = meanRecentAmplitude > 0 ? range / (meanRecentAmplitude * Math.sqrt(boxWindow)) : 0;
   const compression = meanPriorAmplitude > 0
     ? meanRecentAmplitude / meanPriorAmplitude
     : meanRecentAmplitude > 0 ? LARGE_RATIO : 0;
@@ -255,12 +231,10 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
     amplitudeRatio: amplitudeRatios[amplitudeRatios.length - 1],
     intensity,
     consecutiveQuiet,
-    boxTightness,
     compression,
     latestTrend,
     qualified:
       consecutiveQuiet >= consecutive &&
-      boxTightness <= maxBoxRatio &&
       compression <= maxCompression &&
       latestTrend <= maxLatestTrend,
   };

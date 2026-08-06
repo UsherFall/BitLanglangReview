@@ -44,7 +44,6 @@ const params: ShrinkScanParams = {
   window: 2,
   minQuoteVolume24h: 0,
   boxWindow: 2,
-  maxBoxRatio: 0.9,
   maxCompression: 0.8,
   maxLatestTrend: 0.9,
   trendWindow: 2,
@@ -73,16 +72,15 @@ describe('CoinScanService', () => {
       instrument: 'BTC-USDT-SWAP',
       timeframe: '5m',
       direction: 'earlier',
-      limit: 5, // max(window + consecutive, boxWindow) + 1 forming bar
+      limit: 5, // max(window + consecutive, 2 * boxWindow) + 1 forming bar
       anchor: expect.any(Number),
     });
     for (const row of result.scanned) {
       expect(row.qualified).toBe(true);
-      // Flat candles make amplitudeRatio 0 and boxTightness 0, so quiet scores
-      // are volume ratios halved: intensity = mean((0.2/2, 0.25/2)).
+      // Flat candles make amplitudeRatio 0, so quiet scores are volume ratios
+      // halved: intensity = mean((0.2/2, 0.25/2)).
       expect(row.intensity).toBeCloseTo(((0.2 + 0.25) / 2) / 2);
       expect(row.amplitudeRatio).toBe(0);
-      expect(row.boxTightness).toBe(0);
       expect(row.consecutiveQuiet).toBe(2);
     }
     // quoteVolume24h is 24h quote-volume in USDT = volCcy24h * last.
@@ -93,7 +91,6 @@ describe('CoinScanService', () => {
     expect(result.scanned[0].instrument).toBe('BTC-USDT-SWAP');
     // The response echoes the effective scan parameters.
     expect(result.params.boxWindow).toBe(2);
-    expect(result.params.maxBoxRatio).toBe(0.9);
     expect(result.params.maxCompression).toBe(0.8);
     expect(result.params.maxLatestTrend).toBe(0.9);
     expect(result.params.trendWindow).toBe(2);
@@ -173,7 +170,6 @@ describe('CoinScanService', () => {
     expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 13 }));
     // The 12 completed bars cover recent + prior windows, so metrics are computed.
     expect(result.scanned.length).toBeGreaterThan(0);
-    expect(result.scanned[0].boxTightness).toBe(0);
     expect(result.scanned[0].compression).toBe(0);
   });
 });

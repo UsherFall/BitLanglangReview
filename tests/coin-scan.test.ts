@@ -3,7 +3,6 @@ import type { Candlestick } from '../src/domain/candlestick';
 import {
   computeQuietMetrics,
   DEFAULT_BOX_WINDOW,
-  DEFAULT_MAX_BOX_RATIO,
   DEFAULT_MAX_COMPRESSION,
   DEFAULT_MAX_LATEST_TREND,
   DEFAULT_TREND_WINDOW,
@@ -49,7 +48,7 @@ function iso(offset: number): string {
 // Params for the small (4-candle) ratio tests: boxWindow is lowered so the few
 // candles still satisfy the box-window history guard; trendWindow is lowered to
 // 2 so the latest-trend windows also fit in 4 candles.
-const params = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, maxBoxRatio: 0.9, trendWindow: 2 };
+const params = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, trendWindow: 2 };
 const t = [
   '2024-05-21T00:00:00+08:00',
   '2024-05-21T00:05:00+08:00',
@@ -70,9 +69,6 @@ describe('Coin Scan quiet-consolidation metrics', () => {
     expect(result!.amplitudeRatio).toBeCloseTo(0.008 / 0.015);
     expect(result!.consecutiveQuiet).toBe(2);
     expect(result!.intensity).toBeCloseTo((0.5 + (40 / 75 + 0.008 / 0.015) / 2) / 2);
-    // Both trailing bars anchor at the same low (100), so the 2-bar box
-    // overlaps and stays tight.
-    expect(result!.boxTightness).toBeCloseTo(0.79, 1);
     expect(result!.qualified).toBe(true);
   });
 
@@ -114,7 +110,7 @@ describe('Coin Scan quiet-consolidation metrics', () => {
     ]), params)).toBeNull();
   });
 
-  it('treats a zero-amplitude baseline with a flat current bar as calm and a perfect box', () => {
+  it('treats a zero-amplitude baseline with a flat current bar as calm', () => {
     const result = computeQuietMetrics(candles([
       [t[0], 100, 0],
       [t[1], 100, 0],
@@ -124,14 +120,15 @@ describe('Coin Scan quiet-consolidation metrics', () => {
     expect(result).not.toBeNull();
     expect(result!.amplitudeRatio).toBe(0);
     expect(result!.consecutiveQuiet).toBe(2);
-    expect(result!.boxTightness).toBe(0);
+    expect(result!.compression).toBe(0);
     expect(result!.qualified).toBe(true);
   });
 
   it('does not let a wide-amplitude bar break the calm streak (volume-only gate)', () => {
     // t[3] has amplitude ratio 0.05 / 0.015 = 3.33, far above any amplitude
     // gate, but its volume ratio 40/75 is still < ratioThreshold, so the calm
-    // streak is volume-only in v2. The wide bar still breaks the box shape.
+    // streak is volume-only. The wide bar still fails the compression gate
+    // (recent 0.03 vs prior 0.02 → compression 1.5 > 0.8).
     const result = computeQuietMetrics(candles([
       [t[0], 100, 0.02],
       [t[1], 100, 0.02],
@@ -141,20 +138,22 @@ describe('Coin Scan quiet-consolidation metrics', () => {
     expect(result).not.toBeNull();
     expect(result!.amplitudeRatio).toBeGreaterThan(1);
     expect(result!.consecutiveQuiet).toBe(2);
-    expect(result!.boxTightness).toBeGreaterThan(1);
+    expect(result!.compression).toBeGreaterThan(0.8);
     expect(result!.qualified).toBe(false);
   });
 });
 
-describe('Coin Scan boxTightness (v2)', () => {
-  // A 36-bar suite: 24 pre-box bars (volume 100, `preAmplitude`) followed by 12
-  // box bars. The 24 pre-box bars cover the prior compression window (the
+describe('Coin Scan convergence without a box-shape gate (v3.5)', () => {
+  // A 36-bar suite: 24 pre-window bars (volume 100, `preAmplitude`) followed by
+  // 12 convergence bars. The 24 pre bars cover the prior compression window (the
   // boxWindow bars right before the trailing box), and their default amplitude
-  // (2%) is higher than the box span (0.5%), so the suite's compression < 1 and
-  // a tight box qualifies under DEFAULT_MAX_COMPRESSION. The box bars alternate
-  // lean-low / lean-high so their union spans [100 - band/2, 100 + band/2] and
-  // each bar spans `span`. The trailing 3 box bars (the `consecutive` streak)
-  // drop volume to 30 unless shrink is false.
+  // (2%) is higher than the convergence span (0.5%), so the suite's compression
+  // < 1 and it qualifies under DEFAULT_MAX_COMPRESSION. The convergence bars
+  // alternate lean-low / lean-high so their union spans
+  // [100 - band/2, 100 + band/2] and each bar spans `span`. The trailing 3 bars
+  // (the `consecutive` streak) drop volume to 30 unless shrink is false.
+  // There is no boxTightness assertion: a slow-slope compression (price drifting
+  // while amplitude narrows) is a legitimate 收敛 and must qualify.
   function boxSuite(options: {
     band?: number;
     scale?: number;
@@ -180,58 +179,49 @@ describe('Coin Scan boxTightness (v2)', () => {
   }
 
   // maxLatestTrend is set permissively (1.1) so the uniform box's latestTrend ≈ 1.0
-  // does not interfere: this block isolates the boxTightness gate. The default 0.9
+  // does not interfere: this block isolates the compression gate. The default 0.9
   // rejects a uniform box, which is the intended latestTrend behavior.
-  const boxParams = { ratioThreshold: 0.7, consecutive: 3, window: 3, boxWindow: 12, maxBoxRatio: 0.9, maxLatestTrend: 1.1 };
+  const convergeParams = { ratioThreshold: 0.7, consecutive: 3, window: 3, boxWindow: 12, maxLatestTrend: 1.1 };
 
-  it('qualifies a real box: boxTightness under maxBoxRatio', () => {
-    const result = computeQuietMetrics(boxSuite({}), boxParams);
+  it('qualifies a compressed coin even when the price range drifts (no box-shape gate)', () => {
+    // band 1.5 spans a wide price range relative to the 0.5% bars, which under
+    // the v2 boxTightness gate scored ~0.87 (barely) — but a wide band here is
+    // the "slow-slope compression" case the box gate mis-fired on (gold).
+    const result = computeQuietMetrics(boxSuite({ band: 4 }), convergeParams);
     expect(result).not.toBeNull();
     expect(result!.consecutiveQuiet).toBe(3);
-    // band 1.5 / (span 0.5 * sqrt(12)) ≈ 0.87 < 0.9
-    expect(result!.boxTightness).toBeCloseTo(0.87, 1);
-    expect(result!.boxTightness).toBeLessThan(boxParams.maxBoxRatio);
+    expect(result!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
     expect(result!.qualified).toBe(true);
   });
 
-  it('rejects a coin whose box is stretched by a large candle inside the window', () => {
-    const result = computeQuietMetrics(boxSuite({ lastSpan: 8 }), boxParams);
+  it('rejects when the compression is stretched by a large candle inside the window', () => {
+    // The oversized last bar lifts the recent mean amplitude so compression
+    // climbs above the threshold — a fresh flag (big candle + small follow-up).
+    // With no box-shape gate this is the compression gate's job: the recent
+    // window must be meaningfully quieter than the prior, and one big candle
+    // kills that.
+    const result = computeQuietMetrics(boxSuite({ lastSpan: 16 }), convergeParams);
     expect(result).not.toBeNull();
     expect(result!.consecutiveQuiet).toBe(3);
-    expect(result!.boxTightness).toBeGreaterThan(boxParams.maxBoxRatio);
+    expect(result!.compression).toBeGreaterThan(DEFAULT_MAX_COMPRESSION);
     expect(result!.qualified).toBe(false);
   });
 
-  it('rejects a wide oscillation around 1.0 and passes a nested tight box', () => {
-    const wide = computeQuietMetrics(boxSuite({ band: 1.73 }), boxParams);
-    const nested = computeQuietMetrics(boxSuite({ band: 1.4 }), boxParams);
-    expect(wide).not.toBeNull();
-    expect(nested).not.toBeNull();
-    expect(wide!.boxTightness).toBeCloseTo(1, 1);
-    expect(wide!.boxTightness).toBeGreaterThan(boxParams.maxBoxRatio);
-    expect(wide!.qualified).toBe(false);
-    expect(nested!.boxTightness).toBeLessThan(wide!.boxTightness);
-    expect(nested!.boxTightness).toBeLessThan(boxParams.maxBoxRatio);
-    expect(nested!.qualified).toBe(true);
-  });
-
-  it('is scale-free: 0.5%/bar and 2%/bar boxes pass with the same threshold', () => {
-    const small = computeQuietMetrics(boxSuite({}), boxParams); // ~0.5% per bar
-    const large = computeQuietMetrics(boxSuite({ scale: 4 }), boxParams); // ~2% per bar
+  it('is scale-free: 0.5%/bar and 2%/bar convergence pass with the same threshold', () => {
+    const small = computeQuietMetrics(boxSuite({}), convergeParams); // ~0.5% per bar
+    const large = computeQuietMetrics(boxSuite({ scale: 4 }), convergeParams); // ~2% per bar
     expect(small).not.toBeNull();
     expect(large).not.toBeNull();
-    expect(small!.boxTightness).toBeCloseTo(large!.boxTightness, 1);
-    expect(small!.boxTightness).toBeLessThan(boxParams.maxBoxRatio);
-    expect(large!.boxTightness).toBeLessThan(boxParams.maxBoxRatio);
+    expect(small!.compression).toBeCloseTo(large!.compression);
+    expect(small!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
     expect(small!.qualified).toBe(true);
     expect(large!.qualified).toBe(true);
   });
 
   it('does not reject a long-quiet coin whose amplitude ratio is near 1', () => {
     // Every bar has the same ~0.5% amplitude, so the trailing amplitude ratio
-    // is ≈ 1. In v1 that tripped the amplitude gate; in v2 calm is volume-only
-    // and the tight box qualifies.
-    const result = computeQuietMetrics(boxSuite({}), boxParams);
+    // is ≈ 1. In v1 that tripped the amplitude gate; in v2 calm is volume-only.
+    const result = computeQuietMetrics(boxSuite({}), convergeParams);
     expect(result).not.toBeNull();
     expect(result!.amplitudeRatio).toBeCloseTo(1, 1);
     expect(result!.consecutiveQuiet).toBe(3);
@@ -239,39 +229,37 @@ describe('Coin Scan boxTightness (v2)', () => {
   });
 
   it('rejects a dead coin that never shrinks volume', () => {
-    const result = computeQuietMetrics(boxSuite({ shrink: false }), boxParams);
+    const result = computeQuietMetrics(boxSuite({ shrink: false }), convergeParams);
     expect(result).not.toBeNull();
-    // The box is tight but every volume ratio ≈ 1, so no bar is calm.
-    expect(result!.boxTightness).toBeLessThan(boxParams.maxBoxRatio);
+    // Compression is strong but every volume ratio ≈ 1, so no bar is calm.
+    expect(result!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
     expect(result!.consecutiveQuiet).toBe(0);
     expect(result!.qualified).toBe(false);
   });
 
-  it('ignores large candles outside the box window', () => {
-    // The 4 pre-box bars are 10% candles; the 12 box bars are tight. Shape only
-    // depends on the box window, and volume ratios use box bars too.
-    const result = computeQuietMetrics(boxSuite({ preAmplitude: 0.1 }), boxParams);
+  it('ignores large candles outside the convergence window', () => {
+    // The 24 pre bars are 10% candles; the 12 convergence bars are tight. Only
+    // the convergence window feeds compression/volume ratios.
+    const result = computeQuietMetrics(boxSuite({ preAmplitude: 0.1 }), convergeParams);
     expect(result).not.toBeNull();
     expect(result!.consecutiveQuiet).toBe(3);
-    expect(result!.boxTightness).toBeLessThan(boxParams.maxBoxRatio);
+    expect(result!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
     expect(result!.qualified).toBe(true);
   });
 
-  it('falls back to DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO, and DEFAULT_MAX_COMPRESSION when omitted', () => {
+  it('falls back to DEFAULT_BOX_WINDOW and DEFAULT_MAX_COMPRESSION when omitted', () => {
     const result = computeQuietMetrics(boxSuite({}), {
       ratioThreshold: 0.7,
       consecutive: 3,
       window: 3,
       // The uniform box has latestTrend ≈ 1.0; a permissive threshold keeps this
-      // test focused on the three box defaults (the latestTrend default is covered
-      // in the v4 block).
+      // test focused on the compression defaults (the latestTrend default is
+      // covered in the v4 block).
       maxLatestTrend: 1.1,
     });
     expect(result).not.toBeNull();
     expect(DEFAULT_BOX_WINDOW).toBe(12);
-    expect(DEFAULT_MAX_BOX_RATIO).toBe(0.9);
     expect(DEFAULT_MAX_COMPRESSION).toBe(0.8);
-    expect(result!.boxTightness).toBeLessThan(DEFAULT_MAX_BOX_RATIO);
     expect(result!.compression).toBeLessThan(DEFAULT_MAX_COMPRESSION);
     expect(result!.qualified).toBe(true);
   });
@@ -281,7 +269,7 @@ describe('Coin Scan volatility compression (v3)', () => {
   // boxWindow 2 → 4 bars satisfy the 2 * boxWindow history guard. prior = bars
   // [0, 1], recent = bars [2, 3]. The trailing two bars shrink volume so the
   // volume gate stays green and the compression gate decides the verdict.
-  const compressionParams = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, maxBoxRatio: 0.9, maxCompression: 0.8, trendWindow: 2 };
+  const compressionParams = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 2, maxCompression: 0.8, trendWindow: 2 };
 
   it('qualifies when the recent mean amplitude is clearly below the prior window', () => {
     const result = computeQuietMetrics(candles([
@@ -293,7 +281,6 @@ describe('Coin Scan volatility compression (v3)', () => {
     expect(result).not.toBeNull();
     expect(result!.compression).toBeCloseTo(0.3);
     expect(result!.consecutiveQuiet).toBe(2);
-    expect(result!.boxTightness).toBeLessThan(compressionParams.maxBoxRatio);
     expect(result!.qualified).toBe(true);
   });
 
@@ -306,7 +293,6 @@ describe('Coin Scan volatility compression (v3)', () => {
     ]), compressionParams);
     expect(result).not.toBeNull();
     expect(result!.compression).toBeCloseTo(0.9);
-    expect(result!.boxTightness).toBeLessThan(compressionParams.maxBoxRatio);
     expect(result!.qualified).toBe(false);
   });
 
@@ -374,7 +360,7 @@ describe('Coin Scan latest trend (v4)', () => {
   // bars shrink volume so the volume gate stays green; middle/latest amplitudes
   // decide the latestTrend verdict while recent/prior amplitudes keep compression
   // green.
-  const trendParams = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 4, maxBoxRatio: 0.9, maxCompression: 0.8, maxLatestTrend: 0.9, trendWindow: 2 };
+  const trendParams = { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 4, maxCompression: 0.8, maxLatestTrend: 0.9, trendWindow: 2 };
 
   it('qualifies when the latest window keeps narrowing against the middle window', () => {
     const result = computeQuietMetrics(candles([
@@ -390,7 +376,6 @@ describe('Coin Scan latest trend (v4)', () => {
     expect(result).not.toBeNull();
     expect(result!.latestTrend).toBeCloseTo(0.0056 / 0.008); // 0.7
     expect(result!.compression).toBeLessThan(trendParams.maxCompression);
-    expect(result!.boxTightness).toBeLessThan(trendParams.maxBoxRatio);
     expect(result!.qualified).toBe(true);
   });
 
@@ -408,7 +393,6 @@ describe('Coin Scan latest trend (v4)', () => {
     expect(result).not.toBeNull();
     expect(result!.latestTrend).toBeCloseTo(0.00558 / 0.006); // 0.93
     expect(result!.compression).toBeLessThan(trendParams.maxCompression);
-    expect(result!.boxTightness).toBeLessThan(trendParams.maxBoxRatio);
     expect(result!.latestTrend).toBeGreaterThan(trendParams.maxLatestTrend);
     expect(result!.qualified).toBe(false);
   });
@@ -504,7 +488,7 @@ describe('Coin Scan latest trend (v4)', () => {
       [iso(5), 100, 0.006],
       [iso(6), 30, 0.006],
       [iso(7), 20, 0.006],
-    ]), { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 4, maxBoxRatio: 0.9, maxCompression: 0.8 });
+    ]), { ratioThreshold: 0.7, consecutive: 2, window: 2, boxWindow: 4, maxCompression: 0.8 });
     expect(result).not.toBeNull();
     expect(DEFAULT_TREND_WINDOW).toBe(4);
     expect(DEFAULT_MAX_LATEST_TREND).toBe(0.9);

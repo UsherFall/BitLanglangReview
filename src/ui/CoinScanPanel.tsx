@@ -20,7 +20,9 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   const [topN, setTopN] = useState('50');
   const [ratioThreshold, setRatioThreshold] = useState('0.7');
   const [boxWindow, setBoxWindow] = useState('12');
-  const [maxBoxRatio, setMaxBoxRatio] = useState('0.9');
+  const [maxCompression, setMaxCompression] = useState('0.8');
+  const [maxLatestTrend, setMaxLatestTrend] = useState('0.9');
+  const [trendWindow, setTrendWindow] = useState('4');
   const [consecutive, setConsecutive] = useState('3');
   const [avgWindow, setAvgWindow] = useState('20');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
@@ -39,7 +41,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   }, []);
 
   async function scan() {
-    const inputs = [topN, ratioThreshold, boxWindow, maxBoxRatio, consecutive, avgWindow, minQuoteVolume24h];
+    const inputs = [topN, ratioThreshold, boxWindow, maxCompression, maxLatestTrend, trendWindow, consecutive, avgWindow, minQuoteVolume24h];
     if (!scanTimeframes.includes(timeframe) || inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
       return;
@@ -53,7 +55,9 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
         topN,
         ratioThreshold,
         boxWindow,
-        maxBoxRatio,
+        maxCompression,
+        maxLatestTrend,
+        trendWindow,
         consecutive,
         window: avgWindow,
         minQuoteVolume24h,
@@ -139,12 +143,20 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <input type="number" min="0" step="0.05" value={ratioThreshold} onChange={(event) => setRatioThreshold(event.target.value)} />
         </label>
         <label>
-          箱体窗口
+          压缩窗口
           <input type="number" min="1" value={boxWindow} onChange={(event) => setBoxWindow(event.target.value)} />
         </label>
         <label>
-          箱体阈值
-          <input type="number" min="0" step="0.05" value={maxBoxRatio} onChange={(event) => setMaxBoxRatio(event.target.value)} />
+          压缩阈值
+          <input type="number" min="0" step="0.05" value={maxCompression} onChange={(event) => setMaxCompression(event.target.value)} />
+        </label>
+        <label>
+          收窄阈值
+          <input type="number" min="0" step="0.05" value={maxLatestTrend} onChange={(event) => setMaxLatestTrend(event.target.value)} />
+        </label>
+        <label>
+          趋势窗口
+          <input type="number" min="1" value={trendWindow} onChange={(event) => setTrendWindow(event.target.value)} />
         </label>
         <label>
           连续根数
@@ -257,7 +269,8 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
               <th>振幅比</th>
               <th>强度分</th>
               <th>连续平静</th>
-              <th>箱体度</th>
+              <th>压缩比</th>
+              <th>收窄趋势</th>
               <th>状态</th>
               <th>操作</th>
             </tr>
@@ -275,7 +288,8 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
                 <td>{row.amplitudeRatio.toFixed(2)}</td>
                 <td>{row.intensity.toFixed(2)}</td>
                 <td>{row.consecutiveQuiet}</td>
-                <td>{row.boxTightness.toFixed(2)}</td>
+                <td>{formatCompression(row.compression)}</td>
+                <td>{formatLatestTrend(row.latestTrend)}</td>
                 <td>{row.qualified ? '合格' : '—'}</td>
                 <td>
                   <button
@@ -306,6 +320,19 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
 
 function shortInstrument(instrument: string): string {
   return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
+}
+
+function formatCompression(value: number): string {
+  // compression is always a finite number on the wire, but the prior-window-is-flat
+  // boundary reports LARGE_RATIO (1e9) as a "woke up from flat" sentinel. Show it
+  // as a dash so the column stays readable while signaling non-convergence.
+  return value >= 1e9 ? '—' : value.toFixed(2);
+}
+
+function formatLatestTrend(value: number): string {
+  // latestTrend mirrors compression's boundary handling: a flat middle window with
+  // an active latest window reports LARGE_RATIO (1e9), shown as a dash.
+  return value >= 1e9 ? '—' : value.toFixed(2);
 }
 
 function formatPrice(value: number): string {

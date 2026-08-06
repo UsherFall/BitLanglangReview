@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
-import { DEFAULT_BOX_WINDOW, DEFAULT_MAX_BOX_RATIO, DEFAULT_MAX_COMPRESSION, DEFAULT_MAX_LATEST_TREND, DEFAULT_TREND_WINDOW, scanTimeframes } from '../domain/coin-scan';
+import { DEFAULT_BOX_WINDOW, DEFAULT_MAX_COMPRESSION, DEFAULT_MAX_LATEST_TREND, DEFAULT_TREND_WINDOW, scanTimeframes } from '../domain/coin-scan';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
@@ -154,11 +154,11 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         const window = parseScanParam(url.searchParams.get('window'), 20);
         const ratioThreshold = parseScanParam(url.searchParams.get('ratioThreshold'), 0.7);
         const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
-        // boxWindow/maxBoxRatio are optional. parseScanParam's Number(null) === 0
-        // defect would turn an absent param into 0 and trip the guard, so parse
-        // them with an optional parser that maps null/empty/NaN → undefined.
+        // boxWindow/maxCompression/maxLatestTrend/trendWindow are optional.
+        // parseScanParam's Number(null) === 0 defect would turn an absent param
+        // into 0 and trip the guard, so parse them with an optional parser that
+        // maps null/empty/NaN → undefined.
         const boxWindow = parseOptionalNumber(url.searchParams.get('boxWindow'));
-        const maxBoxRatio = parseOptionalNumber(url.searchParams.get('maxBoxRatio'));
         const maxCompression = parseOptionalNumber(url.searchParams.get('maxCompression'));
         const maxLatestTrend = parseOptionalNumber(url.searchParams.get('maxLatestTrend'));
         const trendWindow = parseOptionalNumber(url.searchParams.get('trendWindow'));
@@ -166,9 +166,6 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (boxWindow !== undefined && boxWindow <= 0) {
-          return send(res, 400, { error: 'Invalid scan parameters' });
-        }
-        if (maxBoxRatio !== undefined && maxBoxRatio <= 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (maxCompression !== undefined && maxCompression <= 0) {
@@ -190,7 +187,6 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
             window,
             minQuoteVolume24h,
             boxWindow: boxWindow ?? DEFAULT_BOX_WINDOW,
-            maxBoxRatio: maxBoxRatio ?? DEFAULT_MAX_BOX_RATIO,
             maxCompression: maxCompression ?? DEFAULT_MAX_COMPRESSION,
             maxLatestTrend: maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND,
             trendWindow: trendWindow ?? DEFAULT_TREND_WINDOW,
