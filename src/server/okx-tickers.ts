@@ -1,4 +1,5 @@
 import { defaultFetchJson, type FetchJson } from './http';
+import type { Ticker, TickerSource } from './market-data';
 
 export type OkxTicker = {
   instrument: string;
@@ -46,4 +47,19 @@ function change24hPercent(last: string | undefined, open24h: string | undefined)
   const openValue = Number(open24h);
   if (!Number.isFinite(lastValue) || !Number.isFinite(openValue) || openValue === 0) return 0;
   return ((lastValue - openValue) / openValue) * 100;
+}
+
+/**
+ * OKX implementation of `TickerSource`, delegating to `fetchOkxTickers` so the
+ * native fetch logic (USDT-SWAP filter, `volCcy24h * last` quote-volume) stays
+ * in one place. FreeReplay/trade-review paths keep using the OKX candles
+ * regardless of the coin-scan data source; this class is the OKX option for the
+ * switchable scan/alert data source.
+ */
+export class OkxTickerSource implements TickerSource {
+  constructor(private readonly fetchJson: FetchJson = defaultFetchJson) {}
+
+  async listTickers(): Promise<Ticker[]> {
+    return fetchOkxTickers(this.fetchJson);
+  }
 }

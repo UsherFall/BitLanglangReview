@@ -1,22 +1,17 @@
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { CandlestickStore } from './candlestick-store';
+import type { CandleRequest, CandleSource } from './market-data';
 
 type FetchJson = (url: string) => Promise<unknown>;
 
-type Request = {
-  instrument: string;
-  timeframe: ReviewTimeframe;
-  anchor: number;
-  direction: 'earlier' | 'later';
-  limit: number;
-};
+type Request = CandleRequest;
 
 type OkxResponse = {
   data?: string[][];
 };
 
-export class CandlestickService {
+export class CandlestickService implements CandleSource {
   constructor(
     private readonly store: CandlestickStore,
     private readonly fetchJson: FetchJson = defaultFetchJson,

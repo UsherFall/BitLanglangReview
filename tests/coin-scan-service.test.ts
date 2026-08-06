@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import type { ShrinkScanParams } from '../src/domain/coin-scan';
 import { CoinScanService } from '../src/server/coin-scan-service';
+import type { Ticker } from '../src/server/market-data';
 
 function makeCandle(timestamp: number, volume: number): Candlestick {
   return {
@@ -26,14 +27,14 @@ const completedBar = (barsBack: number, volume: number) => makeCandle(periodStar
 // formingBar(volume) is the still-forming current bar.
 const formingBar = (volume: number) => makeCandle(periodStart, volume);
 
-const tickerPayload = {
-  data: [
-    { instId: 'ETH-USDT-SWAP', last: '3500', open24h: '3400', volCcy24h: '90000000' },
-    { instId: 'BTC-USDT-SWAP', last: '60000', open24h: '62000', volCcy24h: '150000000' },
-    { instId: 'BTC-USD-SWAP', last: '60000', open24h: '62000', volCcy24h: '99999999' },
-    { instId: 'SOL-USDT-SWAP', last: '150', open24h: '140', volCcy24h: '50000000' },
-  ],
-};
+// The service consumes the normalized TickerSource result (already USDT-settled,
+// already sorted by 24h quote-volume descending). The pool here mimics an OKX
+// source; the same shape would arrive from Binance with plain names.
+const tickers: Ticker[] = [
+  { instrument: 'BTC-USDT-SWAP', quoteVolume24h: 150000000 * 60000, lastPrice: 60000, change24h: ((60000 - 62000) / 62000) * 100 },
+  { instrument: 'ETH-USDT-SWAP', quoteVolume24h: 90000000 * 3500, lastPrice: 3500, change24h: ((3500 - 3400) / 3400) * 100 },
+  { instrument: 'SOL-USDT-SWAP', quoteVolume24h: 50000000 * 150, lastPrice: 150, change24h: ((150 - 140) / 140) * 100 },
+];
 
 const params: ShrinkScanParams = {
   method: 'shrink',
@@ -63,7 +64,7 @@ const fiveCandles = [
 describe('CoinScanService', () => {
   it('scans top-N USDT swap instruments ranked by intensity and drops the forming bar', async () => {
     const getCandlesticks = vi.fn(async () => fiveCandles);
-    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
 
     const result = await service.scanShrink(params);
 
@@ -109,14 +110,14 @@ describe('CoinScanService', () => {
     // keeps all four, so the coin qualifies.
     const candles = [completedBar(4, 100), completedBar(3, 100), completedBar(2, 20), completedBar(1, 15)];
     const getCandlesticks = vi.fn(async () => candles);
-    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     const result = await service.scanShrink(params);
     expect(result.scanned.length).toBe(2);
     for (const row of result.scanned) expect(row.qualified).toBe(true);
   });
 
-  it('computes the 24h change percentage from last and open24h', async () => {
-    const service = new CoinScanService({ getCandlesticks: vi.fn(async () => fiveCandles) }, vi.fn(async () => tickerPayload));
+  it('carries the 24h change percentage from the ticker source onto each row', async () => {
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks: vi.fn(async () => fiveCandles) });
     const result = await service.scanShrink(params);
     const btc = result.scanned.find((row) => row.instrument === 'BTC-USDT-SWAP');
     expect(btc?.lastPrice).toBe(60000);
@@ -127,7 +128,7 @@ describe('CoinScanService', () => {
 
   it('skips instruments without enough candle history', async () => {
     const getCandlesticks = vi.fn(async () => [completedBar(2, 100), completedBar(1, 100)]);
-    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     const result = await service.scanShrink(params);
     expect(result.scanned).toEqual([]);
     expect(result.qualifiedCount).toBe(0);
@@ -146,14 +147,14 @@ describe('CoinScanService', () => {
           formingBar(500), // still-forming, dropped
         ],
       ); // ETH: intensity 0.075
-    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     const result = await service.scanShrink(params);
     expect(result.scanned.map((row) => row.instrument)).toEqual(['ETH-USDT-SWAP', 'BTC-USDT-SWAP']);
   });
 
   it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {
     const getCandlesticks = vi.fn(async () => fiveCandles);
-    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     // BTC quote-volume = 150M * 60000 = 9e12; ETH = 90M * 3500 = 3.15e11.
     const result = await service.scanShrink({ ...params, minQuoteVolume24h: 5e11 });
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
@@ -164,7 +165,7 @@ describe('CoinScanService', () => {
     for (let i = 1; i <= 12; i += 1) candles.push(completedBar(i, 100));
     candles.push(formingBar(500)); // still-forming bar, must be dropped
     const getCandlesticks = vi.fn(async () => candles);
-    const service = new CoinScanService({ getCandlesticks }, vi.fn(async () => tickerPayload));
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     const result = await service.scanShrink({ ...params, boxWindow: 6 });
     // window + consecutive = 4, 2 * boxWindow = 12 → limit = 13.
     expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 13 }));

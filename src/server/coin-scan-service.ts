@@ -1,19 +1,15 @@
 import { computeQuietMetrics, DEFAULT_BOX_WINDOW, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
 import { timeframeMs } from './candlestick-service';
-import type { CandlestickService } from './candlestick-service';
-import { defaultFetchJson, type FetchJson } from './http';
-import { fetchOkxTickers } from './okx-tickers';
-
-type CandleSource = Pick<CandlestickService, 'getCandlesticks'>;
+import type { CandleSource, TickerSource } from './market-data';
 
 export class CoinScanService {
   constructor(
+    private readonly tickerSource: TickerSource,
     private readonly candleSource: CandleSource,
-    private readonly fetchJson: FetchJson = defaultFetchJson,
   ) {}
 
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
-    const tickers = await fetchOkxTickers(this.fetchJson);
+    const tickers = await this.tickerSource.listTickers();
     const top = tickers
       .filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h)
       .slice(0, params.topN);

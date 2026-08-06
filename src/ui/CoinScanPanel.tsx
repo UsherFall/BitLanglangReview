@@ -183,7 +183,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
         <div className="coin-scan-alert-form">
           <label>
             币
-            <input value={alertInstrument} onChange={(event) => onAlertInstrumentChange(event.target.value)} placeholder="BTC-USDT-SWAP" />
+            <input value={alertInstrument} onChange={(event) => onAlertInstrumentChange(event.target.value)} placeholder="XAUUSDT" />
           </label>
           <label>
             方向
@@ -318,6 +318,9 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
   );
 }
 
+// OKX symbols carry a `-USDT-SWAP` suffix (BTC-USDT-SWAP) that we strip for
+// display; Binance perpetuals (XAUUSDT, BTCUSDT) have no suffix and pass through
+// as-is.
 function shortInstrument(instrument: string): string {
   return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
 }

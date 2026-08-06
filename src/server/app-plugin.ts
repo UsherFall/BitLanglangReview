@@ -7,6 +7,8 @@ import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
 import { AlertStore } from './alert-store';
+import { BinanceCandleSource } from './binance-candles';
+import { BinanceTickerSource } from './binance-tickers';
 import { CandlestickService } from './candlestick-service';
 import { CoinScanService } from './coin-scan-service';
 import { CandlestickStore } from './candlestick-store';
@@ -15,6 +17,7 @@ import { freeReplayInstrumentPayload } from './free-replay-instruments';
 import { FreeReplaySessionStore, type SaveFreeReplaySessionInput } from './free-replay-session-store';
 import { NoopNotifier, ServerChanNotifier } from './notify';
 import { OkxInstrumentService } from './okx-instrument-service';
+import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
 import { loadTradesFromWorkbook } from './trade-import';
 
@@ -24,6 +27,8 @@ const alertMonitorIntervalMs = 60_000;
 
 export type TradingReviewApiPluginOptions = {
   serverChanKey?: string;
+  /** Coin-scan / alert ticker + candle data source. Defaults to Binance. */
+  marketDataSource?: 'binance' | 'okx';
 };
 
 export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = {}): Plugin {
@@ -34,8 +39,13 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const trades = loadTradesFromWorkbook(workbookPath);
       const reviewStore = new ReviewStore(path.resolve('data/review.sqlite'));
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
+      // FreeReplay / TradeReview always use the OKX candle service.
       const candleService = new CandlestickService(candleStore);
-      const coinScanService = new CoinScanService(candleService);
+      // The coin scan + alert monitor use the switchable market-data source.
+      const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
+      const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new BinanceTickerSource();
+      const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
+      const coinScanService = new CoinScanService(tickerSource, scanCandleSource);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
       const instrumentService = new OkxInstrumentService();
@@ -43,7 +53,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const serverChanKey = options.serverChanKey ?? process.env.SERVERCHAN_KEY ?? '';
       const alertStore = new AlertStore(path.resolve('data/review.sqlite'));
       const notifier = serverChanKey ? new ServerChanNotifier(serverChanKey) : new NoopNotifier();
-      const alertMonitor = new AlertMonitor({ store: alertStore, notifier, intervalMs: alertMonitorIntervalMs });
+      const alertMonitor = new AlertMonitor({ store: alertStore, notifier, intervalMs: alertMonitorIntervalMs, tickerSource });
       alertMonitor.start();
 
       server.middlewares.use('/api/trades', async (req, res) => {
