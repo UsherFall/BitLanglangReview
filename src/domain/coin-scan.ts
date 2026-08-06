@@ -4,7 +4,7 @@ import type { ReviewTimeframe } from './trade';
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
 /** Number of trailing completed bars used for the volatility-compression windows. */
-export const DEFAULT_BOX_WINDOW = 12;
+export const DEFAULT_BOX_WINDOW = 4;
 /**
  * Volatility-compression threshold: compression <= maxCompression to qualify.
  * compression = mean amplitude of the recent boxWindow bars / mean amplitude of
@@ -21,17 +21,22 @@ export const DEFAULT_MAX_COMPRESSION = 0.8;
  * that has always been quiet).
  */
 export const DEFAULT_MAX_LATEST_TREND = 0.9;
-/** Number of trailing completed bars used to compute latestTrend. */
-export const DEFAULT_TREND_WINDOW = 4;
+/**
+ * Number of trailing completed bars used to compute latestTrend. Default 3, not
+ * 2: a 2-bar window makes the gate twitchy — one wider bar (e.g. ONUSDT 4H
+ * @08-05 16:00, latestTrend 1.16 with tr=2 vs 0.52 with tr=3) flips the verdict
+ * even though the convergence is obvious. 3 bars averages out the single-bar
+ * blip while still rejecting a genuinely flattened/widening coin (≈ 1.0+).
+ */
+export const DEFAULT_TREND_WINDOW = 3;
 
 export type ShrinkScanParams = {
   method: 'shrink';
   timeframe: ReviewTimeframe;
   topN: number;
-  ratioThreshold: number;
-  consecutive: number;
-  window: number;
   minQuoteVolume24h: number;
+  /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */
+  anchor?: number;
   /** Volatility-compression window; absent falls back to DEFAULT_BOX_WINDOW. */
   boxWindow?: number;
   /** Volatility-compression threshold; absent falls back to DEFAULT_MAX_COMPRESSION. */
@@ -47,14 +52,10 @@ export type ScanRow = {
   lastPrice: number;
   change24h: number;
   quoteVolume24h: number;
-  currentVolume: number;
-  averageVolume: number;
-  ratio: number;
-  amplitudeRatio: number;
-  intensity: number;
-  consecutiveQuiet: number;
   compression: number;
   latestTrend: number;
+  /** Sort key = compression + latestTrend; lower = converging harder. */
+  score: number;
   qualified: boolean;
 };
 
@@ -66,20 +67,16 @@ export type ScanResponse = {
 };
 
 export type QuietMetrics = {
-  currentVolume: number;
-  averageVolume: number;
-  ratio: number;
-  amplitudeRatio: number;
-  intensity: number;
-  consecutiveQuiet: number;
   compression: number;
   latestTrend: number;
+  /** Sort key = compression + latestTrend; lower = converging harder. */
+  score: number;
   qualified: boolean;
 };
 
 export type QuietMetricsParams = Pick<
   ShrinkScanParams,
-  'ratioThreshold' | 'consecutive' | 'window' | 'boxWindow' | 'maxCompression' | 'maxLatestTrend' | 'trendWindow'
+  'boxWindow' | 'maxCompression' | 'maxLatestTrend' | 'trendWindow'
 >;
 
 // Used instead of Infinity so JSON serialization never produces null.
@@ -90,25 +87,14 @@ function amplitudeOf(candle: Candlestick): number {
 }
 
 /**
- * Computes quiet-consolidation (缩量盘整) metrics for the last completed
- * candlestick: volume shrinking and price range narrowing at the same time.
+ * Computes pure-price 收敛 (convergence) metrics for the last completed
+ * candlestick. Volume plays no role: the user's stance is "看裸 K" — a coin is
+ * 收敛 when its price range has compressed against its own past and is still
+ * narrowing toward the present.
  *
  * The caller must pass only completed candlesticks (the still-forming bar is
  * excluded before this call). Candlesticks may arrive in any order; they are
  * sorted ascending by timestamp here.
- *
- * A candlestick is *calm* when its volume ratio is below `ratioThreshold`
- * (volume shrinking against its own trailing `window` mean). Amplitude no
- * longer gates calm: a coin that has been quiet for a long time has an
- * amplitude ratio near 1 (current ≈ its own mean) and must not be rejected
- * for not being "freshly" quiet. A coin qualifies only when it is 收敛
- * (converging): its recent volatility compressed against its own past
- * (`compression <= maxCompression`) and still shrinking toward the present
- * (`latestTrend <= maxLatestTrend`). There is no box-shape gate: a slow-slope
- * compression (a coin whose per-bar amplitude keeps narrowing while the price
- * drifts) is a legitimate 收敛 and must not be rejected for not being a tight
- * box — that was the v2 boxTightness bug that mis-fired on gold-style
- * compression.
  *
  * compression is a scale-free volatility-compression measure over the trailing
  * `boxWindow` completed bars (recent) against the `boxWindow` bars immediately
@@ -118,8 +104,8 @@ function amplitudeOf(candle: Candlestick): number {
  * quiet scores ≈ 1 (no "tension") and is rejected. When the prior window is
  * all-flat but the recent window is not, compression is reported as
  * `LARGE_RATIO` (the coin "woke up" from flat, which is not convergence); when
- * both windows are flat, compression is 0 and the volume-shrink gate carries
- * the verdict.
+ * both windows are flat, compression is 0 and the latestTrend gate carries the
+ * verdict.
  *
  * latestTrend is the tension-in-the-present gate: the trailing `trendWindow`
  * completed bars (latest) against the `trendWindow` bars immediately before them
@@ -128,65 +114,26 @@ function amplitudeOf(candle: Candlestick): number {
  * that has flattened out (latest ≈ middle → latestTrend ≈ 1) or is widening
  * (latest > middle) has no 收窄 feel and is rejected; a coin still converging
  * scores below 1. Boundary: a flat middle window with an active latest window
- * reports `LARGE_RATIO`; two flat windows report 0 and the other gates carry the
- * verdict.
+ * reports `LARGE_RATIO`; two flat windows report 0 and the compression gate
+ * carries the verdict.
  *
- * Returns null when there is not enough history (fewer than
- * `window + consecutive` candles, fewer than `2 * boxWindow` candles so both
- * compression windows exist, or fewer than `2 * trendWindow` candles so both
- * latest-trend windows exist), when a volume window average is zero, or when a
- * price is non-positive.
+ * score = compression + latestTrend is the pure-price ranking key (both are
+ * mean-amplitude ratios, so they are same-unit and additive). qualified requires
+ * compression <= maxCompression AND latestTrend <= maxLatestTrend.
+ *
+ * Returns null when there is not enough history (fewer than `2 * boxWindow`
+ * candles so both compression windows exist, or fewer than `2 * trendWindow`
+ * candles so both latest-trend windows exist) or when a price is non-positive.
  */
 export function computeQuietMetrics(candles: readonly Candlestick[], params: QuietMetricsParams): QuietMetrics | null {
-  const { ratioThreshold, consecutive, window } = params;
   const boxWindow = params.boxWindow ?? DEFAULT_BOX_WINDOW;
   const maxCompression = params.maxCompression ?? DEFAULT_MAX_COMPRESSION;
   const maxLatestTrend = params.maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND;
   const trendWindow = params.trendWindow ?? DEFAULT_TREND_WINDOW;
   const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
   const count = sorted.length;
-  if (count < window + consecutive || count < 2 * boxWindow || count < 2 * trendWindow) return null;
+  if (count < 2 * boxWindow || count < 2 * trendWindow) return null;
   if (sorted.some((candle) => candle.low <= 0)) return null;
-
-  // Sliding window means; ratio of candle i is value[i] / mean(window before i).
-  const volumeAverages: number[] = new Array(count).fill(0);
-  const volumeRatios: number[] = [];
-  const amplitudeRatios: number[] = [];
-  const calm: boolean[] = [];
-  for (let i = window; i < count; i += 1) {
-    let volumeSum = 0;
-    let amplitudeSum = 0;
-    for (let j = i - window; j < i; j += 1) {
-      volumeSum += sorted[j].volume;
-      amplitudeSum += amplitudeOf(sorted[j]);
-    }
-    const volumeAverage = volumeSum / window;
-    if (volumeAverage <= 0) return null;
-    const amplitudeAverage = amplitudeSum / window;
-    volumeAverages[i] = volumeAverage;
-
-    const volumeRatio = sorted[i].volume / volumeAverage;
-    const currentAmplitude = amplitudeOf(sorted[i]);
-    const amplitudeRatio = amplitudeAverage <= 0
-      ? currentAmplitude === 0 ? 0 : LARGE_RATIO
-      : currentAmplitude / amplitudeAverage;
-
-    volumeRatios.push(volumeRatio);
-    amplitudeRatios.push(amplitudeRatio);
-    calm.push(volumeRatio < ratioThreshold);
-  }
-
-  const lastIndex = count - 1;
-  const quietScores: number[] = [];
-  for (let k = volumeRatios.length - consecutive; k < volumeRatios.length; k += 1) {
-    quietScores.push((volumeRatios[k] + amplitudeRatios[k]) / 2);
-  }
-  const intensity = quietScores.reduce((sum, score) => sum + score, 0) / consecutive;
-
-  let consecutiveQuiet = 0;
-  for (let k = calm.length - 1; k >= 0 && calm[k]; k -= 1) {
-    consecutiveQuiet += 1;
-  }
 
   // Volatility compression: the trailing `boxWindow` completed bars (recent)
   // vs the `boxWindow` bars immediately before them (prior). Mean amplitudes
@@ -224,18 +171,11 @@ export function computeQuietMetrics(candles: readonly Candlestick[], params: Qui
     ? meanLatestAmplitude / meanMiddleAmplitude
     : meanLatestAmplitude > 0 ? LARGE_RATIO : 0;
 
+  const score = compression + latestTrend;
   return {
-    currentVolume: sorted[lastIndex].volume,
-    averageVolume: volumeAverages[lastIndex],
-    ratio: volumeRatios[volumeRatios.length - 1],
-    amplitudeRatio: amplitudeRatios[amplitudeRatios.length - 1],
-    intensity,
-    consecutiveQuiet,
     compression,
     latestTrend,
-    qualified:
-      consecutiveQuiet >= consecutive &&
-      compression <= maxCompression &&
-      latestTrend <= maxLatestTrend,
+    score,
+    qualified: compression <= maxCompression && latestTrend <= maxLatestTrend,
   };
 }

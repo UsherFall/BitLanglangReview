@@ -4,15 +4,18 @@ import type { ShrinkScanParams } from '../src/domain/coin-scan';
 import { CoinScanService } from '../src/server/coin-scan-service';
 import type { Ticker } from '../src/server/market-data';
 
-function makeCandle(timestamp: number, volume: number): Candlestick {
+// amplitude = (high - low) / low; volume is carried but plays no role in the
+// pure-price metrics (v5 removed the volume dimension).
+function makeCandle(timestamp: number, volume: number, amplitude = 0): Candlestick {
+  const low = 100;
   return {
     instrument: 'BTC-USDT-SWAP',
     timeframe: '5m',
     timestamp,
-    open: 100,
-    high: 100,
-    low: 100,
-    close: 100,
+    open: low,
+    high: low * (1 + amplitude),
+    low,
+    close: low,
     volume,
   };
 }
@@ -22,8 +25,8 @@ const now = Date.now();
 // Start of the current (still-forming) 5m bar; the scan drops bars that have not
 // closed (timestamp + STEP > now), so only periodStart is dropped.
 const periodStart = now - (now % STEP);
-// completedBars(k, volume) is a bar that closed k periods ago.
-const completedBar = (barsBack: number, volume: number) => makeCandle(periodStart - barsBack * STEP, volume);
+// completedBar(k, ...) is a bar that closed k periods ago.
+const completedBar = (barsBack: number, volume: number, amplitude = 0) => makeCandle(periodStart - barsBack * STEP, volume, amplitude);
 // formingBar(volume) is the still-forming current bar.
 const formingBar = (volume: number) => makeCandle(periodStart, volume);
 
@@ -40,9 +43,6 @@ const params: ShrinkScanParams = {
   method: 'shrink',
   timeframe: '5m',
   topN: 2,
-  ratioThreshold: 0.7,
-  consecutive: 2,
-  window: 2,
   minQuoteVolume24h: 0,
   boxWindow: 2,
   maxCompression: 0.8,
@@ -51,18 +51,18 @@ const params: ShrinkScanParams = {
 };
 
 // Five candles where the newest (forming) one has a huge volume. When it is
-// dropped before computing, the last two completed ratios stay below 0.7 and
-// the coin qualifies; when it is kept, the streak breaks.
+// dropped before computing, the four completed flat candles give compression 0
+// and latestTrend 0, so the coin qualifies under the pure-price gates.
 const fiveCandles = [
   completedBar(4, 100),
   completedBar(3, 100),
-  completedBar(2, 20), // ratio 0.2
-  completedBar(1, 15), // ratio 0.25
+  completedBar(2, 20),
+  completedBar(1, 15),
   formingBar(500), // still-forming bar, must be dropped
 ];
 
 describe('CoinScanService', () => {
-  it('scans top-N USDT swap instruments ranked by intensity and drops the forming bar', async () => {
+  it('scans top-N USDT swap instruments ranked by score and drops the forming bar', async () => {
     const getCandlesticks = vi.fn(async () => fiveCandles);
     const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
 
@@ -73,34 +73,28 @@ describe('CoinScanService', () => {
       instrument: 'BTC-USDT-SWAP',
       timeframe: '5m',
       direction: 'earlier',
-      limit: 5, // max(window + consecutive, 2 * boxWindow) + 1 forming bar
+      limit: 5, // 2 * max(boxWindow, trendWindow) + 1 forming bar
       anchor: expect.any(Number),
     });
     for (const row of result.scanned) {
       expect(row.qualified).toBe(true);
-      // Flat candles make amplitudeRatio 0, so quiet scores are volume ratios
-      // halved: intensity = mean((0.2/2, 0.25/2)).
-      expect(row.intensity).toBeCloseTo(((0.2 + 0.25) / 2) / 2);
-      expect(row.amplitudeRatio).toBe(0);
-      expect(row.consecutiveQuiet).toBe(2);
+      // Flat candles make compression 0 and latestTrend 0, so score = 0.
+      expect(row.compression).toBe(0);
+      expect(row.latestTrend).toBe(0);
+      expect(row.score).toBe(0);
     }
     // quoteVolume24h is 24h quote-volume in USDT = volCcy24h * last.
     expect(result.scanned.find((row) => row.instrument === 'BTC-USDT-SWAP')?.quoteVolume24h).toBe(150000000 * 60000);
     expect(result.scanned.find((row) => row.instrument === 'ETH-USDT-SWAP')?.quoteVolume24h).toBe(90000000 * 3500);
     expect(result.qualifiedCount).toBe(2);
-    // BTC-USDT-SWAP first in the fetch order (150M quote volume), ETH second.
+    // BTC-USDT-SWAP first in the fetch order (150M quote volume), ETH second;
+    // equal scores keep the insertion order.
     expect(result.scanned[0].instrument).toBe('BTC-USDT-SWAP');
     // The response echoes the effective scan parameters.
     expect(result.params.boxWindow).toBe(2);
     expect(result.params.maxCompression).toBe(0.8);
     expect(result.params.maxLatestTrend).toBe(0.9);
     expect(result.params.trendWindow).toBe(2);
-    // Flat candles make compression 0 and latestTrend 0 (both windows flat), so
-    // the row carries them.
-    for (const row of result.scanned) {
-      expect(row.compression).toBe(0);
-      expect(row.latestTrend).toBe(0);
-    }
   });
 
   it('keeps the newest completed bar when the source has no forming bar', async () => {
@@ -134,22 +128,35 @@ describe('CoinScanService', () => {
     expect(result.qualifiedCount).toBe(0);
   });
 
-  it('sorts scanned rows by intensity ascending with the most-shrunk coin first', async () => {
+  it('sorts scanned rows by score ascending with the most-converged coin first', async () => {
     const getCandlesticks = vi
       .fn()
-      .mockResolvedValueOnce(fiveCandles) // BTC: intensity 0.225
-      .mockResolvedValueOnce(
-        [
-          completedBar(4, 100),
-          completedBar(3, 100),
-          completedBar(2, 10), // ratio 0.1
-          completedBar(1, 5), // ratio 0.05
-          formingBar(500), // still-forming, dropped
-        ],
-      ); // ETH: intensity 0.075
+      .mockResolvedValueOnce([
+        completedBar(4, 100, 0.02),
+        completedBar(3, 100, 0.02),
+        completedBar(2, 100, 0.02),
+        completedBar(1, 100, 0.02),
+        formingBar(500),
+      ]) // BTC: compression 1.0, latestTrend 1.0, score 2.0
+      .mockResolvedValueOnce([
+        completedBar(4, 100, 0.02),
+        completedBar(3, 100, 0.02),
+        completedBar(2, 100, 0.006),
+        completedBar(1, 100, 0.006),
+        formingBar(500),
+      ]); // ETH: compression 0.3, latestTrend 0.3, score 0.6
     const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     const result = await service.scanShrink(params);
     expect(result.scanned.map((row) => row.instrument)).toEqual(['ETH-USDT-SWAP', 'BTC-USDT-SWAP']);
+  });
+
+  it('uses a past anchor when provided instead of now, and echoes it in params', async () => {
+    const getCandlesticks = vi.fn(async () => fiveCandles);
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
+    const pastAnchor = Date.parse('2026-08-04T00:00:00Z');
+    const result = await service.scanShrink({ ...params, anchor: pastAnchor });
+    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ anchor: pastAnchor }));
+    expect(result.params.anchor).toBe(pastAnchor);
   });
 
   it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {
@@ -160,17 +167,47 @@ describe('CoinScanService', () => {
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
   });
 
-  it('pulls max(window + consecutive, 2 * boxWindow) + 1 bars so both compression windows are covered', async () => {
+  it('pulls 2 * max(boxWindow, trendWindow) + 1 bars so both compression windows are covered', async () => {
     const candles: Candlestick[] = [];
     for (let i = 1; i <= 12; i += 1) candles.push(completedBar(i, 100));
     candles.push(formingBar(500)); // still-forming bar, must be dropped
     const getCandlesticks = vi.fn(async () => candles);
     const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
     const result = await service.scanShrink({ ...params, boxWindow: 6 });
-    // window + consecutive = 4, 2 * boxWindow = 12 → limit = 13.
+    // 2 * max(6, 2) + 1 = 13.
     expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 13 }));
     // The 12 completed bars cover recent + prior windows, so metrics are computed.
     expect(result.scanned.length).toBeGreaterThan(0);
     expect(result.scanned[0].compression).toBe(0);
+  });
+
+  it('qualifies a gold-style 1D convergence at the anchor (XAUUSDT 08-04 scenario)', async () => {
+    // 1D candles: 07-29..08-04, a horizontal band whose per-day amplitude narrows
+    // toward the present — the gold 1D 08-04 convergence the user wanted scanned.
+    const DAY = 24 * 60 * 60 * 1000;
+    const dayStart = periodStart - periodStart % DAY; // today's 00:00 UTC
+    // back 0 is the still-forming current day (dropped by the service). The 8
+    // completed days: prior (back 5..8) amplitude 0.012, middle (back 3..4)
+    // 0.008, recent/latest (back 1..2) 0.004 — compression 0.5, latestTrend 0.5.
+    const daily = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((back) =>
+      makeCandle(dayStart - back * DAY, 100, back >= 5 ? 0.012 : back >= 3 ? 0.008 : 0.004),
+    );
+    const getCandlesticks = vi.fn(async () => daily);
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
+    const result = await service.scanShrink({
+      method: 'shrink',
+      timeframe: '1D',
+      topN: 2,
+      minQuoteVolume24h: 0,
+      boxWindow: 4,
+      maxCompression: 0.8,
+      maxLatestTrend: 0.9,
+      trendWindow: 2,
+    });
+    expect(result.scanned.length).toBeGreaterThan(0);
+    const row = result.scanned[0];
+    expect(row.compression).toBeLessThan(0.8);
+    expect(row.latestTrend).toBeLessThan(0.9);
+    expect(row.qualified).toBe(true);
   });
 });

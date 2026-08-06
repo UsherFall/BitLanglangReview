@@ -160,19 +160,20 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'timeframe must be one of 5m, 15m, 1H, 4H, 1D' });
         }
         const topN = parseScanParam(url.searchParams.get('topN'), 50);
-        const consecutive = parseScanParam(url.searchParams.get('consecutive'), 3);
-        const window = parseScanParam(url.searchParams.get('window'), 20);
-        const ratioThreshold = parseScanParam(url.searchParams.get('ratioThreshold'), 0.7);
         const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
-        // boxWindow/maxCompression/maxLatestTrend/trendWindow are optional.
+        // anchor/boxWindow/maxCompression/maxLatestTrend/trendWindow are optional.
         // parseScanParam's Number(null) === 0 defect would turn an absent param
         // into 0 and trip the guard, so parse them with an optional parser that
         // maps null/empty/NaN → undefined.
+        const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
         const boxWindow = parseOptionalNumber(url.searchParams.get('boxWindow'));
         const maxCompression = parseOptionalNumber(url.searchParams.get('maxCompression'));
         const maxLatestTrend = parseOptionalNumber(url.searchParams.get('maxLatestTrend'));
         const trendWindow = parseOptionalNumber(url.searchParams.get('trendWindow'));
-        if (topN < 1 || consecutive < 1 || window < 1 || ratioThreshold <= 0 || minQuoteVolume24h < 0) {
+        if (topN < 1 || minQuoteVolume24h < 0) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (anchor !== undefined && anchor <= 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (boxWindow !== undefined && boxWindow <= 0) {
@@ -192,10 +193,8 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
             method: 'shrink',
             timeframe,
             topN,
-            ratioThreshold,
-            consecutive,
-            window,
             minQuoteVolume24h,
+            anchor,
             boxWindow: boxWindow ?? DEFAULT_BOX_WINDOW,
             maxCompression: maxCompression ?? DEFAULT_MAX_COMPRESSION,
             maxLatestTrend: maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND,

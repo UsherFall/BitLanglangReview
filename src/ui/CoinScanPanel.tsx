@@ -18,14 +18,13 @@ type AlertConfig = {
 export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentChange }: CoinScanPanelProps) {
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [topN, setTopN] = useState('50');
-  const [ratioThreshold, setRatioThreshold] = useState('0.7');
-  const [boxWindow, setBoxWindow] = useState('12');
+  const [boxWindow, setBoxWindow] = useState('4');
   const [maxCompression, setMaxCompression] = useState('0.8');
   const [maxLatestTrend, setMaxLatestTrend] = useState('0.9');
-  const [trendWindow, setTrendWindow] = useState('4');
-  const [consecutive, setConsecutive] = useState('3');
-  const [avgWindow, setAvgWindow] = useState('20');
+  const [trendWindow, setTrendWindow] = useState('3');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
+  // Optional scan anchor (local datetime); empty = scan "now".
+  const [anchorInput, setAnchorInput] = useState('');
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,9 +40,14 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   }, []);
 
   async function scan() {
-    const inputs = [topN, ratioThreshold, boxWindow, maxCompression, maxLatestTrend, trendWindow, consecutive, avgWindow, minQuoteVolume24h];
+    const inputs = [topN, boxWindow, maxCompression, maxLatestTrend, trendWindow, minQuoteVolume24h];
     if (!scanTimeframes.includes(timeframe) || inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
+      return;
+    }
+    const anchorEpoch = anchorInput.trim() === '' ? null : Date.parse(anchorInput);
+    if (anchorInput.trim() !== '' && !Number.isFinite(anchorEpoch)) {
+      setError('时间点无效,请检查');
       return;
     }
     setScanning(true);
@@ -53,15 +57,13 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
         method: 'shrink',
         timeframe,
         topN,
-        ratioThreshold,
         boxWindow,
         maxCompression,
         maxLatestTrend,
         trendWindow,
-        consecutive,
-        window: avgWindow,
         minQuoteVolume24h,
       });
+      if (anchorEpoch !== null) query.set('anchor', String(anchorEpoch));
       const response = await fetch(`/api/scan?${query.toString()}`);
       const payload = (await response.json()) as ScanResponse & { error?: string };
       if (!response.ok) throw new Error(payload.error || '扫描失败');
@@ -139,10 +141,6 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <input type="number" min="1" value={topN} onChange={(event) => setTopN(event.target.value)} />
         </label>
         <label>
-          量比阈值
-          <input type="number" min="0" step="0.05" value={ratioThreshold} onChange={(event) => setRatioThreshold(event.target.value)} />
-        </label>
-        <label>
           压缩窗口
           <input type="number" min="1" value={boxWindow} onChange={(event) => setBoxWindow(event.target.value)} />
         </label>
@@ -159,18 +157,15 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <input type="number" min="1" value={trendWindow} onChange={(event) => setTrendWindow(event.target.value)} />
         </label>
         <label>
-          连续根数
-          <input type="number" min="1" value={consecutive} onChange={(event) => setConsecutive(event.target.value)} />
-        </label>
-        <label>
-          均量窗口
-          <input type="number" min="1" value={avgWindow} onChange={(event) => setAvgWindow(event.target.value)} />
-        </label>
-        <label>
           最低成交额
           <input type="number" min="0" value={minQuoteVolume24h} onChange={(event) => setMinQuoteVolume24h(event.target.value)} />
         </label>
+        <label>
+          扫描时间点
+          <input type="datetime-local" value={anchorInput} onChange={(event) => setAnchorInput(event.target.value)} />
+        </label>
       </div>
+      <p className="panel-status hint">时间点留空 = 现在;填入则扫描「该时刻之前已完成」的 K 线(验证历史收敛用)。</p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
       </button>
@@ -246,7 +241,7 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  const ordered = [...result.scanned].sort((a, b) => Number(b.qualified) - Number(a.qualified) || a.intensity - b.intensity);
+  const ordered = [...result.scanned].sort((a, b) => Number(b.qualified) - Number(a.qualified) || a.score - b.score);
   return (
     <>
       <header className="detail-header">
@@ -263,12 +258,6 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
               <th>最新价</th>
               <th>24h 涨跌</th>
               <th>成交额</th>
-              <th>当前量</th>
-              <th>均量</th>
-              <th>量比</th>
-              <th>振幅比</th>
-              <th>强度分</th>
-              <th>连续平静</th>
               <th>压缩比</th>
               <th>收窄趋势</th>
               <th>状态</th>
@@ -282,12 +271,6 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
                 <td>{formatPrice(row.lastPrice)}</td>
                 <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
                 <td>{formatVolume(row.quoteVolume24h)}</td>
-                <td>{formatVolume(row.currentVolume)}</td>
-                <td>{formatVolume(row.averageVolume)}</td>
-                <td>{row.ratio.toFixed(2)}</td>
-                <td>{row.amplitudeRatio.toFixed(2)}</td>
-                <td>{row.intensity.toFixed(2)}</td>
-                <td>{row.consecutiveQuiet}</td>
                 <td>{formatCompression(row.compression)}</td>
                 <td>{formatLatestTrend(row.latestTrend)}</td>
                 <td>{row.qualified ? '合格' : '—'}</td>

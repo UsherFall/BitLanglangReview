@@ -1,4 +1,4 @@
-import { computeQuietMetrics, DEFAULT_BOX_WINDOW, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
+import { computeQuietMetrics, DEFAULT_BOX_WINDOW, DEFAULT_TREND_WINDOW, type ScanResponse, type ScanRow, type ShrinkScanParams } from '../domain/coin-scan';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, TickerSource } from './market-data';
 
@@ -16,7 +16,7 @@ export class CoinScanService {
 
     const scanned: ScanRow[] = [];
     const step = timeframeMs(params.timeframe);
-    const anchor = Date.now();
+    const anchor = params.anchor ?? Date.now();
     for (const ticker of top) {
       const candles = await this.candleSource.getCandlesticks({
         instrument: ticker.instrument,
@@ -25,10 +25,9 @@ export class CoinScanService {
         direction: 'earlier',
         // One extra bar for the still-forming candle, which is dropped below.
         // compression needs 2 * boxWindow completed bars (recent + prior) and the
-        // latest-trend windows need 2 * trendWindow, which is covered because the
-        // route enforces trendWindow <= boxWindow. The pull must satisfy both
-        // `window + consecutive` and `2 * boxWindow`.
-        limit: Math.max(params.window + params.consecutive, 2 * (params.boxWindow ?? DEFAULT_BOX_WINDOW)) + 1,
+        // latest-trend windows need 2 * trendWindow (middle + latest). Both must
+        // be covered, so the limit is the larger of the two + 1.
+        limit: 2 * Math.max(params.boxWindow ?? DEFAULT_BOX_WINDOW, params.trendWindow ?? DEFAULT_TREND_WINDOW) + 1,
       });
       // Drop the still-forming bar by time (timestamp + step > now). The candle
       // cache may or may not contain the forming bar, so slicing the newest
@@ -45,7 +44,7 @@ export class CoinScanService {
       });
     }
 
-    scanned.sort((a, b) => a.intensity - b.intensity);
+    scanned.sort((a, b) => a.score - b.score);
     const qualifiedCount = scanned.filter((row) => row.qualified).length;
     return { scanned, qualifiedCount, params, scannedAt: new Date().toISOString() };
   }
