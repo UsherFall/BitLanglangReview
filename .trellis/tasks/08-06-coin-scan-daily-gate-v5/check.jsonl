@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "回归:纯价格收敛契约、参数表(删量缩三参)、qualified 两门、score 排序、ScanRow 字段、默认 boxWindow=4。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "回归:UI 参数/列与纯价格契约一致,黄金 1D 收敛可扫出。"}
