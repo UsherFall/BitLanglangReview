@@ -497,3 +497,42 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - None - task complete
+
+## Session 11: 扫描收敛 v5:纯价格收敛 + 历史锚 + 全周期方案
+
+**Date**: 2026-08-06
+**Task**: 08-06-coin-scan-daily-gate-v5(基座已提交)+ 08-06-08-06-coin-scan-multi-timeframe(新建)
+**Branch**: `master`
+
+### Summary
+
+彻底移除交易量维度,纯裸 K 收敛(compression + latestTrend 两门,score 排序)。用户原话「我们看裸k就可以」。默认 boxWindow 12→4、trendWindow 4→3(tr=2 太灵敏:ONUSDT 4H @08-05 16:00 单根放大 lt 1.16 卡,tr=3 变 0.52)。新增可选 anchor 参数(epoch ms),UI 加「扫描时间点」datetime-local,可扫历史点验证收敛。真数据验证:黄金 1D 08-03/08-04(锚 08-04/08-03 起始)qualified ✓(复现 prd 模拟 comp 0.578/0.798, lt 0.347/0.472);黄金 4H AC2 所有 bw 都 fail(日内噪声,待重定义)。
+
+案例库(真数据):C1-C4 当前门全对;C5 HYPE 15m @08-03 19:00+08 箱体顶部收敛被 latestTrend 误杀(lt≈1.1,15m 走平),但切 1H 就扫出(comp 0.61~0.67/lt 0.669,plateau{3,4});C6 撤案。结论:不改 latestTrend(会放回 CRCL 类长期安静误报),改**全周期扫描**——每币在自然周期显形。新任务 `08-06-08-06-coin-scan-multi-timeframe` 建好,prd 粗稿:点扫描跑全周期、每币一行+收敛周期列、plateau≥2 连续窗口滤孤立误报。
+
+### Main Changes
+
+- domain: 纯价格 computeQuietMetrics,删量字段/参数,score=comp+lt,默认 bw4/tr3
+- service: limit=2*max(bw,tr)+1,score 升序
+- route: 删 ratioThreshold/consecutive/window,加 anchor
+- UI: 删量输入/列,加「扫描时间点」输入
+- spec: coin-scan.md v5 纯价格+anchor 契约;component-guidelines 同步
+- research: case-library.md(6 案例,真数据可重跑)
+- 新任务 prd: multi-timeframe
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `097d60f` | feat(scan): pure-price convergence, drop volume gate, add historical anchor |
+| `a9c50ef` | docs(spec): coin-scan v5 pure-price + anchor contract |
+| `927076b` | docs(task): coin-scan case library + multi-timeframe scan prd |
+
+### Testing
+
+- [OK] `npm test`: 173 tests / 34 files 全绿
+- [OK] `npx tsc --noEmit`: 干净
+
+### Status
+
+[OK] 基座 **Committed**;多周期任务 planning(prd 粗稿,待 design/implement)
