@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "回归:币安数据源实现、切换口子、边界 UTC0:00、稳定币排除、FreeReplay 保持 OKX 不受影响。"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "回归:选币池从 OKX SWAP 改币安 USDT-M 永续,XAUUSDT 黄金在池,compression/latestTrend 判定不回归。"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "回归:shortInstrument 兼容币安命名,参数/列不变。"}
