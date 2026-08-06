@@ -536,3 +536,24 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Status
 
 [OK] 基座 **Committed**;多周期任务 planning(prd 粗稿,待 design/implement)
+
+## Session 12: 扫描收敛 v5 收尾 + 归档
+
+**Date**: 2026-08-06
+**Task**: 08-06-coin-scan-daily-gate-v5(归档)
+**Branch**: `master`
+
+### Summary
+
+收尾 v5:用户决策 **AC2 接受失败,重新定义为「黄金 1D 为目标周期,4H 不保证」**。根因:黄金 4H 日内噪声 + 小 boxWindow(4) 装不下 ~48h 箱体;大 bw 下 latestTrend 走平门仍拒。4H 黄金交给全周期扫描任务。prd 补齐:R7/AC6(anchor,实现中新增)、实现偏差记录(trendWindow 4→3,tr=2 太灵敏)、AC1/3/4/5/6 打勾。复跑 `npm test` 173 绿 + tsc 干净。任务归档至 `archive/2026-08/`。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e2cfe1` | docs(task): finish coin-scan v5 — AC2 redefined (4H gold not guaranteed) |
+| (archive auto) | chore(task): archive 08-06-coin-scan-daily-gate-v5 |
+
+### Status
+
+[OK] v5 **Archived**。剩余:multi-timeframe(planning,待 design/implement)、box-end(planning)。
