@@ -2,7 +2,7 @@
 
 ## 架构总览
 
-在 v2(量缩 + boxTightness)基础上加**波动压缩门** + **收窄趋势门**。全是相对自己过去的比率,scale-free,不加绝对百分比。
+在 v2(量缩 + boxTightness)基础上加**波动压缩门** + **收窄趋势门**,并**移除 boxTightness 箱体门**。全是相对自己过去的比率,scale-free,不加绝对百分比。
 
 ```
 UI (CoinScanPanel)              -- maxCompression + maxLatestTrend + trendWindow 输入;压缩比/收窄趋势 列
@@ -14,7 +14,7 @@ app-plugin.ts /api/scan         -- 可选 maxCompression/maxLatestTrend/trendWin
 CoinScanService.scanShrink      -- limit = max(window+consecutive, 2*boxWindow)+1;透传
    │
    ▼
-computeQuietMetrics             -- 量缩门 && boxTightness 门 && compression 门 && latestTrend 门
+computeQuietMetrics             -- 量缩门 && compression 门 && latestTrend 门
 ```
 
 ## 判定公式
@@ -40,10 +40,11 @@ latestTrend = meanAmp(middle) > 0
             : (latest > 0 ? LARGE_RATIO : 0)
 
 qualified = consecutiveQuiet >= consecutive            // 量缩门(volumeRatio<ratioThreshold)
-         && boxTightness <= maxBoxRatio                // 箱体形状门(0.9)
          && compression <= maxCompression              // 波动压缩门(0.8)
-         && latestTrend <= maxLatestTrend              // 收窄趋势门(0.9) —— 新增
+         && latestTrend <= maxLatestTrend              // 收窄趋势门(0.9)
 ```
+
+**boxTightness 已移除**:v3 目标「现在在收敛且收敛到极致」由 compression + latestTrend 承担,箱体度不是扫描必选。实证(XAU 4H):收敛窗口 compression 0.18~0.68(达标)、量缩达标、quiet 到 12,却全被 boxTightness 1.13~1.81 拒——黄金是缓坡压缩(振幅持续收窄但价格区间跨度相对偏大),不是紧箱体。移除后黄金收敛窗口(comp 达标 + latestTrend < 0.9)可过;latestTrend 仍拦截「躺平后波动反升」(08-02 起 trend>1.2)。
 
 **为什么是压缩**:用户原话「现在的波动明显比之前小」。平躺币(一直安静)recent≈prior → compression≈1 → 拒,无张力。真压缩币 recent << prior → 通过。
 
@@ -62,6 +63,8 @@ export const DEFAULT_MAX_COMPRESSION = 0.8;
 export const DEFAULT_MAX_LATEST_TREND = 0.9;
 export const DEFAULT_TREND_WINDOW = 4;
 
+// 移除: DEFAULT_MAX_BOX_RATIO、maxBoxRatio、boxTightness
+
 // ShrinkScanParams / QuietMetricsParams 增:
 maxCompression: number;          // 缺省回落 DEFAULT_MAX_COMPRESSION
 maxLatestTrend: number;          // 缺省回落 DEFAULT_MAX_LATEST_TREND
@@ -77,7 +80,17 @@ latestTrend: number;             // 最近 T 根 / 再前 T 根 均幅比;middle
 count < window + consecutive || count < 2 * boxWindow  → null
 ```
 
-(boxTightness 需 boxWindow 根;compression 需 2×boxWindow 根;latestTrend 的 T ≤ boxWindow,已覆盖。)
+(compression 需 2×boxWindow 根;latestTrend 的 T ≤ boxWindow,已覆盖。boxTightness 移除后 boxWindow 仍是压缩窗口,守卫不变。)
+
+### 路由参数
+
+| 参数 | 类型 | 缺省 | 说明 |
+| --- | --- | --- | --- |
+| `maxCompression` | number 可选 | 0.8 | `null`/空/NaN → undefined → 默认;填了 `<= 0` → 400 |
+| `maxLatestTrend` | number 可选 | 0.9 | 同上 |
+| `trendWindow` | number 可选 | 4 | 同上;`>= 1` 且 `<= boxWindow` |
+
+optional 解析(复用 parseOptionalNumber,不用 parseScanParam)。`maxBoxRatio` 解析删除。
 
 ### 路由参数
 
@@ -112,13 +125,15 @@ meanAmp 对「单根波动收窄」(三角/箱体都如此)直接响应;区间 R
 合格必须过所有门;**同时把 压缩比/收窄趋势 显示在结果列**,用户扫完肉眼对照调阈值。
 - **权衡**:门越多越严格,结果越少;但用户明确要「收敛到极致」,宁少勿滥。
 
-### 保留既有门
-量缩门(volumeRatio) + boxTightness(箱体形状)仍保留。压缩门新增「张力」维度,收窄趋势门新增「正当时」维度。
-- **权衡**:四道门结果池更小;每个阈值都可调、可放宽。
+### 移除 boxTightness 门
+boxTightness(箱体形状)是 v2 用「箱体」近似「收敛」的旧工具,与 v3「波动压缩」语义正交。黄金实证:真正的缓坡压缩(compression 0.18)因非紧箱体被 box 门误杀。目标「现在在收敛且收敛到极致」由 compression(比之前小)+ latestTrend(还在变小)承担。
+- **权衡**:移除后「收敛但形状不紧」的币(缓坡/三角)可进;新鲜旗形(大阳线后小整理)仍由 compression 挡(大阳线在 recent 窗口 → 均幅高)。结果池比 v2 大,但语义对齐用户目标。
+- **1D 局限**:黄金 1D 卡在量缩门(quiet 不足),与 box 无关,另开任务处理。
 
 ## 兼容性与回滚
 
 - 新增可选参数 + 新字段 + 新门,全部增量;老请求(不带 maxCompression)回落默认 0.8,行为变严。
 - service limit 公式改变(2×boxWindow),只影响拉取根数,不破坏既有。
 - `compression: Infinity` 用 LARGE_RATIO 哨兵防 JSON null。
+- **boxTightness 移除是破坏性变更**:`maxBoxRatio` 参数、`boxTightness` 字段、UI 输入框/列全删。老请求带 `maxBoxRatio` 会被忽略(route 不再解析);旧客户端引用 `boxTightness` 字段会得 undefined。本项目单客户端,可接受。
 - 触碰文件全部可单提交回滚。
