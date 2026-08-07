@@ -5,46 +5,108 @@ import { scanTimeframes } from '../src/domain/coin-scan';
 import type { ReviewTimeframe } from '../src/domain/trade';
 import { timeframeMs } from '../src/server/candlestick-service';
 import { CoinScanService } from '../src/server/coin-scan-service';
-import type { CandleSource, Ticker } from '../src/server/market-data';
+import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-data';
 
-// amplitude = (high - low) / low; volume is carried but plays no role in the
-// pure-price metrics (v5 removed the volume dimension).
-function makeCandle(timestamp: number, volume: number, amplitude = 0): Candlestick {
-  const low = 100;
-  return {
-    instrument: 'BTC-USDT-SWAP',
-    timeframe: '5m',
-    timestamp,
-    open: low,
-    high: low * (1 + amplitude),
-    low,
-    close: low,
-    volume,
-  };
-}
+// ---------------------------------------------------------------------------
+// Real-structure synthetic bars (shared with the pure-algorithm tests): a
+// horizontal low-volatility box, a symmetric triangle, and a trending channel
+// that must NOT classify as a structure. The service test only needs the box
+// and the triangle to be reliably detected — the exact geometry is calibrated
+// in tests/coin-scan.test.ts.
+// ---------------------------------------------------------------------------
 
-const now = Date.now();
+const boxBars: ReadonlyArray<readonly [number, number]> = [
+  [100, 200], [100, 200], [100, 200], [100, 200], [100, 200], [100, 200],
+  [97, 110], [102, 108], [102, 108], [102, 108],
+  [102, 113], [97, 110], [102, 108], [102, 108], [102, 108],
+  [102, 113], [97, 110], [102, 108], [102, 108], [102, 108],
+  [102, 113], [97, 110], [102, 108], [102, 108], [102, 108],
+  [102, 113], [102, 108], [102, 108], [102, 108],
+];
+
+// Triangle fixture must be STILL converging at the newest bar (index 24, apex ≈
+// 29) — anchoring trend lines at the current bar rejects the old fixture whose
+// apex (≈ 23) had already passed the newest bar (27).
+const triangleBars: ReadonlyArray<readonly [number, number]> = [
+  [108, 110], [108, 110], [108, 110], [108, 110], [108, 110], [108, 110],
+  [88, 109], [108, 110], [108, 110], [108, 110],
+  [108, 122], [92, 109], [108, 110], [108, 110], [108, 110],
+  [108, 118], [96, 109], [108, 110], [108, 110], [108, 110],
+  [108, 114], [100, 109], [108, 110], [108, 110], [108, 110],
+];
+
+const uptrendBars: ReadonlyArray<readonly [number, number]> = [
+  [108, 110], [108, 110], [108, 110], [108, 110], [108, 110], [108, 110],
+  [90, 109], [108, 110], [108, 110], [108, 110],
+  [108, 114], [96, 109], [108, 110], [108, 110], [108, 110],
+  [108, 120], [102, 109], [108, 110], [108, 110], [108, 110],
+  [108, 126], [108, 110], [108, 110], [108, 110],
+];
 
 /**
- * 12 completed bars aligned to `timeframe` (step-sized apart, oldest first) plus
- * one still-forming bar at the current period start. The service drops the
- * forming bar by time (timestamp + timeframeMs(timeframe) > anchor), so exactly
- * 12 completed bars feed computePlateau (the largest plateau window bw=6 needs
- * 2 * 6 = 12).
+ * Builds completed candles for `bars` whose newest bar closes exactly at
+ * `anchor - timeframeStep` (so the service's by-time completed filter keeps it),
+ * optionally appending a still-forming bar at `anchor` that the service must
+ * drop. All candles carry `timeframe` so `timeframeMs` sees the right step.
  */
-function timeframeCandles(timeframe: ReviewTimeframe, amplitudes: number[]): Candlestick[] {
+function candlesAt(
+  anchor: number,
+  timeframe: ReviewTimeframe,
+  bars: ReadonlyArray<readonly [number, number]>,
+  withForming = false,
+): Candlestick[] {
   const step = timeframeMs(timeframe);
-  const periodStart = now - (now % step);
-  const bars = amplitudes.map((amplitude, index) =>
-    makeCandle(periodStart - (amplitudes.length - index) * step, 100, amplitude),
-  );
-  bars.push(makeCandle(periodStart, 100)); // still-forming bar, dropped by the service
-  return bars;
+  const out = bars.map(([low, high], index) => ({
+    instrument: 'TEST',
+    timeframe,
+    timestamp: anchor - step * (bars.length - index),
+    open: (low + high) / 2,
+    high,
+    low,
+    close: (low + high) / 2,
+    volume: 100,
+  }));
+  if (withForming) {
+    out.push({ instrument: 'TEST', timeframe, timestamp: anchor, open: 105, high: 105, low: 105, close: 105, volume: 0 });
+  }
+  return out;
 }
 
-// The service consumes the normalized TickerSource result (already USDT-settled,
-// already sorted by 24h quote-volume descending). The pool here mimics an OKX
-// source; the same shape would arrive from Binance with plain names.
+/** A structure-kind plan per (coin, timeframe): which synthetic shape to serve. */
+type Shape = 'box' | 'triangle' | 'uptrend' | 'none';
+
+const shapeBars: Record<Exclude<Shape, 'none'>, ReadonlyArray<readonly [number, number]>> = {
+  box: boxBars,
+  triangle: triangleBars,
+  uptrend: uptrendBars,
+};
+
+type Source = {
+  listTickers: ReturnType<typeof vi.fn<() => Promise<Ticker[]>>>;
+  getCandlesticks: ReturnType<typeof vi.fn<CandleSource['getCandlesticks']>>;
+};
+
+function buildSource(
+  plan: (instrument: string, timeframe: ReviewTimeframe) => Shape,
+  withForming = false,
+): Source {
+  const listTickers = vi.fn<() => Promise<Ticker[]>>(async () => tickers);
+  const getCandlesticks = vi.fn<CandleSource['getCandlesticks']>(
+    async ({ instrument, timeframe, anchor }: CandleRequest) => {
+      const shape = plan(instrument, timeframe);
+      const bars = shape === 'none' ? null : shapeBars[shape];
+      if (!bars) return [];
+      return candlesAt(anchor, timeframe, bars, withForming);
+    },
+  );
+  return { listTickers, getCandlesticks };
+}
+
+/** Wraps the mock source in the TickerSource/CandleSource object shapes. */
+function serviceFrom(source: Source): CoinScanService {
+  return new CoinScanService({ listTickers: source.listTickers }, { getCandlesticks: source.getCandlesticks });
+}
+
 const tickers: Ticker[] = [
   { instrument: 'BTC-USDT-SWAP', quoteVolume24h: 150000000 * 60000, lastPrice: 60000, change24h: ((60000 - 62000) / 62000) * 100 },
   { instrument: 'ETH-USDT-SWAP', quoteVolume24h: 90000000 * 3500, lastPrice: 3500, change24h: ((3500 - 3400) / 3400) * 100 },
@@ -55,163 +117,200 @@ const params: ShrinkScanParams = {
   method: 'shrink',
   topN: 2,
   minQuoteVolume24h: 0,
-  maxCompression: 0.8,
-  maxLatestTrend: 0.9,
-  trendWindow: 2,
-  plateauMin: 2,
 };
 
-// A 12-bar step-narrowing tail: bars 0..5 wide (0.02), 6..8 medium (0.01),
-// 9..11 narrow (0.003). Every plateau box window 3..6 compresses, so the coin
-// qualifies on any timeframe fed this data.
-const qualifyingAmplitudes = [0.02, 0.02, 0.02, 0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.003, 0.003, 0.003];
-// A uniformly quiet tail: compression ≈ 1.0, latestTrend ≈ 1.0 → no box window
-// qualifies (the "long-term quiet, no tension" coin the gate rejects).
-const quietAmplitudes = Array.from({ length: 12 }, () => 0.02);
-// A deeper convergence: compression ≈ 0.1-0.2 on every window, so its bestScore
-// is much lower than qualifyingAmplitudes' — used to test score-ascending sort.
-const deepAmplitudes = [0.03, 0.03, 0.03, 0.03, 0.03, 0.03, 0.005, 0.005, 0.005, 0.001, 0.001, 0.001];
+const allBoxPlan = () => 'box' as const;
 
-function scanServiceWith(getCandlesticks: CandleSource['getCandlesticks']) {
-  return new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
-}
-
-describe('CoinScanService (multi-timeframe)', () => {
-  it('scans top-N USDT swap instruments across all 5 timeframes and drops the forming bar', async () => {
-    const getCandlesticks = vi.fn(async ({ timeframe }: { timeframe: ReviewTimeframe }) =>
-      timeframeCandles(timeframe, qualifyingAmplitudes),
-    );
-    const service = scanServiceWith(getCandlesticks);
-
+describe('CoinScanService (convergence structure, multi-timeframe)', () => {
+  it('scans top-N coins across all 5 timeframes and reports every qualified structure', async () => {
+    const source = buildSource((instrument, timeframe) => (instrument === 'SOL-USDT-SWAP' ? 'uptrend' : allBoxPlan()));
+    const service = serviceFrom(source);
     const result = await service.scanShrink(params);
 
-    // Both top-2 coins converge on every timeframe → both appear.
+    // BTC + ETH are the top-2 (SOL falls outside topN) and both converge on all
+    // 5 timeframes → both rows appear.
     expect(result.scanned.map((row) => row.instrument).sort()).toEqual(['BTC-USDT-SWAP', 'ETH-USDT-SWAP']);
-    // Each (coin, timeframe) fetch pulls 2 * max(PLATEAU_BOX_WINDOWS) + 1 = 13
-    // bars and drops the forming bar by time (the anchor is resolved to now).
-    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ limit: 13, direction: 'earlier', anchor: expect.any(Number) }));
-    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ instrument: 'BTC-USDT-SWAP', timeframe: '5m' }));
-    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ instrument: 'BTC-USDT-SWAP', timeframe: '1D' }));
-    expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ instrument: 'ETH-USDT-SWAP', timeframe: '4H' }));
     for (const row of result.scanned) {
-      expect(row.timeframes).toHaveLength(scanTimeframes.length);
-      expect(row.convergenceTimeframes).toEqual(['5m', '15m', '1H', '4H', '1D']);
+      expect(row.convergedTimeframes).toEqual(scanTimeframes);
       expect(row.qualifiedCount).toBe(5);
       expect(row.qualified).toBe(true);
-      for (const timeframe of row.timeframes) expect(timeframe.qualified).toBe(true);
+      for (const timeframe of scanTimeframes) {
+        expect(row.structures[timeframe].structure).toBe('box');
+        expect(row.structures[timeframe].qualified).toBe(true);
+        expect(row.structures[timeframe].score).toBeCloseTo(0.812, 2);
+      }
     }
     expect(result.qualifiedCount).toBe(2);
-    // Equal counts and equal bestScore keep the ticker (quote-volume) order.
+    // Equal counts and equal bestScore keep the stable ticker (quote-volume) order.
     expect(result.scanned[0].instrument).toBe('BTC-USDT-SWAP');
-    // The response echoes the effective scan parameters, including the resolved
-    // anchor (Date.now() when the client omitted it).
-    expect(result.params.maxCompression).toBe(0.8);
-    expect(result.params.maxLatestTrend).toBe(0.9);
-    expect(result.params.trendWindow).toBe(2);
-    expect(result.params.plateauMin).toBe(2);
-    expect(result.params.anchor).toBeTypeOf('number');
+    expect(result.params).toEqual({ ...params, anchor: expect.any(Number) });
   });
 
-  it('keeps the newest completed bar when the source has no forming bar', async () => {
-    const getCandlesticks = vi.fn(async ({ timeframe }: { timeframe: ReviewTimeframe }) =>
-      timeframeCandles(timeframe, qualifyingAmplitudes).slice(0, -1),
+  it('fetches each (coin, timeframe) with the probe-type per-timeframe limit', async () => {
+    const source = buildSource(allBoxPlan);
+    const service = serviceFrom(source);
+    await service.scanShrink(params);
+
+    for (const timeframe of ['5m', '15m', '1H', '4H'] as ReviewTimeframe[]) {
+      expect(source.getCandlesticks).toHaveBeenCalledWith(
+        expect.objectContaining({ timeframe, limit: 100, direction: 'earlier', anchor: expect.any(Number) }),
+      );
+    }
+    expect(source.getCandlesticks).toHaveBeenCalledWith(
+      expect.objectContaining({ timeframe: '1D', limit: 40, direction: 'earlier' }),
     );
-    const service = scanServiceWith(getCandlesticks);
-    const result = await service.scanShrink(params);
-    // The 12 completed bars (no forming bar in the cache) still feed the plateau.
-    expect(result.scanned.length).toBe(2);
-    for (const row of result.scanned) expect(row.qualified).toBe(true);
+    expect(source.getCandlesticks).toHaveBeenCalledWith(
+      expect.objectContaining({ instrument: 'BTC-USDT-SWAP', timeframe: '5m' }),
+    );
   });
 
-  it('carries the 24h change percentage from the ticker source onto each row', async () => {
-    const getCandlesticks = vi.fn(async ({ timeframe }: { timeframe: ReviewTimeframe }) =>
-      timeframeCandles(timeframe, qualifyingAmplitudes),
-    );
-    const service = scanServiceWith(getCandlesticks);
+  it('drops the still-forming bar by time without dropping the newest completed bar', async () => {
+    const anchor = Date.parse('2026-08-04T00:00:00Z');
+    // Same data, once with a forming bar appended at `anchor` and once without.
+    const withForming = buildSource(allBoxPlan, true);
+    const withoutForming = buildSource(allBoxPlan, false);
+    const a = serviceFrom(withForming);
+    const b = serviceFrom(withoutForming);
+    const [resultWith, resultWithout] = await Promise.all([
+      a.scanShrink({ ...params, anchor }),
+      b.scanShrink({ ...params, anchor }),
+    ]);
+    // The forming bar must not change the verdict — it is dropped by time, and
+    // the newest COMPLETED bar is never sliced away.
+    expect(resultWith.scanned.map((row) => row.qualifiedCount)).toEqual([5, 5]);
+    expect(resultWithout.scanned.map((row) => row.qualifiedCount)).toEqual([5, 5]);
+    for (const row of resultWith.scanned) {
+      expect(row.qualified).toBe(true);
+    }
+  });
+
+  it('carries the 24h change percentage and last price from the ticker onto each row', async () => {
+    const source = buildSource(allBoxPlan);
+    const service = serviceFrom(source);
     const result = await service.scanShrink(params);
     const btc = result.scanned.find((row) => row.instrument === 'BTC-USDT-SWAP');
     expect(btc?.lastPrice).toBe(60000);
     expect(btc?.change24h).toBeCloseTo(((60000 - 62000) / 62000) * 100);
     const eth = result.scanned.find((row) => row.instrument === 'ETH-USDT-SWAP');
+    expect(eth?.lastPrice).toBe(3500);
     expect(eth?.change24h).toBeCloseTo(((3500 - 3400) / 3400) * 100);
+    expect(eth?.quoteVolume24h).toBe(90000000 * 3500);
   });
 
-  it('skips coins without enough candle history on every timeframe', async () => {
-    const getCandlesticks = vi.fn(async ({ timeframe }: { timeframe: ReviewTimeframe }) =>
-      timeframeCandles(timeframe, qualifyingAmplitudes).slice(0, 2),
+  it('hides coins with no convergent structure on any timeframe (宁少勿滥)', async () => {
+    const source = buildSource((instrument, timeframe) =>
+      instrument === 'BTC-USDT-SWAP' ? 'box' : 'uptrend',
     );
-    const service = scanServiceWith(getCandlesticks);
-    const result = await service.scanShrink(params);
-    expect(result.scanned).toEqual([]);
-    expect(result.qualifiedCount).toBe(0);
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 3 });
+    // Only BTC qualifies; ETH and SOL have no structure anywhere and never appear.
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
+    expect(result.qualifiedCount).toBe(1);
   });
 
-  it('sorts by qualifiedCount desc, then bestScore asc, and hides non-converged coins', async () => {
-    const getCandlesticks = vi.fn(async ({ instrument, timeframe }: { instrument: string; timeframe: ReviewTimeframe }) => {
-      if (instrument === 'BTC-USDT-SWAP') {
-        return timeframeCandles(timeframe, timeframe === '5m' ? qualifyingAmplitudes : quietAmplitudes);
-      }
-      if (instrument === 'ETH-USDT-SWAP') {
-        return timeframeCandles(timeframe, timeframe === '4H' ? deepAmplitudes : quietAmplitudes);
-      }
-      return timeframeCandles(timeframe, quietAmplitudes); // SOL converges nowhere
+  it('sorts by qualifiedCount desc, then bestScore desc, across structure strength', async () => {
+    const source = buildSource((instrument, timeframe) => {
+      if (instrument === 'BTC-USDT-SWAP') return 'box'; // all 5 timeframes
+      if (instrument === 'ETH-USDT-SWAP') return timeframe === '5m' ? 'box' : 'uptrend'; // 1 tf, weak
+      if (instrument === 'SOL-USDT-SWAP') return timeframe === '5m' ? 'triangle' : 'uptrend'; // 1 tf, strong
+      return 'none';
     });
-    const service = scanServiceWith(getCandlesticks);
-    const result = await service.scanShrink(params);
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 3 });
 
-    // BTC: only 5m converges (bestScore ≈ 0.76); ETH: only 4H converges, deeper
-    // (bestScore ≈ 0.42). Equal counts → ETH (lower bestScore) sorts first; SOL
-    // converges nowhere and never appears.
-    expect(result.scanned.map((row) => row.instrument)).toEqual(['ETH-USDT-SWAP', 'BTC-USDT-SWAP']);
-    const eth = result.scanned[0];
-    expect(eth.convergenceTimeframes).toEqual(['4H']);
-    expect(eth.qualifiedCount).toBe(1);
-    const btc = result.scanned[1];
-    expect(btc.convergenceTimeframes).toEqual(['5m']);
-    expect(btc.bestScore).toBeGreaterThan(eth.bestScore);
+    // BTC converges on 5 timeframes (0.812) → first. SOL and ETH converge on 1
+    // timeframe; SOL's triangle (0.825) is stronger than ETH's box (0.812) →
+    // SOL second, ETH third. All orderings come from the service, not the UI.
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'SOL-USDT-SWAP', 'ETH-USDT-SWAP']);
+    expect(result.scanned[0].qualifiedCount).toBe(5);
+    expect(result.scanned[1].convergedTimeframes).toEqual(['5m']);
+    expect(result.scanned[2].convergedTimeframes).toEqual(['5m']);
+    expect(result.scanned[1].bestScore).toBeGreaterThan(result.scanned[2].bestScore);
+    expect(result.scanned[1].bestScore).toBeCloseTo(0.825, 2);
   });
 
   it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {
-    const getCandlesticks = vi.fn(async ({ timeframe }: { timeframe: ReviewTimeframe }) =>
-      timeframeCandles(timeframe, qualifyingAmplitudes),
-    );
-    const service = scanServiceWith(getCandlesticks);
+    const source = buildSource(allBoxPlan);
+    const service = serviceFrom(source);
     // BTC quote-volume = 150M * 60000 = 9e12; ETH = 90M * 3500 = 3.15e11.
     const result = await service.scanShrink({ ...params, minQuoteVolume24h: 5e11 });
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
   });
 
+  it('applies the minScore gate: weaker structures are filtered out when the knob is raised', async () => {
+    const source = buildSource(allBoxPlan);
+    const service = serviceFrom(source);
+    // Box score ≈ 0.812. With minScore 0.8 the coins qualify; with 0.9 none do.
+    const permissive = await service.scanShrink({ ...params, minScore: 0.8 });
+    expect(permissive.qualifiedCount).toBe(2);
+    const strict = await service.scanShrink({ ...params, minScore: 0.9 });
+    expect(strict.scanned).toEqual([]);
+    expect(strict.qualifiedCount).toBe(0);
+  });
+
   it('applies a past anchor to every timeframe and echoes it in params', async () => {
-    const getCandlesticks = vi.fn(async ({ timeframe }: { timeframe: ReviewTimeframe }) =>
-      timeframeCandles(timeframe, qualifyingAmplitudes),
-    );
-    const service = scanServiceWith(getCandlesticks);
+    const source = buildSource(allBoxPlan);
+    const service = serviceFrom(source);
     const pastAnchor = Date.parse('2026-08-04T00:00:00Z');
     const result = await service.scanShrink({ ...params, anchor: pastAnchor });
     for (const timeframe of scanTimeframes) {
-      expect(getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ anchor: pastAnchor, timeframe }));
+      expect(source.getCandlesticks).toHaveBeenCalledWith(
+        expect.objectContaining({ anchor: pastAnchor, timeframe }),
+      );
     }
     expect(result.params.anchor).toBe(pastAnchor);
+    expect(result.scanned.length).toBeGreaterThan(0);
   });
 
-  it('qualifies a gold-style 1D convergence at the anchor (XAUUSDT 08-04 scenario)', async () => {
-    // 1D candles: a horizontal band whose per-day amplitude narrows toward the
-    // anchor — the gold 1D 08-04 convergence the user wanted scanned.
-    const DAY = 24 * 60 * 60 * 1000;
-    const dayStart = now - (now % DAY);
-    const daily = qualifyingAmplitudes.map((amplitude, index) =>
-      makeCandle(dayStart - (qualifyingAmplitudes.length - index) * DAY, 100, amplitude),
-    );
-    daily.push(makeCandle(dayStart, 100)); // still-forming current day
-    const getCandlesticks = vi.fn(async () => daily);
-    const service = scanServiceWith(getCandlesticks);
-    // Anchor just after the newest completed day closed, so exactly the 12
-    // completed days feed the plateau and the forming day is dropped.
-    const anchor = dayStart - DAY + 1000;
-    const result = await service.scanShrink({ ...params, anchor });
-    expect(result.scanned.length).toBeGreaterThan(0);
+  it('reports a single coin with different structures on different timeframes (AC5)', async () => {
+    // BTC: 5m triangle + 1H box, nothing elsewhere. One row carries both
+    // structures; convergedTimeframes lists them in scanTimeframes order.
+    const source = buildSource((instrument, timeframe) => {
+      if (instrument !== 'BTC-USDT-SWAP') return 'uptrend';
+      if (timeframe === '5m') return 'triangle';
+      if (timeframe === '1H') return 'box';
+      return 'uptrend';
+    });
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 1 });
+
+    expect(result.scanned).toHaveLength(1);
     const row = result.scanned[0];
-    expect(row.convergenceTimeframes).toContain('1D');
-    expect(row.timeframes.find((timeframe) => timeframe.timeframe === '1D')?.qualified).toBe(true);
+    expect(row.convergedTimeframes).toEqual(['5m', '1H']);
+    expect(row.qualifiedCount).toBe(2);
+    expect(row.structures['5m'].structure).toBe('triangle');
+    expect(row.structures['1H'].structure).toBe('box');
+    expect(row.structures['5m'].score).toBeGreaterThan(row.structures['1H'].score);
+    // bestScore = strongest score across the qualified timeframes (the triangle).
+    expect(row.bestScore).toBeCloseTo(0.825, 2);
+  });
+
+  it('fills neutral zeros for timeframes without a convergent structure', async () => {
+    const source = buildSource((instrument, timeframe) =>
+      instrument === 'BTC-USDT-SWAP' && timeframe === '5m' ? 'box' : 'uptrend',
+    );
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 1 });
+    const row = result.scanned[0];
+    expect(row.convergedTimeframes).toEqual(['5m']);
+    expect(row.qualifiedCount).toBe(1);
+    expect(row.structures['5m'].structure).toBe('box');
+    for (const timeframe of ['15m', '1H', '4H', '1D'] as ReviewTimeframe[]) {
+      expect(row.structures[timeframe]).toEqual({
+        structure: null,
+        position: 0,
+        score: 0,
+        touchCount: 0,
+        qualified: false,
+      });
+    }
+  });
+
+  it('skips coins with insufficient candle history on every timeframe', async () => {
+    const getCandlesticks = vi.fn(async () => []);
+    const service = new CoinScanService({ listTickers: vi.fn(async () => tickers) }, { getCandlesticks });
+    const result = await service.scanShrink(params);
+    expect(result.scanned).toEqual([]);
+    expect(result.qualifiedCount).toBe(0);
   });
 });

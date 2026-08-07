@@ -1,6 +1,11 @@
 import { Fragment, useEffect, useState } from 'react';
 import type { AlertDirection, PriceAlert } from '../domain/price-alert';
-import type { ScanResponse } from '../domain/coin-scan';
+import {
+  scanTimeframes,
+  type ConvergenceStructure,
+  type ScanResponse,
+  type ScanRow,
+} from '../domain/coin-scan';
 
 export type CoinScanPanelProps = {
   onScanned: (result: ScanResponse) => void;
@@ -15,11 +20,9 @@ type AlertConfig = {
 
 export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentChange }: CoinScanPanelProps) {
   const [topN, setTopN] = useState('50');
-  const [plateauMin, setPlateauMin] = useState('2');
-  const [maxCompression, setMaxCompression] = useState('0.8');
-  const [maxLatestTrend, setMaxLatestTrend] = useState('0.9');
-  const [trendWindow, setTrendWindow] = useState('3');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
+  // 结构强度阈值主旋钮:调高 = 宁少勿滥. Default 0 = any qualified structure counts.
+  const [minScore, setMinScore] = useState('0');
   // Optional scan anchor (local datetime); empty = scan "now".
   const [anchorInput, setAnchorInput] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -37,7 +40,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   }, []);
 
   async function scan() {
-    const inputs = [topN, plateauMin, maxCompression, maxLatestTrend, trendWindow, minQuoteVolume24h];
+    const inputs = [topN, minQuoteVolume24h, minScore];
     if (inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
       setError('参数无效,请检查');
       return;
@@ -53,11 +56,8 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
       const query = new URLSearchParams({
         method: 'shrink',
         topN,
-        plateauMin,
-        maxCompression,
-        maxLatestTrend,
-        trendWindow,
         minQuoteVolume24h,
+        minScore,
       });
       if (anchorEpoch !== null) query.set('anchor', String(anchorEpoch));
       const response = await fetch(`/api/scan?${query.toString()}`);
@@ -122,7 +122,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
       <label>
         方法
         <select value="shrink" disabled>
-          <option value="shrink">缩量</option>
+          <option value="shrink">收敛结构</option>
         </select>
       </label>
       <div className="coin-scan-params">
@@ -131,31 +131,29 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
           <input type="number" min="1" value={topN} onChange={(event) => setTopN(event.target.value)} />
         </label>
         <label>
-          连续收敛窗口
-          <input type="number" min="1" value={plateauMin} onChange={(event) => setPlateauMin(event.target.value)} />
-        </label>
-        <label>
-          压缩阈值
-          <input type="number" min="0" step="0.05" value={maxCompression} onChange={(event) => setMaxCompression(event.target.value)} />
-        </label>
-        <label>
-          收窄阈值
-          <input type="number" min="0" step="0.05" value={maxLatestTrend} onChange={(event) => setMaxLatestTrend(event.target.value)} />
-        </label>
-        <label>
-          趋势窗口
-          <input type="number" min="1" value={trendWindow} onChange={(event) => setTrendWindow(event.target.value)} />
-        </label>
-        <label>
           最低成交额
           <input type="number" min="0" value={minQuoteVolume24h} onChange={(event) => setMinQuoteVolume24h(event.target.value)} />
+        </label>
+        <label>
+          结构强度阈值
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            value={minScore}
+            onChange={(event) => setMinScore(event.target.value)}
+            title="调高 = 宁少勿滥"
+          />
         </label>
         <label>
           扫描时间点
           <input type="datetime-local" value={anchorInput} onChange={(event) => setAnchorInput(event.target.value)} />
         </label>
       </div>
-      <p className="panel-status hint">一次扫描全周期(5m/15m/1H/4H/1D),每币一行。时间点留空 = 现在;填入则扫描「该时刻之前已完成」的 K 线(验证历史收敛用)。</p>
+      <p className="panel-status hint">
+        一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。
+      </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
       </button>
@@ -232,7 +230,7 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  // The service sorts scanned rows (qualifiedCount desc, then bestScore asc); the
+  // The service sorts scanned rows (qualifiedCount desc, then bestScore desc); the
   // UI renders them as-is.
   return (
     <>
@@ -250,8 +248,8 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
               <th>最新价</th>
               <th>24h 涨跌</th>
               <th>成交额</th>
-              <th>收敛周期</th>
-              <th>状态</th>
+              <th>收敛结构</th>
+              <th>强度分</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -263,13 +261,13 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
                   <td>{formatPrice(row.lastPrice)}</td>
                   <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
                   <td>{formatVolume(row.quoteVolume24h)}</td>
-                  <td>{row.convergenceTimeframes.join(', ') || '—'}</td>
-                  <td>合格</td>
+                  <td>{formatConvergedStructures(row)}</td>
+                  <td>{formatScore(row.bestScore)}</td>
                   <td>
                     <button
                       type="button"
                       className="coin-scan-copy"
-                      title="展开各周期收敛明细"
+                      title="展开各周期结构明细"
                       onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
                     >
                       {expandedInstrument === row.instrument ? '收起' : '详情'}
@@ -299,26 +297,27 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
                         <thead>
                           <tr>
                             <th>周期</th>
-                            <th>压缩比</th>
-                            <th>收窄趋势</th>
-                            <th>score</th>
-                            <th>窗口</th>
-                            <th>plateau宽</th>
+                            <th>结构类型</th>
+                            <th>位置</th>
+                            <th>强度分</th>
+                            <th>触碰次数</th>
                             <th>状态</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {row.timeframes.map((timeframe) => (
-                            <tr key={timeframe.timeframe} className={timeframe.qualified ? 'qualified' : ''}>
-                              <td>{timeframe.timeframe}</td>
-                              <td>{formatCompression(timeframe.compression)}</td>
-                              <td>{formatLatestTrend(timeframe.latestTrend)}</td>
-                              <td>{formatScore(timeframe.score)}</td>
-                              <td>{timeframe.bestBoxWindow}</td>
-                              <td>{timeframe.plateauWidth}</td>
-                              <td>{timeframe.qualified ? '合格' : '—'}</td>
-                            </tr>
-                          ))}
+                          {scanTimeframes.map((timeframe) => {
+                            const structure = row.structures[timeframe];
+                            return (
+                              <tr key={timeframe} className={structure.qualified ? 'qualified' : ''}>
+                                <td>{timeframe}</td>
+                                <td>{structureLabel(structure.structure)}</td>
+                                <td>{formatPosition(structure.position)}</td>
+                                <td>{formatScore(structure.score)}</td>
+                                <td>{structure.touchCount}</td>
+                                <td>{structure.qualified ? '合格' : '—'}</td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </td>
@@ -340,23 +339,36 @@ function shortInstrument(instrument: string): string {
   return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
 }
 
-function formatCompression(value: number): string {
-  // compression is always a finite number on the wire, but the prior-window-is-flat
-  // boundary reports LARGE_RATIO (1e9) as a "woke up from flat" sentinel. Show it
-  // as a dash so the column stays readable while signaling non-convergence.
-  return value >= 1e9 ? '—' : value.toFixed(2);
+// 收敛结构 column: each qualified timeframe shown with its structure type, e.g.
+// "5m三角 1H箱体". Rows always have >= 1 qualified timeframe, but a defensive
+// dash keeps the column readable if a row ever arrives empty.
+function formatConvergedStructures(row: ScanRow): string {
+  const parts = row.convergedTimeframes.map((timeframe) => {
+    const structure = row.structures[timeframe].structure;
+    return `${timeframe}${structureLabel(structure)}`;
+  });
+  return parts.length > 0 ? parts.join(' ') : '—';
 }
 
-function formatLatestTrend(value: number): string {
-  // latestTrend mirrors compression's boundary handling: a flat middle window with
-  // an active latest window reports LARGE_RATIO (1e9), shown as a dash.
-  return value >= 1e9 ? '—' : value.toFixed(2);
+function structureLabel(structure: ConvergenceStructure | null): string {
+  switch (structure) {
+    case 'triangle':
+      return '三角';
+    case 'box':
+      return '箱体';
+    default:
+      return '—';
+  }
+}
+
+function formatPosition(value: number): string {
+  // position is a 0..1 fraction; show it as a percent (0.28 → "28%").
+  return `${Math.round(value * 100)}%`;
 }
 
 function formatScore(value: number): string {
-  // A score only goes >= 1e9 when one of its components hit the flat-window
-  // sentinel, which never qualifies; show it as a dash for readability.
-  return value >= 1e9 ? '—' : value.toFixed(2);
+  // score is normalized to 0..1 (larger = stronger convergence).
+  return value.toFixed(2);
 }
 
 function formatPrice(value: number): string {

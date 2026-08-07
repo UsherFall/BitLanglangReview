@@ -4,90 +4,160 @@ import type { ReviewTimeframe } from './trade';
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
 /**
- * Volatility-compression threshold: compression <= maxCompression to qualify.
- * compression = mean amplitude of the recent boxWindow bars / mean amplitude of
- * the boxWindow bars immediately before them, so a coin only qualifies when its
- * current volatility is meaningfully smaller than its own recent past.
+ * Kind of convergence structure. A coin is 蓄力待突破 when its swing structure has
+ * collapsed into one of these two shapes:
+ * - `triangle`: converging trend lines (lower highs + higher lows, or one side
+ *   flat). Direction is not locked — both bullish and bearish wedges qualify.
+ * - `box`: a horizontal channel (both edges slope ≈ 0) whose height is narrow
+ *   relative to the coin's own past volatility.
  */
-export const DEFAULT_MAX_COMPRESSION = 0.8;
-/**
- * Latest-trend threshold: latestTrend <= maxLatestTrend to qualify.
- * latestTrend = mean amplitude of the trailing trendWindow bars / mean amplitude
- * of the trendWindow bars immediately before them, so a coin only qualifies when
- * its volatility is still shrinking toward the present (收窄), not just smaller
- * than some earlier past (which compression alone cannot distinguish from a coin
- * that has always been quiet).
- */
-export const DEFAULT_MAX_LATEST_TREND = 0.9;
-/**
- * Number of trailing completed bars used to compute latestTrend. Default 3, not
- * 2: a 2-bar window makes the gate twitchy — one wider bar (e.g. ONUSDT 4H
- * @08-05 16:00, latestTrend 1.16 with tr=2 vs 0.52 with tr=3) flips the verdict
- * even though the convergence is obvious. 3 bars averages out the single-bar
- * blip while still rejecting a genuinely flattened/widening coin (≈ 1.0+).
- */
-export const DEFAULT_TREND_WINDOW = 3;
+export type ConvergenceStructure = 'triangle' | 'box';
 
 /**
- * Box windows scanned by the plateau convergence gate. A coin converges when it
- * compresses (compression) and is still narrowing (latestTrend) across at least
- * `plateauMin` consecutive box windows, which filters isolated one-window noise
- * and adapts to the natural box length of each instrument.
+ * One timeframe's convergence verdict. `structure === null` means that timeframe
+ * has no convergent structure at all; the other fields are then meaningless and
+ * the service fills them with neutral zeros.
  */
-export const PLATEAU_BOX_WINDOWS = [3, 4, 5, 6] as const;
-/** Minimum number of consecutive qualified box windows for a coin to qualify. */
-export const DEFAULT_PLATEAU_MIN = 2;
+export type StructureResult = {
+  /** Structure type; null = this timeframe has no convergence structure. */
+  structure: ConvergenceStructure | null;
+  /** Position inside the structure, 0..1: box = (lastPrice - boxLow) / (boxHigh - boxLow); triangle = current price between the two trend lines. */
+  position: number;
+  /** Convergence strength score, larger = stronger. Sort key. */
+  score: number;
+  /** Touch count (sum of swing points on both edges). */
+  touchCount: number;
+  /** True when the structure passed the maturity gate (touchMin per edge). */
+  qualified: boolean;
+};
 
+/**
+ * Classification thresholds for `classifyStructure` / `probeStructure`.
+ *
+ * `slopeTolerance`, `touchMin` and `maxBoxRelativeHeight` are the calibration
+ * knobs the design keeps internal (not exposed in the UI); `lastPrice` and
+ * `priorAmplitude` are data that `probeStructure` measures from the candles and
+ * injects so the pure classifier can stay stateless. Tests may pass them
+ * directly; when absent the box low-volatility gate is skipped rather than
+ * guessed (see `classifyStructure`).
+ */
+export type StructureParams = {
+  /**
+   * Horizontal-drift tolerance for a box edge: an edge counts as flat when the
+   * regression line's TOTAL drift across the edge's swing span, normalized by
+   * the edge's mean price, is <= slopeTolerance. Total-drift (not per-bar slope)
+   * is used so a long, slowly-tilting structure is not mistaken for a box — the
+   * drift is scale-free (relative to the edge's own price), so one value works
+   * for any timeframe and volatility level.
+   */
+  slopeTolerance: number;
+  /**
+   * Minimum touch points per edge for a structure to be mature (宁少勿滥). Both
+   * edges need at least touchMin swing points. Must be >= 2 — a 1-point edge
+   * cannot feed a linear regression, so lower values are clamped to 2.
+   */
+  touchMin: number;
+  /**
+   * Box low-volatility gate: (boxHeight / midPrice) / priorAmplitude must be
+   * strictly less than this. The box must be a *convergence from larger
+   * volatility* — an always-quiet coin (box width ≈ its own amplitude) has no
+   * 蓄力 tension and is rejected.
+   */
+  maxBoxRelativeHeight: number;
+  /** Data: latest completed close, used for `position`. Filled by probeStructure. */
+  lastPrice?: number;
+  /**
+   * Data: mean per-bar amplitude ((high - low) / low) of the coin's own recent
+   * past, used by the box low-volatility gate. Filled by probeStructure from the
+   * candle window; a naturally quiet coin has priorAmplitude ≈ boxRelativeHeight
+   * → ratio ≈ 1 → rejected.
+   */
+  priorAmplitude?: number;
+  /**
+   * Data: current bar index = the last candle's index in the ascending-sorted
+   * candle array. Filled by probeStructure; tests may pass it directly. Trend
+   * lines, widths and positions are all anchored at this bar (extrapolated to
+   * where price is NOW), so a structure whose apex is already behind the current
+   * bar is rejected. Absent → falls back to the last swing's index (backward
+   * compatible for direct classifyStructure unit calls).
+   */
+  currentIndex?: number;
+  /**
+   * Recency gate: a structure's last swing must be within this many bars of
+   * currentIndex to be "现役". A swing sequence whose most recent touch is far in
+   * the past describes an old, already-resolved shape, not 蓄力待突破. Absent →
+   * `DEFAULT_MAX_RECENT_BARS`.
+   */
+  maxRecentBars?: number;
+  /**
+   * Monotonicity tolerance for a triangle's trending edges. Each successive
+   * swing on a rising edge must not fall more than this fraction below the
+   * previous swing, and each swing on a falling edge must not rise more than
+   * this fraction above the previous swing. This catches an outlier swing that
+   * pulls the OLS regression into the right sign while the edge is not actually
+   * monotonic (HEI's deep-low dip, HFT's post-crash rebound). A flat edge may
+   * wiggle within its flat tolerance and is not checked. Absent →
+   * `DEFAULT_MONOTONIC_TOLERANCE`.
+   */
+  monotonicTolerance?: number;
+  /**
+   * Box edge range gate: an edge's (max - min) / mean swing-price spread must be
+   * <= this for the edge to count as a horizontal channel. Complements the
+   * regression-slope flat test — a slow drift plus one deep spike can net a zero
+   * slope while visibly not being a horizontal box. Absent →
+   * `DEFAULT_BOX_RANGE_TOLERANCE`.
+   */
+  boxRangeTolerance?: number;
+};
+
+/**
+ * A fractal swing point. `index` is the bar index into the ascending-sorted
+ * candle array, kept as the regression x-coordinate so trend lines can be
+ * extrapolated to the current bar for `position`. `price` is high[i] for a swing
+ * high and low[i] for a swing low.
+ */
+export type SwingPoint = {
+  /** Bar index (into the sorted candle array) where the fractal was found. */
+  index: number;
+  /** Bar open time (ms). */
+  timestamp: number;
+  /** Fractal price: high[i] for a swing high, low[i] for a swing low. */
+  price: number;
+  kind: 'high' | 'low';
+};
+
+/**
+ * Minimal scan parameters (extreme UI panel: no swing/touch/slope knobs). The
+ * structure thresholds live in `StructureParams` (file-top defaults, calibrated
+ * on real data); only the output-strength knob is exposed.
+ */
 export type ShrinkScanParams = {
   method: 'shrink';
   topN: number;
   minQuoteVolume24h: number;
   /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */
   anchor?: number;
-  /** Volatility-compression threshold; absent falls back to DEFAULT_MAX_COMPRESSION. */
-  maxCompression?: number;
-  /** Latest-trend threshold; absent falls back to DEFAULT_MAX_LATEST_TREND. */
-  maxLatestTrend?: number;
-  /** Number of trailing bars for the latest-trend windows; absent falls back to DEFAULT_TREND_WINDOW. */
-  trendWindow?: number;
-  /** Minimum consecutive qualified plateau windows; absent falls back to DEFAULT_PLATEAU_MIN. */
-  plateauMin?: number;
+  /** 结构强度阈值主旋钮;调高 = 宁少勿滥. Timeframes with score < minScore don't count as converged. */
+  minScore?: number;
 };
 
 /**
- * One timeframe's convergence verdict for a scanned coin. The multi-timeframe
- * scan (5m/15m/1H/4H/1D) produces one entry per timeframe per coin; the coin is
- * 收敛 on the timeframes where `qualified` is true.
+ * One scanned coin. The scan covers all of `scanTimeframes`; a row exists only
+ * when the coin converges on at least one timeframe (宁少勿滥).
  */
-export type ScanTimeframeResult = {
-  timeframe: ReviewTimeframe;
-  /** Compression of the best plateau window (bestBoxWindow). */
-  compression: number;
-  /** Latest-trend of the best plateau window. */
-  latestTrend: number;
-  /** Score of the best plateau window = compression + latestTrend. */
-  score: number;
-  /** Longest run of consecutive qualified plateau windows. */
-  plateauWidth: number;
-  /** Box window of the best plateau window. */
-  bestBoxWindow: number;
-  /** plateauWidth >= plateauMin. */
-  qualified: boolean;
-};
-
 export type ScanRow = {
   instrument: string;
   lastPrice: number;
   change24h: number;
   quoteVolume24h: number;
-  /** All 5 timeframes in scanTimeframes order, each with its own convergence verdict. */
-  timeframes: ScanTimeframeResult[];
-  /** Subset of timeframes where qualified is true (收敛周期 column data). */
-  convergenceTimeframes: ReviewTimeframe[];
+  /** Per-timeframe structure verdicts, keyed by ReviewTimeframe (scanTimeframes order). */
+  structures: Record<ReviewTimeframe, StructureResult>;
+  /** Timeframes with a qualified structure (收敛周期 column). */
+  convergedTimeframes: ReviewTimeframe[];
   qualifiedCount: number;
-  /** Min score across qualified timeframes; a row always has >= 1 qualified timeframe. */
+  /** Strongest score across qualified timeframes; a row always has >= 1 qualified timeframe. */
   bestScore: number;
-  /** Always true (scanned rows only include coins with >= 1 qualified timeframe), kept for compatibility. */
+  /** Always true (scanned rows only include coins with >= 1 qualified timeframe). */
   qualified: boolean;
 };
 
@@ -98,234 +168,472 @@ export type ScanResponse = {
   scannedAt: string;
 };
 
-export type QuietMetrics = {
-  compression: number;
-  latestTrend: number;
-  /** Sort key = compression + latestTrend; lower = converging harder. */
-  score: number;
-  qualified: boolean;
-};
+/**
+ * Candidate fractal N set for the probing scan. Each coin/timeframe runs
+ * `detectSwings` at every N and keeps the N that yields the most regular
+ * structure (see `probeStructure`), so a small consolidation shows up at a small
+ * N and a large one at a large N without a pre-fixed window.
+ */
+export const STRUCTURE_SWING_N = [2, 3, 4, 5, 6, 8, 10, 12] as const;
 
-export type QuietMetricsParams = {
-  /** Volatility-compression window. */
-  boxWindow: number;
-  /** Volatility-compression threshold; absent falls back to DEFAULT_MAX_COMPRESSION. */
-  maxCompression?: number;
-  /** Latest-trend threshold; absent falls back to DEFAULT_MAX_LATEST_TREND. */
-  maxLatestTrend?: number;
-  /** Number of trailing bars for the latest-trend windows; absent falls back to DEFAULT_TREND_WINDOW. */
-  trendWindow?: number;
-};
+/**
+ * Horizontal-drift tolerance for a box edge: the edge's total drift across its
+ * swing span, as a fraction of the edge's mean price, must be <= this for the
+ * edge to count as flat (a box). An edge drifting more than this is "trending"
+ * and can form a triangle side. Calibrated on real data (implement stage);
+ * 0.02 = an edge may drift at most 2% of its own price from first to last swing
+ * and still count as a horizontal box edge.
+ */
+export const DEFAULT_SLOPE_TOLERANCE = 0.02;
+/** Minimum touch points per edge for a mature structure (both edges). */
+export const DEFAULT_TOUCH_MIN = 2;
+/**
+ * Box low-volatility gate: (boxHeight / midPrice) / priorAmplitude must be
+ * strictly < this. 0.8 = the box must be meaningfully narrower than the coin's
+ * own average bar amplitude, so an always-quiet coin (ratio ≈ 1) is rejected —
+ * it has no "从大波动收敛到小" 蓄力 tension.
+ */
+export const DEFAULT_MAX_BOX_RELATIVE_HEIGHT = 0.8;
+/**
+ * Only the most recent swings describe the *current* structure. Older swings
+ * (e.g. the trend before the consolidation) would skew the edge regressions, so
+ * classification windows to the last `DEFAULT_MAX_STRUCTURE_SWINGS` swings.
+ */
+export const DEFAULT_MAX_STRUCTURE_SWINGS = 8;
+/**
+ * Recency gate default: a structure's last swing must be within this many bars
+ * of the current bar (currentIndex) to count as "现役". Calibrated on real data —
+ * on 1D this is ~12 days, on 5m ~12 bars. A swing sequence whose most recent
+ * touch is older than this has already resolved; the trend lines would still
+ * extrapolate to a non-crossing width only by chance.
+ */
+export const DEFAULT_MAX_RECENT_BARS = 12;
+/**
+ * Monotonicity tolerance for a triangle's trending edges: a later swing may move
+ * against the edge's required direction by at most this fraction of the previous
+ * swing's price before the edge is judged non-monotonic. 0.02 = a rising low may
+ * pull back at most 2% per step; HEI's 0.1969 → 0.1816 (−7.8%) deep-low dip and
+ * HFT's post-crash rebound both exceed it. Calibrated on real data (implement
+ * stage); separate from slopeTolerance because it verifies the swing SEQUENCE,
+ * not the regression line.
+ */
+export const DEFAULT_MONOTONIC_TOLERANCE = 0.02;
+/**
+ * Box edge range gate: an edge's (max − min) / mean swing-price spread must be
+ * <= this for a horizontal channel. Same order of magnitude as slopeTolerance
+ * but slightly looser — an edge that regresses flat can legitimately wobble
+ * more than its net drift. 0.05 = the edge may spread at most 5% of its mean
+ * price. Calibrated on real data (implement stage).
+ */
+export const DEFAULT_BOX_RANGE_TOLERANCE = 0.05;
 
-export type PlateauWindow = {
-  boxWindow: number;
-  compression: number;
-  latestTrend: number;
-  score: number;
-  qualified: boolean;
-};
+/** Score normalization for the touch contribution: this many touches = full marks. */
+const TOUCH_SCALE = DEFAULT_MAX_STRUCTURE_SWINGS;
 
-export type PlateauResult = {
-  /** Per-box-window verdicts in PLATEAU_BOX_WINDOWS order. */
-  windows: PlateauWindow[];
-  /** Longest run of consecutive qualified windows. */
-  plateauWidth: number;
-  /** Compression of the best window. */
-  compression: number;
-  /** Latest-trend of the best window. */
-  latestTrend: number;
-  /** Score of the best window. */
-  score: number;
-  /** Box window of the best window. */
-  bestBoxWindow: number;
-  /** plateauWidth >= plateauMin. */
-  qualified: boolean;
-};
+function clamp01(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
 
-export type PlateauParams = {
-  maxCompression: number;
-  maxLatestTrend: number;
-  trendWindow: number;
-  plateauMin: number;
-};
+function mean(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  let sum = 0;
+  for (const value of values) sum += value;
+  return sum / values.length;
+}
 
-// Used instead of Infinity so JSON serialization never produces null.
-const LARGE_RATIO = 1_000_000_000;
+function maxValue(values: readonly number[]): number {
+  let max = -Infinity;
+  for (const value of values) if (value > max) max = value;
+  return max;
+}
 
-function amplitudeOf(candle: Candlestick): number {
-  return (candle.high - candle.low) / candle.low;
+function minValue(values: readonly number[]): number {
+  let min = Infinity;
+  for (const value of values) if (value < min) min = value;
+  return min;
 }
 
 /**
- * Computes pure-price 收敛 (convergence) metrics for the last completed
- * candlestick. Volume plays no role: the user's stance is "看裸 K" — a coin is
- * 收敛 when its price range has compressed against its own past and is still
- * narrowing toward the present.
+ * Directional monotonicity check for a triangle edge. A trending edge must not
+ * contain a swing that clearly moves AGAINST the edge's required direction —
+ * a single outlier swing can pull the OLS regression into the right sign while
+ * the edge is not actually monotonic (the HEI deep-low dip and HFT post-crash
+ * rebound both fooled slope-only classification). The edge is therefore
+ * verified swing-by-swing on top of the regression test.
  *
- * The caller must pass only completed candlesticks (the still-forming bar is
- * excluded before this call). Candlesticks may arrive in any order; they are
- * sorted ascending by timestamp here.
+ *   'up'   -> a later price falling below prev * (1 - tol) breaks monotonicity
+ *   'down' -> a later price rising above prev * (1 + tol) breaks monotonicity
+ *   'flat' -> not checked (a flat edge may wiggle within its flat tolerance)
  *
- * compression is a scale-free volatility-compression measure over the trailing
- * `boxWindow` completed bars (recent) against the `boxWindow` bars immediately
- * before them (prior): meanAmp(recent) / meanAmp(prior), where meanAmp is the
- * mean per-bar (high - low) / low. A coin whose current volatility has shrunk
- * meaningfully against its own past scores below 1; a coin that was always
- * quiet scores ≈ 1 (no "tension") and is rejected. When the prior window is
- * all-flat but the recent window is not, compression is reported as
- * `LARGE_RATIO` (the coin "woke up" from flat, which is not convergence); when
- * both windows are flat, compression is 0 and the latestTrend gate carries the
- * verdict.
- *
- * latestTrend is the tension-in-the-present gate: the trailing `trendWindow`
- * completed bars (latest) against the `trendWindow` bars immediately before them
- * (middle), meanAmp(latest) / meanAmp(middle). compression only asks "is it
- * quieter than before"; latestTrend asks "is it still getting quieter". A coin
- * that has flattened out (latest ≈ middle → latestTrend ≈ 1) or is widening
- * (latest > middle) has no 收窄 feel and is rejected; a coin still converging
- * scores below 1. Boundary: a flat middle window with an active latest window
- * reports `LARGE_RATIO`; two flat windows report 0 and the compression gate
- * carries the verdict.
- *
- * score = compression + latestTrend is the pure-price ranking key (both are
- * mean-amplitude ratios, so they are same-unit and additive). qualified requires
- * compression <= maxCompression AND latestTrend <= maxLatestTrend.
- *
- * Returns null when there is not enough history (fewer than `2 * boxWindow`
- * candles so both compression windows exist, or fewer than `2 * trendWindow`
- * candles so both latest-trend windows exist) or when a price is non-positive.
+ * `tolerance` is the per-step relative slack (DEFAULT_MONOTONIC_TOLERANCE).
  */
-export function computeQuietMetrics(candles: readonly Candlestick[], params: QuietMetricsParams): QuietMetrics | null {
-  const boxWindow = params.boxWindow;
-  const maxCompression = params.maxCompression ?? DEFAULT_MAX_COMPRESSION;
-  const maxLatestTrend = params.maxLatestTrend ?? DEFAULT_MAX_LATEST_TREND;
-  const trendWindow = params.trendWindow ?? DEFAULT_TREND_WINDOW;
+function isDirectionalMonotonic(
+  prices: readonly number[],
+  direction: 'up' | 'down' | 'flat',
+  tolerance: number,
+): boolean {
+  if (direction === 'flat' || prices.length < 2) return true;
+  for (let i = 1; i < prices.length; i += 1) {
+    const prev = prices[i - 1];
+    const curr = prices[i];
+    if (direction === 'up' && curr < prev * (1 - tolerance)) return false;
+    if (direction === 'down' && curr > prev * (1 + tolerance)) return false;
+  }
+  return true;
+}
+
+/** Mean per-bar relative amplitude ((high - low) / low) across the candles. */
+function meanAmplitude(candles: readonly Candlestick[]): number {
+  if (candles.length === 0) return 0;
+  let sum = 0;
+  for (const candle of candles) sum += (candle.high - candle.low) / candle.low;
+  return sum / candles.length;
+}
+
+type RegPoint = { x: number; y: number };
+type RegLine = { slope: number; intercept: number };
+
+/**
+ * Ordinary least-squares fit y = slope * x + intercept. Returns null when fewer
+ * than 2 points or all x-coordinates coincide (a vertical line has no slope).
+ */
+function linearRegression(points: readonly RegPoint[]): RegLine | null {
+  const n = points.length;
+  if (n < 2) return null;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumXX = 0;
+  for (const point of points) {
+    sumX += point.x;
+    sumY += point.y;
+    sumXY += point.x * point.y;
+    sumXX += point.x * point.x;
+  }
+  const denominator = n * sumXX - sumX * sumX;
+  if (denominator === 0) return null;
+  const slope = (n * sumXY - sumX * sumY) / denominator;
+  const intercept = (sumY - slope * sumX) / n;
+  return { slope, intercept };
+}
+
+/**
+ * Detects fractal swing highs/lows over the completed candles with a single
+ * fractal width `n`:
+ *
+ *   swing high at bar i ⟺ high[i] is strictly greater than the n highs on each side
+ *   swing low  at bar i ⟺ low[i]  is strictly less   than the n lows  on each side
+ *
+ * Pure and deterministic: the input is never mutated (a copy is sorted ascending
+ * by timestamp). Consecutive same-direction swing points are collapsed to the
+ * extreme (highest high / lowest low) so each edge is single-valued for
+ * regression. Returns an empty array when there are fewer than 2n + 1 bars (not
+ * enough fractal context) or a price is non-positive (structure math divides by
+ * price).
+ */
+export function detectSwings(candles: readonly Candlestick[], n: number): SwingPoint[] {
   const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
-  const count = sorted.length;
-  if (count < 2 * boxWindow || count < 2 * trendWindow) return null;
-  if (sorted.some((candle) => candle.low <= 0)) return null;
+  if (sorted.length < 2 * n + 1) return [];
+  if (sorted.some((candle) => candle.low <= 0)) return [];
 
-  // Volatility compression: the trailing `boxWindow` completed bars (recent)
-  // vs the `boxWindow` bars immediately before them (prior). Mean amplitudes
-  // feed the compression ratio.
-  let recentAmplitudeSum = 0;
-  for (let i = count - boxWindow; i < count; i += 1) {
-    recentAmplitudeSum += amplitudeOf(sorted[i]);
+  const raw: SwingPoint[] = [];
+  for (let i = n; i < sorted.length - n; i += 1) {
+    const bar = sorted[i];
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - n; j <= i + n; j += 1) {
+      if (j === i) continue;
+      if (bar.high <= sorted[j].high) isHigh = false;
+      if (bar.low >= sorted[j].low) isLow = false;
+      if (!isHigh && !isLow) break;
+    }
+    if (isHigh) raw.push({ index: i, timestamp: bar.timestamp, price: bar.high, kind: 'high' });
+    if (isLow) raw.push({ index: i, timestamp: bar.timestamp, price: bar.low, kind: 'low' });
   }
-  let priorAmplitudeSum = 0;
-  for (let i = count - 2 * boxWindow; i < count - boxWindow; i += 1) {
-    priorAmplitudeSum += amplitudeOf(sorted[i]);
-  }
-  const meanRecentAmplitude = recentAmplitudeSum / boxWindow;
-  const meanPriorAmplitude = priorAmplitudeSum / boxWindow;
-  const compression = meanPriorAmplitude > 0
-    ? meanRecentAmplitude / meanPriorAmplitude
-    : meanRecentAmplitude > 0 ? LARGE_RATIO : 0;
 
-  // Latest-trend: the trailing `trendWindow` completed bars (latest) vs the
-  // `trendWindow` bars immediately before them (middle). Both windows sit inside
-  // the trailing boxWindow bars because trendWindow <= boxWindow, which the
-  // plateau caller enforces via tr(bw) = min(trendWindow, bw - 1). A coin still
-  // converging scores below 1; a flattened or widening coin scores >= 1 and is
-  // rejected.
-  let latestAmplitudeSum = 0;
-  for (let i = count - trendWindow; i < count; i += 1) {
-    latestAmplitudeSum += amplitudeOf(sorted[i]);
-  }
-  let middleAmplitudeSum = 0;
-  for (let i = count - 2 * trendWindow; i < count - trendWindow; i += 1) {
-    middleAmplitudeSum += amplitudeOf(sorted[i]);
-  }
-  const meanLatestAmplitude = latestAmplitudeSum / trendWindow;
-  const meanMiddleAmplitude = middleAmplitudeSum / trendWindow;
-  const latestTrend = meanMiddleAmplitude > 0
-    ? meanLatestAmplitude / meanMiddleAmplitude
-    : meanLatestAmplitude > 0 ? LARGE_RATIO : 0;
-
-  const score = compression + latestTrend;
-  return {
-    compression,
-    latestTrend,
-    score,
-    qualified: compression <= maxCompression && latestTrend <= maxLatestTrend,
-  };
-}
-
-/**
- * Multi-window convergence verdict over the same set of completed candlesticks.
- * Scans every box window in PLATEAU_BOX_WINDOWS with the pure-price gate
- * (computeQuietMetrics) and requires `plateauMin` consecutive qualified windows
- * so an isolated single-window convergence (e.g. a coin that happened to align
- * with exactly one box length) does not qualify. Each box window uses
- * tr(bw) = min(trendWindow, bw - 1), which keeps the latest-trend windows inside
- * the box window and avoids the bw = trendWindow degeneration where the latest
- * window equals the recent window.
- *
- * A box window whose history is insufficient (< 2 * bw completed bars, or fewer
- * than 2 * tr(bw) bars for its latest-trend windows) or that hits a non-positive
- * price reports qualified = false and never contributes to a consecutive run —
- * a freshly listed coin with only small-bw history still qualifies through its
- * small windows without the null large windows breaking the run.
- *
- * Returns null when no box window could be computed at all (fewer than
- * 2 * PLATEAU_BOX_WINDOWS[0] completed bars or a non-positive price).
- */
-export function computePlateau(candles: readonly Candlestick[], params: PlateauParams): PlateauResult | null {
-  const windows: PlateauWindow[] = [];
-  let anyComputed = false;
-  for (const boxWindow of PLATEAU_BOX_WINDOWS) {
-    // tr(bw) = min(trendWindow, boxWindow): bw=3 with the default trendWindow
-    // collapses the latest-trend windows onto the box windows (latest == recent,
-    // middle == prior), so compression and latestTrend are the same value and the
-    // compression gate carries bw=3. That matches the case-library plateau
-    // ({3,4} for HYPE 1H, {3,4,5} for ONUSDT 4H): a 2-bar latest window at bw=3
-    // is too twitchy (HYPE 1H lt 0.905 > 0.9, one wider bar flips the verdict).
-    // A null metrics result (insufficient history for this box window) reports a
-    // non-qualified window with an infinite score so it is never selected as the
-    // best window.
-    const metrics = computeQuietMetrics(candles, {
-      boxWindow,
-      maxCompression: params.maxCompression,
-      maxLatestTrend: params.maxLatestTrend,
-      trendWindow: Math.min(params.trendWindow, boxWindow),
-    });
-    if (metrics) {
-      anyComputed = true;
-      windows.push({ boxWindow, ...metrics });
+  // Collapse consecutive same-direction swings to the extreme. Strict fractal
+  // comparisons already prevent two adjacent *same-direction* points, but a wide
+  // bar can be BOTH a swing high and a swing low, and the dedup keeps the edge
+  // regression single-valued regardless.
+  const deduped: SwingPoint[] = [];
+  for (const point of raw) {
+    const last = deduped[deduped.length - 1];
+    if (last && last.kind === point.kind) {
+      if (point.kind === 'high' ? point.price > last.price : point.price < last.price) {
+        deduped[deduped.length - 1] = point;
+      }
     } else {
-      windows.push({ boxWindow, compression: 0, latestTrend: 0, score: Number.POSITIVE_INFINITY, qualified: false });
+      deduped.push(point);
     }
   }
-  if (!anyComputed) return null;
+  return deduped;
+}
 
-  // plateauWidth = longest consecutive run of qualified windows. A null window
-  // resets the run, so a gap in the middle is not merged across.
-  let plateauWidth = 0;
-  let currentRun = 0;
-  for (const window of windows) {
-    currentRun = window.qualified ? currentRun + 1 : 0;
-    plateauWidth = Math.max(plateauWidth, currentRun);
+/**
+ * Classifies a swing sequence into a box or a triangle, returning a fully
+ * scored `StructureResult` when a structure is present, or null when the swing
+ * geometry does not form either shape.
+ *
+ * Box:   both edge regressions are flat (edge total drift across the swing span
+ *        / meanPrice <= slopeTolerance), the box height is narrow relative to
+ *        the coin's own past amplitude (priorAmplitude), and each edge is
+ *        touched >= touchMin times.
+ * Triangle: highs slope < 0 + lows slope > 0 (symmetric wedge), or one side flat
+ *        (rising triangle: flat highs + rising lows; falling triangle: falling
+ *        highs + flat lows). The trending side must be beyond the flat tolerance,
+ *        so a near-box is not mislabelled a triangle. Each edge >= touchMin.
+ *
+ * Position: box = (lastPrice - boxLow) / (boxHigh - boxLow); triangle = where
+ * lastPrice sits between the two trend lines at the current bar.
+ *
+ * Score: box = mean(compression + flatness + touch contributions); triangle =
+ * mean(convergence + touch contributions). Both land in [0, 1] so a box and a
+ * triangle are comparable sort keys — higher = stronger.
+ *
+ * Everything is anchored to the CURRENT bar (`params.currentIndex`, the last
+ * candle index), not the last swing: trend lines are extrapolated to where price
+ * is now, so a triangle whose apex is already behind the current bar (width <= 0
+ * at the current bar) is rejected as resolved, and the convergence score measures
+ * the width that remains at the current bar instead of saturating at the
+ * narrowest swing point.
+ *
+ * The `priorAmplitude` low-volatility gate is applied only when a finite value is
+ * supplied (probeStructure always supplies it). Absent, the gate is skipped so a
+ * direct unit-test call without candle context is not spuriously rejected.
+ */
+export function classifyStructure(swings: readonly SwingPoint[], params: StructureParams): StructureResult | null {
+  // A box/triangle needs at least one swing high and one swing low per edge; with
+  // fewer than 4 swings the geometry cannot be verified (2 high + 2 low minimum).
+  if (swings.length < 4) return null;
+
+  // Window to the most recent swings: older ones describe an earlier regime (e.g.
+  // the trend that preceded the consolidation) and would tilt the edge regressions.
+  const recent = swings.slice(-DEFAULT_MAX_STRUCTURE_SWINGS);
+  const highs = recent.filter((swing) => swing.kind === 'high');
+  const lows = recent.filter((swing) => swing.kind === 'low');
+  const touchMin = Math.max(params.touchMin, 2);
+  if (highs.length < touchMin || lows.length < touchMin) return null;
+
+  // Anchor everything to the current bar. probeStructure injects the last candle
+  // index; a direct call without it falls back to the last swing index.
+  const currentIndex = params.currentIndex ?? recent[recent.length - 1].index;
+  // Recency gate (both structure kinds): the structure's last swing must be close
+  // enough to the current bar to be 现役. A touch far in the past describes an
+  // old, already-resolved shape whose trend lines only extrapolate by chance.
+  const maxRecentBars = params.maxRecentBars ?? DEFAULT_MAX_RECENT_BARS;
+  if (currentIndex - recent[recent.length - 1].index > maxRecentBars) return null;
+
+  const highLine = linearRegression(highs.map((swing) => ({ x: swing.index, y: swing.price })));
+  const lowLine = linearRegression(lows.map((swing) => ({ x: swing.index, y: swing.price })));
+  if (!highLine || !lowLine) return null;
+
+  const highPrices = highs.map((swing) => swing.price);
+  const lowPrices = lows.map((swing) => swing.price);
+  const meanHigh = mean(highPrices);
+  const meanLow = mean(lowPrices);
+  // Total edge drift across its swing span, as a fraction of the edge's mean
+  // price. Total (not per-bar) drift keeps long, slowly-tilting structures from
+  // looking flat — a 100-bar edge tilting 10% has a tiny per-bar slope yet is
+  // clearly trending, and would be mislabelled a box by any per-bar tolerance.
+  const highSpan = highs[highs.length - 1].index - highs[0].index;
+  const lowSpan = lows[lows.length - 1].index - lows[0].index;
+  const highDrift = (Math.abs(highLine.slope) * highSpan) / meanHigh;
+  const lowDrift = (Math.abs(lowLine.slope) * lowSpan) / meanLow;
+  const highFlat = highDrift <= params.slopeTolerance;
+  const lowFlat = lowDrift <= params.slopeTolerance;
+  const highFalling = highLine.slope < 0 && highDrift > params.slopeTolerance;
+  const lowRising = lowLine.slope > 0 && lowDrift > params.slopeTolerance;
+  const touchCount = highs.length + lows.length;
+  const lastPrice = params.lastPrice ?? recent[recent.length - 1].price;
+
+  // ---- box ----
+  if (highFlat && lowFlat) {
+    // Range gate: a box edge must stay in a narrow band, not merely regress to
+    // ~0 slope. A slow drift plus one deep spike nets a zero regression slope
+    // yet visibly is not a horizontal channel, so each edge's max-min spread
+    // (relative to its mean price) is also bounded.
+    const boxRangeTolerance = params.boxRangeTolerance ?? DEFAULT_BOX_RANGE_TOLERANCE;
+    const highRange = (maxValue(highPrices) - minValue(highPrices)) / meanHigh;
+    const lowRange = (maxValue(lowPrices) - minValue(lowPrices)) / meanLow;
+    if (highRange > boxRangeTolerance || lowRange > boxRangeTolerance) return null;
+    const boxHigh = meanHigh;
+    const boxLow = meanLow;
+    const boxHeight = boxHigh - boxLow;
+    if (boxHeight > 0) {
+      const midPrice = (boxHigh + boxLow) / 2;
+      const boxRelativeHeight = boxHeight / midPrice;
+      // priorAmplitude is optional data: probeStructure always supplies it, but
+      // a direct unit-test call without candle context must not be spuriously
+      // rejected — absent prior data, the low-volatility gate is skipped.
+      const prior = params.priorAmplitude;
+      const lowVolatility =
+        prior === undefined ||
+        !Number.isFinite(prior) ||
+        prior <= 0 ||
+        boxRelativeHeight / prior < params.maxBoxRelativeHeight;
+      if (lowVolatility) {
+        // 价格在结构内: a lastPrice beyond a small tolerance outside the box edges
+        // has already broken out / collapsed — no longer 蓄力待突破.
+        const boxTolerance = 0.1 * boxHeight;
+        if (lastPrice < boxLow - boxTolerance || lastPrice > boxHigh + boxTolerance) return null;
+        // 收缩比: how much the box has compressed against the coin's own past.
+        // ratio -> 0 (much tighter than its own amplitude) = strongest tension.
+        const compressionRatio =
+          prior !== undefined && Number.isFinite(prior) && prior > 0 ? boxRelativeHeight / prior : 1;
+        const compressionContribution = clamp01(1 - compressionRatio);
+        // 水平度: closer to perfectly flat (drift -> 0) = higher.
+        const flatnessContribution = clamp01(1 - Math.max(highDrift, lowDrift) / params.slopeTolerance);
+        // 触碰: more edge touches = more mature box.
+        const touchContribution = clamp01(touchCount / TOUCH_SCALE);
+        const score = (compressionContribution + flatnessContribution + touchContribution) / 3;
+        const position = clamp01((lastPrice - boxLow) / boxHeight);
+        return { structure: 'box', position, score, touchCount, qualified: true };
+      }
+    }
   }
 
-  // Best window: the qualified window with the smallest score; when no window
-  // qualifies, the computed window with the smallest score (null-window entries
-  // carry an infinite score and never win). `anyComputed` guarantees at least
-  // one finite-score window exists, so `pool[0]` is always defined.
-  const computedWindows = windows.filter((window) => Number.isFinite(window.score));
-  const qualifiedWindows = computedWindows.filter((window) => window.qualified);
-  const pool = qualifiedWindows.length > 0 ? qualifiedWindows : computedWindows;
-  let best = pool[0];
-  for (const window of pool) {
-    if (window.score < best.score) best = window;
+  // ---- triangle ----
+  const symmetric = highFalling && lowRising;
+  const rising = highFlat && lowRising; // 上升三角: flat highs, rising lows
+  const falling = highFalling && lowFlat; // 下降三角: falling highs, flat lows
+  if (symmetric || rising || falling) {
+    // Range gate for a triangle's flat edge: a side that is supposed to be flat
+    // must actually stay in a narrow band, not merely regress to ~0 slope. A deep
+    // spike inside the edge (HEI's 0.1969 → 0.1816 深跌毛刺) can pull the OLS slope
+    // flat while the edge visibly spans far more than a flat line would, so the
+    // flat side gets the same (max − min) / mean spread bound as a box edge. The
+    // symmetric branch has no flat side (both edges trend) and keeps only its
+    // monotonicity gate — a wide-amplitude symmetric wedge is legitimate.
+    const boxRangeTolerance = params.boxRangeTolerance ?? DEFAULT_BOX_RANGE_TOLERANCE;
+    if (rising && (maxValue(highPrices) - minValue(highPrices)) / meanHigh > boxRangeTolerance) return null;
+    if (falling && (maxValue(lowPrices) - minValue(lowPrices)) / meanLow > boxRangeTolerance) return null;
+    // Monotonicity gate: a triangle's trending edges must move point-by-point
+    // in the required direction within `monotonicTolerance`. An outlier swing
+    // (HEI's 0.1969 → 0.1816 deep-low dip, HFT's post-crash rebound) can pull
+    // the OLS slope into the right sign while the edge is not actually
+    // monotonic, so the regression test is paired with a per-swing check. A
+    // flat edge may wiggle inside its flat tolerance and is not checked: for a
+    // rising triangle only the rising lows are verified, for a falling triangle
+    // only the falling highs, for a symmetric triangle both.
+    const monotonicTolerance = params.monotonicTolerance ?? DEFAULT_MONOTONIC_TOLERANCE;
+    const highDirection = symmetric || falling ? 'down' : 'flat';
+    const lowDirection = symmetric || rising ? 'up' : 'flat';
+    if (
+      !isDirectionalMonotonic(highPrices, highDirection, monotonicTolerance) ||
+      !isDirectionalMonotonic(lowPrices, lowDirection, monotonicTolerance)
+    ) {
+      return null;
+    }
+    const firstIndex = recent[0].index;
+    // Channel width between the two trend lines at bar x.
+    const widthAt = (x: number) =>
+      (highLine.slope - lowLine.slope) * x + (highLine.intercept - lowLine.intercept);
+    const widthStart = widthAt(firstIndex);
+    const widthCurrent = widthAt(currentIndex);
+    // 收敛度: fraction of the starting width already collapsed by the CURRENT bar.
+    // Anchoring at currentIndex (not the last swing) is what rejects the SPCX
+    // "降弹平带" false positive: a rebound low line (slope ≈ 0.15/bar) extrapolated
+    // to the current bar crosses the flat high line → widthCurrent <= 0 → already
+    // resolved, not 蓄力. widthStart > 0 + widthCurrent < widthStart reject a
+    // degenerate/parallel pair; widthCurrent > 0 rejects a crossed/resolved pair
+    // (whose position would also divide by a non-positive width).
+    if (widthStart > 0 && widthCurrent > 0 && widthCurrent < widthStart) {
+      const upper = highLine.slope * currentIndex + highLine.intercept;
+      const lower = lowLine.slope * currentIndex + lowLine.intercept;
+      const width = upper - lower;
+      // 价格在结构内: the extrapolated lines bound the current price. A lastPrice
+      // far outside (beyond 10% of the structure width) has broken out or
+      // collapsed — not 蓄力待突破. This uses the extrapolated lines, so a
+      // price that has already punched through one side is rejected.
+      const priceTolerance = 0.1 * width;
+      if (lastPrice < lower - priceTolerance || lastPrice > upper + priceTolerance) return null;
+      const convergenceContribution = clamp01((widthStart - widthCurrent) / widthStart);
+      const touchContribution = clamp01(touchCount / TOUCH_SCALE);
+      const score = (convergenceContribution + touchContribution) / 2;
+      const position = width > 0 ? clamp01((lastPrice - lower) / width) : 0.5;
+      return { structure: 'triangle', position, score, touchCount, qualified: true };
+    }
   }
 
+  return null;
+}
+
+/**
+ * Combination entry point: probes every candidate fractal N and returns the most
+ * regular structure found (or null when no N produces one).
+ *
+ * Selection priority (design): 有结构 > 触碰次数多 > swing 对数多 > score 强, with
+ * a final tie-break toward the smaller N (防大 N 过度平滑). Each coin/timeframe
+ * discovers its own structure scale — a small consolidation resolves at a small
+ * N, a large one at a large N — without a pre-fixed window.
+ *
+ * `priorAmplitude`, `lastPrice` and `currentIndex` are measured here from the
+ * completed candles and injected into `classifyStructure`, which stays a pure
+ * function of swings + params. `currentIndex` is the last candle's index, so the
+ * classifier anchors trend lines at the current bar (see `classifyStructure`).
+ */
+export function probeStructure(candles: readonly Candlestick[], params: StructureParams): StructureResult | null {
+  const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
+  if (sorted.length < 4) return null;
+  if (sorted.some((candle) => candle.low <= 0)) return null;
+
+  const lastPrice = sorted[sorted.length - 1].close;
+  const currentIndex = sorted.length - 1;
+  // "该币自身前期波动": mean per-bar amplitude across the scanned window. A box is
+  // 低波动 only relative to this own-amplitude baseline — an always-quiet coin
+  // (amplitude ≈ box width) has no "从大波动收敛到小" process and is rejected.
+  const priorAmplitude = meanAmplitude(sorted);
+
+  let best: { result: StructureResult; pairs: number; n: number } | null = null;
+  for (const n of STRUCTURE_SWING_N) {
+    const swings = detectSwings(sorted, n);
+    if (swings.length < 4) continue;
+    const result = classifyStructure(swings, { ...params, lastPrice, priorAmplitude, currentIndex });
+    if (!result) continue;
+    const pairs = Math.min(
+      swings.filter((swing) => swing.kind === 'high').length,
+      swings.filter((swing) => swing.kind === 'low').length,
+    );
+    if (best === null || isBetterStructure(result, pairs, n, best.result, best.pairs, best.n)) {
+      best = { result, pairs, n };
+    }
+  }
+  return best === null ? null : best.result;
+}
+
+/**
+ * Structure-regularity comparison for `probeStructure`. Priority: 触碰次数多 >
+ * swing 对数多 > score 强 > N 小 (防大 N 过度平滑). All candidates here already have
+ * a structure, so the "有结构" level of the priority is implicit.
+ */
+function isBetterStructure(
+  a: StructureResult,
+  aPairs: number,
+  aN: number,
+  b: StructureResult,
+  bPairs: number,
+  bN: number,
+): boolean {
+  if (a.touchCount !== b.touchCount) return a.touchCount > b.touchCount;
+  if (aPairs !== bPairs) return aPairs > bPairs;
+  if (a.score !== b.score) return a.score > b.score;
+  return aN < bN;
+}
+
+/**
+ * Builds a `StructureParams` from the file-top default constants, so callers (the
+ * service in a later phase, tests now) don't repeat the calibration values. The
+ * data fields `lastPrice`/`priorAmplitude` are left for `probeStructure` to fill.
+ */
+export function defaultStructureParams(overrides?: Partial<StructureParams>): StructureParams {
   return {
-    windows,
-    plateauWidth,
-    qualified: plateauWidth >= params.plateauMin,
-    compression: best.compression,
-    latestTrend: best.latestTrend,
-    score: best.score,
-    bestBoxWindow: best.boxWindow,
+    slopeTolerance: DEFAULT_SLOPE_TOLERANCE,
+    touchMin: DEFAULT_TOUCH_MIN,
+    maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
+    monotonicTolerance: DEFAULT_MONOTONIC_TOLERANCE,
+    boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
+    ...overrides,
   };
 }

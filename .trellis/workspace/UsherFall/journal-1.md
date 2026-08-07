@@ -585,3 +585,17 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Status
 
 [OK] 实施 **Committed**;待归档。剩余:box-end(planning)。
+
+## Session 10: 收敛结构检测(三角/箱体)v1 —— 弃箱体末期,swing 结构重写
+
+**Task**: `08-07-coin-scan-convergence-structure`(废旧建新,弃 08-04-box-end)
+
+**决策**: 缩量扫描从"纯振幅收缩"升级为"swing 结构检测(收敛三角/低波动箱体)"。双向不锁方向。绝对振幅不做门(不同品种振幅天然不同),改相对自身。探测型窗口 = 候选 N=[2,3,4,5,6,8,10,12] 扫描选最规整结构。swing 用 fractal。结果列:结构类型/位置/强度分。UI 极简参数(minScore 主旋钮)。
+
+**实现**: domain(coin-scan.ts 重写:detectSwings/classifyStructure/probeStructure)+ 服务层 + API(minScore)+ UI + 测试。三缺陷修复:①结构陈旧(锚定当前 bar 非最后 swing)②score 饱和(收敛度用当前 bar 宽度)③降/弹/平带误判(单调性 + 区间门)。HEI 深跌腿误判根因:判成 falling 三角后 lows 平边不查单调,补 flat 边区间门。
+
+**实盘对照**: 修复前 14/14 全三角 score 0.9-1.0;修复后 5-7 币 score 0.5-0.9。HEI/HFT 崩后平静误判消除。MRVL/SNDK/SOXX 真三角验证通过。合成箱体 probe 识别 box 0.96。
+
+**spec**: coin-scan.md 全重写(swing 结构契约替换 compression/plateau)。
+
+[OK] 192 tests 全绿 + tsc 干净。spec 已更新。

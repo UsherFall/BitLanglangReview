@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Verification against the rewritten contract: request params, response shape, error matrix, service aggregation, sort order, and the 宁少勿滥 hiding rule."}
+{"file": ".trellis/spec/server/market-data.md", "reason": "Verify per-timeframe candle limit still respects CandleSource windowing (forming-bar drop by time, contiguity, cache reuse)."}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Verify domain types (StructureResult, ScanRow) stay consistent with Candlestick/ReviewTimeframe contracts and domain language."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify UI params/results changes follow frontend conventions and tests exist for the panel."}

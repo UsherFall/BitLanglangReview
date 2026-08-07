@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Current scan contract (params/response/service aggregation). This task rewrites the shrink algorithm to swing-based structure detection; read to know the existing contract shape to replace."}
+{"file": ".trellis/spec/server/market-data.md", "reason": "CandleSource/TickerSource contracts, Binance klines limit/forming-bar behavior, contiguity. Implementation changes candle limit per timeframe — must respect source windowing rules."}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "ReviewTimeframe union and Candlestick contract. New scan consumes 5m/15m/1H/4H/1D Candlestick bars; domain language must stay consistent."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "UI panel params/results table changes (CoinScanPanel). Follows frontend component conventions."}
