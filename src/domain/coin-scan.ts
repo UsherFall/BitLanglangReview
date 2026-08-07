@@ -74,6 +74,13 @@ export type StructureParams = {
    */
   priorAmplitude?: number;
   /**
+   * Flat-edge drift ratio gate: an edge's net drift (relative to mean price) must
+   * be <= this × priorAmplitude for the edge to count as flat. Absent → falls
+   * back to DEFAULT_MAX_FLAT_DRIFT_RATIO. Skipped when priorAmplitude is absent
+   * (falls back to slopeTolerance only).
+   */
+  maxFlatDriftRatio?: number;
+  /**
    * Data: current bar index = the last candle's index in the ascending-sorted
    * candle array. Filled by probeStructure; tests may pass it directly. Trend
    * lines, widths and positions are all anchored at this bar (extrapolated to
@@ -226,6 +233,18 @@ export const DEFAULT_MONOTONIC_TOLERANCE = 0.02;
  * price. Calibrated on real data (implement stage).
  */
 export const DEFAULT_BOX_RANGE_TOLERANCE = 0.05;
+/**
+ * Flat-edge drift ratio gate: an edge's net drift (relative to its mean price)
+ * must be <= this × the coin's own past amplitude (priorAmplitude) for the edge
+ * to count as flat. slopeTolerance alone (a fixed 2% of mean price) is too wide
+ * for low-volatility coins: XRP 1H's 0.9% slow decline is 1.6× its 0.56% own
+ * amplitude yet only 0.9% of price, and was mislabelled a flat falling-triangle
+ * low edge (score 0.90). 1.0 = an edge may drift at most one full own-amplitude
+ * and still count as flat; a genuine box edge drifts ≈ 0. Calibrated on real
+ * data; skipped when priorAmplitude is absent (direct classifier call without
+ * candle context falls back to slopeTolerance only).
+ */
+export const DEFAULT_MAX_FLAT_DRIFT_RATIO = 1.0;
 
 /** Score normalization for the touch contribution: this many touches = full marks. */
 const TOUCH_SCALE = DEFAULT_MAX_STRUCTURE_SWINGS;
@@ -441,8 +460,24 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
   const lowSpan = lows[lows.length - 1].index - lows[0].index;
   const highDrift = (Math.abs(highLine.slope) * highSpan) / meanHigh;
   const lowDrift = (Math.abs(lowLine.slope) * lowSpan) / meanLow;
-  const highFlat = highDrift <= params.slopeTolerance;
-  const lowFlat = lowDrift <= params.slopeTolerance;
+  // An edge is flat only when its net drift is small BOTH as a fraction of its
+  // own mean price (slopeTolerance) AND relative to the coin's own past
+  // amplitude (maxFlatDriftRatio). The slopeTolerance bound alone (fixed 2% of
+  // price) is too wide for low-volatility coins: XRP 1H's 0.9% slow decline is
+  // only 0.9% of price (passes slopeTolerance) yet 1.6× its 0.56% own amplitude
+  // — a clear trend, not a flat falling-triangle low edge. priorAmplitude absent
+  // (direct classifier call without candle context) skips the relative gate.
+  const prior = params.priorAmplitude;
+  const driftRatioAvailable = prior !== undefined && Number.isFinite(prior) && prior > 0;
+  const maxFlatDriftRatio = params.maxFlatDriftRatio ?? DEFAULT_MAX_FLAT_DRIFT_RATIO;
+  const highDriftRatio = driftRatioAvailable ? highDrift / prior : 0;
+  const lowDriftRatio = driftRatioAvailable ? lowDrift / prior : 0;
+  const highFlat =
+    highDrift <= params.slopeTolerance &&
+    (!driftRatioAvailable || highDriftRatio <= maxFlatDriftRatio);
+  const lowFlat =
+    lowDrift <= params.slopeTolerance &&
+    (!driftRatioAvailable || lowDriftRatio <= maxFlatDriftRatio);
   const highFalling = highLine.slope < 0 && highDrift > params.slopeTolerance;
   const lowRising = lowLine.slope > 0 && lowDrift > params.slopeTolerance;
   const touchCount = highs.length + lows.length;
@@ -634,6 +669,7 @@ export function defaultStructureParams(overrides?: Partial<StructureParams>): St
     maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
     monotonicTolerance: DEFAULT_MONOTONIC_TOLERANCE,
     boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
+    maxFlatDriftRatio: DEFAULT_MAX_FLAT_DRIFT_RATIO,
     ...overrides,
   };
 }

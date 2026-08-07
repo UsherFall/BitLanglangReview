@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Verify the rewritten flat-edge gate matches the spec's algorithm section, that the XRP 1H case is documented, and that the calibration constants table reflects the new maxFlatDriftRatio constant."}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Verify the 宁少勿滥 sorting / hiding rules still hold after the gate change."}

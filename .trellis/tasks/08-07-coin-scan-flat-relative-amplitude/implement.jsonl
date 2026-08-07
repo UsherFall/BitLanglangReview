@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Current flat-edge gate contract (drift relative to mean price). This task changes it to relative-to-priorAmplitude; read to know the exact classifyStructure section to modify and the calibration constants table to update."}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Candlestick contract and domain-language constraints for the pure algorithm change in coin-scan.ts."}

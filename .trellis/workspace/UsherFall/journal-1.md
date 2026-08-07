@@ -599,3 +599,17 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 **spec**: coin-scan.md 全重写(swing 结构契约替换 compression/plateau)。
 
 [OK] 192 tests 全绿 + tsc 干净。spec 已更新。
+
+## Session 10b: 收敛结构-平边判定相对自身振幅(修XRP缓跌误判)
+
+**Task**: `08-07-coin-scan-flat-relative-amplitude`(Session 10 后续 bug)
+
+**问题**: XRP 1H 单边缓跌被误判 falling 三角 score 0.90。swings lows=[1.0388,1.0410,1.0317,1.0292],highs 缓降。lows regression drift 0.9% < slopeTolerance 2%(相对 mean price 判平),但相对自身振幅 0.56% 是 1.6× 明显趋势。
+
+**根因**: flat 边判定只相对 mean price(固定 2%),对低波动币太宽。缓降段 drift 占总价比例小但相对自身振幅大。
+
+**修法(用户选方向 2)**: flat 边判定加 `drift / priorAmplitude <= maxFlatDriftRatio(1.0)`。真箱体边 drift≈0 不误伤;priorAmplitude 缺省回退旧行为。趋势边(highFalling/lowRising)保持原逻辑。
+
+**验证**: XRP 案例回归拒;MRVL 真三角带 priorAmplitude 仍过(不误伤)。实盘重扫 XRP 消失。194 tests 全绿 + tsc 干净。spec coin-scan.md 常量表 + 算法段 + design decision 更新。
+
+[OK] 194 tests + tsc 干净。待归档。

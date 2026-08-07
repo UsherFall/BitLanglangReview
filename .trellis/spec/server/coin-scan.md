@@ -80,8 +80,10 @@ swing low  at bar i ⟺ low[i]  strictly less   than the n lows  on each side
 
 Windows to the most recent `DEFAULT_MAX_STRUCTURE_SWINGS` (8) swings (older regime swings would tilt the edge regressions). Classifies:
 
-- **Box**: both edge regressions flat (`edge total drift across swing span / meanPrice <= slopeTolerance`), each edge's `(max-min)/mean` spread `<= boxRangeTolerance` (0.05), box height narrow relative to the coin's own past amplitude (`boxRelativeHeight / priorAmplitude < maxBoxRelativeHeight`, the 天生安静 rejection), each edge touched `>= touchMin`.
-- **Triangle**: highs falling + lows rising (symmetric), or one side flat (rising: flat highs + rising lows; falling: falling highs + flat lows). The flat side must stay in a narrow band (`(max-min)/mean <= boxRangeTolerance`). The trending edges must be point-by-point monotonic (`isDirectionalMonotonic` within `monotonicTolerance` 0.02) — an outlier swing can pull the OLS slope into the right sign while the edge is not actually monotonic. Channel width must be positive and narrowing at the current bar (`widthCurrent > 0 && widthCurrent < widthStart`) — a resolved/crossed triangle (已突破) is rejected.
+- **Box**: both edge regressions flat (`edge total drift across swing span / meanPrice <= slopeTolerance` AND `drift / priorAmplitude <= maxFlatDriftRatio`), each edge's `(max-min)/mean` spread `<= boxRangeTolerance` (0.05), box height narrow relative to the coin's own past amplitude (`boxRelativeHeight / priorAmplitude < maxBoxRelativeHeight`, the 天生安静 rejection), each edge touched `>= touchMin`.
+- **Triangle**: highs falling + lows rising (symmetric), or one side flat (rising: flat highs + rising lows; falling: falling highs + flat lows). The flat side must stay in a narrow band (`(max-min)/mean <= boxRangeTolerance`) AND drift no more than one own-amplitude (`drift / priorAmplitude <= maxFlatDriftRatio`). The trending edges must be point-by-point monotonic (`isDirectionalMonotonic` within `monotonicTolerance` 0.02) — an outlier swing can pull the OLS slope into the right sign while the edge is not actually monotonic. Channel width must be positive and narrowing at the current bar (`widthCurrent > 0 && widthCurrent < widthStart`) — a resolved/crossed triangle (已突破) is rejected.
+
+**Flat-edge gate is relative to the coin's own amplitude**: a flat edge must have net drift small both as a fraction of its mean price (`slopeTolerance`, fixed 2%) AND relative to the coin's own past amplitude (`maxFlatDriftRatio`, 1.0 = at most one own-amplitude). `slopeTolerance` alone is too wide for low-volatility coins: XRP 1H's 0.9% slow decline is only 0.9% of price (passes slopeTolerance) yet 1.6× its 0.56% own amplitude — a clear trend, not a flat edge. When `priorAmplitude` is absent (direct classifier call without candle context) the relative gate is skipped and only `slopeTolerance` applies.
 
 **Everything is anchored to the CURRENT bar** (`params.currentIndex`, the last candle index), not the last swing: trend lines are extrapolated to where price is now. A structure whose apex is already behind the current bar (`widthCurrent <= 0`) is rejected as resolved. Position and convergence score use the width at the current bar, which also prevents score saturation.
 
@@ -118,6 +120,7 @@ pick the most regular: 有结构 > touchCount 多 > swing 对数多 > score 强 
 | `DEFAULT_MAX_RECENT_BARS` | 12 | recency gate (last touch within this many bars) |
 | `DEFAULT_MONOTONIC_TOLERANCE` | 0.02 | triangle trending-edge per-step monotonicity slack |
 | `DEFAULT_BOX_RANGE_TOLERANCE` | 0.05 | box/triangle-flat-edge `(max-min)/mean` spread bound |
+| `DEFAULT_MAX_FLAT_DRIFT_RATIO` | 1.0 | flat edge net drift / priorAmplitude must be <= this (a flat edge may drift at most one own-amplitude) |
 
 ### Service aggregation
 
@@ -208,6 +211,10 @@ Different instruments have intrinsically different amplitudes (a $1000 coin vs a
 ### Anchoring to the current bar
 
 `classifyStructure` anchors trend lines, position, and convergence width to `params.currentIndex` (the last candle), not the last swing. A triangle whose apex is behind the current bar (`widthCurrent <= 0`) is already resolved and rejected. This also de-saturates the score: convergence = `(widthStart - widthCurrent)/widthStart` at the current bar, so a still-converging triangle scores below 1.0 instead of saturating at the narrowest swing point.
+
+### Flat-edge drift is relative to the coin's own amplitude
+
+A flat edge must have net drift small both as a fraction of its mean price (`slopeTolerance`, fixed 2%) and relative to the coin's own past amplitude (`maxFlatDriftRatio` = 1.0). The fixed 2%-of-price bound is too wide for low-volatility instruments: XRP 1H's slow 0.9% decline is only 0.9% of price (would pass a pure slopeTolerance gate) yet 1.6× its 0.56% own amplitude — the 4 swing lows `[1.0388, 1.0410, 1.0317, 1.0292]` regress nearly flat but visibly drift down, and were mislabelled a falling-triangle low edge (score 0.90). Requiring `drift / priorAmplitude <= 1.0` rejects it while a genuine box/triangle edge (drift ≈ 0) passes. The relative gate is skipped when `priorAmplitude` is absent so direct classifier unit calls without candle context keep working.
 
 ### Monotonicity + flat-edge range: guarding against regression outliers
 

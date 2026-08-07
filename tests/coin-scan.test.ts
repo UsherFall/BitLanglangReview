@@ -4,6 +4,7 @@ import {
   classifyStructure,
   DEFAULT_BOX_RANGE_TOLERANCE,
   DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
+  DEFAULT_MAX_FLAT_DRIFT_RATIO,
   DEFAULT_MAX_RECENT_BARS,
   DEFAULT_MAX_STRUCTURE_SWINGS,
   DEFAULT_MONOTONIC_TOLERANCE,
@@ -307,6 +308,26 @@ describe('classifyStructure (swing geometry)', () => {
     expect(result!.qualified).toBe(true);
   });
 
+  it('still classifies a genuine MRVL-style rising triangle with a flat-high edge when priorAmplitude is supplied (regression)', () => {
+    // MRVL 15m 真三角(实盘验证过 score 0.93):highs 平 ~215(211.15/214.38/215/219.73
+    // spread 很小),lows 抬升。flat-high 边的 net drift 相对 priorAmplitude(0.03)
+    // 必须远小于 maxFlatDriftRatio 1.0 —— 真三角不能被新的相对振幅门误杀。
+    const mrvlRising = [
+      swing(23, 210.02, 'high'),
+      swing(31, 202.13, 'low'),
+      swing(35, 219.73, 'high'),
+      swing(58, 208.55, 'low'),
+      swing(73, 215.0, 'high'),
+      swing(79, 211.15, 'low'),
+      swing(85, 214.38, 'high'),
+      swing(92, 211.88, 'low'),
+    ];
+    const result = classifyStructure(mrvlRising, { ...params, lastPrice: 215.62, priorAmplitude: 0.03, currentIndex: 98 });
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('triangle');
+    expect(result!.qualified).toBe(true);
+  });
+
   it('classifies a falling triangle (falling highs + flat lows) (AC1)', () => {
     const falling = [
       swing(6, 97, 'low'),
@@ -321,6 +342,25 @@ describe('classifyStructure (swing geometry)', () => {
     expect(result).not.toBeNull();
     expect(result!.structure).toBe('triangle');
     expect(result!.qualified).toBe(true);
+  });
+
+  it('rejects the XRP 1H slow-decline pattern — a flat edge must not drift more than one own-amplitude (regression)', () => {
+    // XRP 1H 实盘误判:lows 持续缓降 [1.0388, 1.0410, 1.0317, 1.0292],highs 缓降
+    // [1.0582, 1.0540, 1.0371, 1.0389]。lows 的 net drift 0.9% < slopeTolerance 2%
+    // (相对 mean price 判定为平),但相对其自身振幅(priorAmplitude 0.0056)是
+    // 0.9%/0.56% = 1.6× —— 明显趋势,不是平边。此前误判成 falling 三角 score 0.90。
+    // 新 gate:flat 边 drift 相对 priorAmplitude 不得超 maxFlatDriftRatio(1.0)。
+    const xrp = [
+      swing(30, 1.0388, 'low'),
+      swing(32, 1.0582, 'high'),
+      swing(33, 1.0410, 'low'),
+      swing(35, 1.0540, 'high'),
+      swing(37, 1.0317, 'low'),
+      swing(38, 1.0371, 'high'),
+      swing(39, 1.0292, 'low'),
+      swing(40, 1.0389, 'high'),
+    ];
+    expect(classifyStructure(xrp, { ...params, lastPrice: 1.0256, priorAmplitude: 0.0056, currentIndex: 45 })).toBeNull();
   });
 
   it('rejects a downtrend continuation (both edges falling) — no convergence structure', () => {
@@ -704,6 +744,7 @@ describe('Coin Scan structure defaults and types', () => {
     expect(DEFAULT_MAX_RECENT_BARS).toBe(12);
     expect(DEFAULT_MONOTONIC_TOLERANCE).toBe(0.02);
     expect(DEFAULT_BOX_RANGE_TOLERANCE).toBe(0.05);
+    expect(DEFAULT_MAX_FLAT_DRIFT_RATIO).toBe(1);
   });
 
   it('defaultStructureParams fills every threshold from the file-top defaults', () => {
@@ -714,6 +755,7 @@ describe('Coin Scan structure defaults and types', () => {
       maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
       monotonicTolerance: DEFAULT_MONOTONIC_TOLERANCE,
       boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
+      maxFlatDriftRatio: DEFAULT_MAX_FLAT_DRIFT_RATIO,
     };
     expect(params).toEqual(expected);
     expect(defaultStructureParams({ touchMin: 3 }).touchMin).toBe(3);
