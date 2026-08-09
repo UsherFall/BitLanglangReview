@@ -613,3 +613,17 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 **验证**: XRP 案例回归拒;MRVL 真三角带 priorAmplitude 仍过(不误伤)。实盘重扫 XRP 消失。194 tests 全绿 + tsc 干净。spec coin-scan.md 常量表 + 算法段 + design decision 更新。
 
 [OK] 194 tests + tsc 干净。待归档。
+
+## Session 11: 收敛结构-回溯窗口检测(破斜率终止+容忍度)
+
+**Task**: `08-07-coin-scan-backscan-window`(窗口机制重构)
+
+**决策**: 窗口确定从固定"最近 8 swing"改回溯扫描 —— 从最新 K 往回扫 swing 序列,破斜率终止。swing 检测与形态边界分离(方案 B):大窗口 detectSwings 一次,backscanWindow 扫 swing 序列找连续形态段。破斜率 = 单根插针即破但分毛刺:影线穿透不算,收盘穿透趋势线 > tolerance×结构宽度才算真破。容忍度 = 收盘穿透 ≤ 20% × 结构宽度(DEFAULT_STRUCTURE_TOLERANCE=0.2)。B(最小成形跨度):三角 13 根、箱体 5 根,每周期一致(以根计)。
+
+**实现**: domain(coin-scan.ts):SwingPoint 加 close 字段;backscanWindow 两阶段(先找 base suffix=classify 收下的最晚段,再往回扩展,候选 swing 对**当前段**边线判 close 破位,不重算回归,防 INTC 103 尖峰把回归拉向自己混入;真破/换型即终止)。classifyStructure 不再内窗,加 close 门 + B 门。probeStructure 排序 touchCount 多 > 跨度长 > N 小。旧 monotonicTolerance/isDirectionalMonotonic 全删,统一 close 门。
+
+**校准**(本地 sqlite 真 K 缓存):INTC 15m 真数据 backscan 正确排除 103 尖峰(box 变 falling triangle,扩展在尖峰终止)。容忍度 0.2 成立:HEI 深跌腿/HFT 崩拉/~8% 破位 close 穿低边缘全拒;XRP 缓跌 drift-ratio 门拒。当前实盘快照 5 币无合格结构 = 宁少勿滥(箱体宽于自身 bar 振幅),非 bug。
+
+**测试**: coin-scan.test.ts 45 个适配+新增(backscanWindow describe:已知三角段起点/破斜率终止/毛刺容忍/INTC 尖峰排除/B 门)。服务层接口不变零改动。
+
+[OK] 199 tests 全绿 + tsc 干净。QC 全过。spec coin-scan.md 已更新。待 commit + 归档。

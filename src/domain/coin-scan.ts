@@ -32,14 +32,16 @@ export type StructureResult = {
 };
 
 /**
- * Classification thresholds for `classifyStructure` / `probeStructure`.
+ * Classification thresholds for `classifyStructure` / `backscanWindow` /
+ * `probeStructure`.
  *
- * `slopeTolerance`, `touchMin` and `maxBoxRelativeHeight` are the calibration
- * knobs the design keeps internal (not exposed in the UI); `lastPrice` and
- * `priorAmplitude` are data that `probeStructure` measures from the candles and
- * injects so the pure classifier can stay stateless. Tests may pass them
- * directly; when absent the box low-volatility gate is skipped rather than
- * guessed (see `classifyStructure`).
+ * `slopeTolerance`, `touchMin`, `maxBoxRelativeHeight`, `boxRangeTolerance`,
+ * `maxFlatDriftRatio`, `minSpanTriangle`, `minSpanBox` and `structureTolerance`
+ * are the calibration knobs the design keeps internal (not exposed in the UI);
+ * `lastPrice`, `priorAmplitude` and `currentIndex` are data that `probeStructure`
+ * measures from the candles and injects so the pure classifier can stay
+ * stateless. Tests may pass them directly; when absent the box low-volatility
+ * gate is skipped rather than guessed (see `classifyStructure`).
  */
 export type StructureParams = {
   /**
@@ -97,31 +99,41 @@ export type StructureParams = {
    */
   maxRecentBars?: number;
   /**
-   * Monotonicity tolerance for a triangle's trending edges. Each successive
-   * swing on a rising edge must not fall more than this fraction below the
-   * previous swing, and each swing on a falling edge must not rise more than
-   * this fraction above the previous swing. This catches an outlier swing that
-   * pulls the OLS regression into the right sign while the edge is not actually
-   * monotonic (HEI's deep-low dip, HFT's post-crash rebound). A flat edge may
-   * wiggle within its flat tolerance and is not checked. Absent →
-   * `DEFAULT_MONOTONIC_TOLERANCE`.
-   */
-  monotonicTolerance?: number;
-  /**
-   * Box edge range gate: an edge's (max - min) / mean swing-price spread must be
-   * <= this for the edge to count as a horizontal channel. Complements the
-   * regression-slope flat test — a slow drift plus one deep spike can net a zero
-   * slope while visibly not being a horizontal box. Absent →
+   * Box/triangle-flat-edge range gate: an edge's (max - min) / mean swing-price
+   * spread must be <= this for the edge to count as horizontal. Absent →
    * `DEFAULT_BOX_RANGE_TOLERANCE`.
    */
   boxRangeTolerance?: number;
+  /**
+   * Minimum formation span (in K bars) for a triangle: the backscanned segment's
+   * span (last swing index - first swing index) must be >= this. A triangle needs
+   * enough bars to be a real 蓄力 structure, not a 3-swing blip. Absent →
+   * `DEFAULT_MIN_SPAN_TRIANGLE`.
+   */
+  minSpanTriangle?: number;
+  /**
+   * Minimum formation span (in K bars) for a box. Absent → `DEFAULT_MIN_SPAN_BOX`.
+   */
+  minSpanBox?: number;
+  /**
+   * Slope-break / edge-validity tolerance, unified with the backscan's
+   * noise-spike judgement. A swing's bar CLOSE may poke through its edge trend
+   * line by up to this fraction of the structure width at that bar (the distance
+   * between the two trend lines) before it counts as a genuine break; a closer
+   * that recovers inside the tolerance is a wick 毛刺. Absent →
+   * `DEFAULT_STRUCTURE_TOLERANCE`.
+   */
+  structureTolerance?: number;
 };
 
 /**
  * A fractal swing point. `index` is the bar index into the ascending-sorted
  * candle array, kept as the regression x-coordinate so trend lines can be
  * extrapolated to the current bar for `position`. `price` is high[i] for a swing
- * high and low[i] for a swing low.
+ * high and low[i] for a swing low. `close` is the close of the SAME bar — the
+ * backscan's slope-break judgement compares each swing's close against its edge
+ * trend line to separate wick 毛刺 (close recovers inside the tolerance) from a
+ * genuine break (close pokes through the edge).
  */
 export type SwingPoint = {
   /** Bar index (into the sorted candle array) where the fractal was found. */
@@ -131,6 +143,8 @@ export type SwingPoint = {
   /** Fractal price: high[i] for a swing high, low[i] for a swing low. */
   price: number;
   kind: 'high' | 'low';
+  /** Close of the bar where the fractal was found (slope-break judgement). */
+  close: number;
 };
 
 /**
@@ -187,9 +201,8 @@ export const STRUCTURE_SWING_N = [2, 3, 4, 5, 6, 8, 10, 12] as const;
  * Horizontal-drift tolerance for a box edge: the edge's total drift across its
  * swing span, as a fraction of the edge's mean price, must be <= this for the
  * edge to count as flat (a box). An edge drifting more than this is "trending"
- * and can form a triangle side. Calibrated on real data (implement stage);
- * 0.02 = an edge may drift at most 2% of its own price from first to last swing
- * and still count as a horizontal box edge.
+ * and can form a triangle side. 0.02 = an edge may drift at most 2% of its own
+ * price from first to last swing and still count as a horizontal box edge.
  */
 export const DEFAULT_SLOPE_TOLERANCE = 0.02;
 /** Minimum touch points per edge for a mature structure (both edges). */
@@ -202,49 +215,50 @@ export const DEFAULT_TOUCH_MIN = 2;
  */
 export const DEFAULT_MAX_BOX_RELATIVE_HEIGHT = 0.8;
 /**
- * Only the most recent swings describe the *current* structure. Older swings
- * (e.g. the trend before the consolidation) would skew the edge regressions, so
- * classification windows to the last `DEFAULT_MAX_STRUCTURE_SWINGS` swings.
+ * Score-normalization scale for the touch contribution (this many touches = full
+ * marks). Kept at 8 for backward compatibility with the old fixed-window constant
+ * name; the backscan no longer windows to this many swings.
  */
 export const DEFAULT_MAX_STRUCTURE_SWINGS = 8;
 /**
  * Recency gate default: a structure's last swing must be within this many bars
- * of the current bar (currentIndex) to count as "现役". Calibrated on real data —
- * on 1D this is ~12 days, on 5m ~12 bars. A swing sequence whose most recent
- * touch is older than this has already resolved; the trend lines would still
- * extrapolate to a non-crossing width only by chance.
+ * of the current bar (currentIndex) to count as "现役". A swing sequence whose
+ * most recent touch is older than this has already resolved.
  */
 export const DEFAULT_MAX_RECENT_BARS = 12;
 /**
- * Monotonicity tolerance for a triangle's trending edges: a later swing may move
- * against the edge's required direction by at most this fraction of the previous
- * swing's price before the edge is judged non-monotonic. 0.02 = a rising low may
- * pull back at most 2% per step; HEI's 0.1969 → 0.1816 (−7.8%) deep-low dip and
- * HFT's post-crash rebound both exceed it. Calibrated on real data (implement
- * stage); separate from slopeTolerance because it verifies the swing SEQUENCE,
- * not the regression line.
- */
-export const DEFAULT_MONOTONIC_TOLERANCE = 0.02;
-/**
- * Box edge range gate: an edge's (max − min) / mean swing-price spread must be
- * <= this for a horizontal channel. Same order of magnitude as slopeTolerance
- * but slightly looser — an edge that regresses flat can legitimately wobble
- * more than its net drift. 0.05 = the edge may spread at most 5% of its mean
- * price. Calibrated on real data (implement stage).
+ * Box/triangle-flat-edge range gate: an edge's (max − min) / mean swing-price
+ * spread must be <= this for a horizontal channel. 0.05 = the edge may spread at
+ * most 5% of its mean price.
  */
 export const DEFAULT_BOX_RANGE_TOLERANCE = 0.05;
 /**
  * Flat-edge drift ratio gate: an edge's net drift (relative to its mean price)
  * must be <= this × the coin's own past amplitude (priorAmplitude) for the edge
- * to count as flat. slopeTolerance alone (a fixed 2% of mean price) is too wide
- * for low-volatility coins: XRP 1H's 0.9% slow decline is 1.6× its 0.56% own
- * amplitude yet only 0.9% of price, and was mislabelled a flat falling-triangle
- * low edge (score 0.90). 1.0 = an edge may drift at most one full own-amplitude
- * and still count as flat; a genuine box edge drifts ≈ 0. Calibrated on real
- * data; skipped when priorAmplitude is absent (direct classifier call without
- * candle context falls back to slopeTolerance only).
+ * to count as flat. 1.0 = an edge may drift at most one full own-amplitude and
+ * still count as flat. Skipped when priorAmplitude is absent.
  */
 export const DEFAULT_MAX_FLAT_DRIFT_RATIO = 1.0;
+/**
+ * Minimum formation span (in K bars) for a triangle. The backscanned segment must
+ * span at least this many bars from its first swing to the current swing — a
+ * triangle needs enough bars to be a genuine 蓄力 structure, not a 3-swing blip.
+ * Calibrated on real data (MRVL/SNDK/SOXX genuine triangles span far more than
+ * this; short dip-rebound noise spans less).
+ */
+export const DEFAULT_MIN_SPAN_TRIANGLE = 13;
+/**
+ * Minimum formation span (in K bars) for a box.
+ */
+export const DEFAULT_MIN_SPAN_BOX = 5;
+/**
+ * Slope-break tolerance: a swing's bar CLOSE may poke through its edge trend line
+ * by up to this fraction of the structure width at that bar before it counts as a
+ * genuine break (单根反向 + 容忍度). 0.2 = 20% of the local channel width. A closer
+ * that recovers inside the tolerance is a wick 毛刺 (影线穿透不算); a closer beyond
+ * it is a true break and terminates the backscan. Calibrated on real data.
+ */
+export const DEFAULT_STRUCTURE_TOLERANCE = 0.2;
 
 /** Score normalization for the touch contribution: this many touches = full marks. */
 const TOUCH_SCALE = DEFAULT_MAX_STRUCTURE_SWINGS;
@@ -272,35 +286,6 @@ function minValue(values: readonly number[]): number {
   let min = Infinity;
   for (const value of values) if (value < min) min = value;
   return min;
-}
-
-/**
- * Directional monotonicity check for a triangle edge. A trending edge must not
- * contain a swing that clearly moves AGAINST the edge's required direction —
- * a single outlier swing can pull the OLS regression into the right sign while
- * the edge is not actually monotonic (the HEI deep-low dip and HFT post-crash
- * rebound both fooled slope-only classification). The edge is therefore
- * verified swing-by-swing on top of the regression test.
- *
- *   'up'   -> a later price falling below prev * (1 - tol) breaks monotonicity
- *   'down' -> a later price rising above prev * (1 + tol) breaks monotonicity
- *   'flat' -> not checked (a flat edge may wiggle within its flat tolerance)
- *
- * `tolerance` is the per-step relative slack (DEFAULT_MONOTONIC_TOLERANCE).
- */
-function isDirectionalMonotonic(
-  prices: readonly number[],
-  direction: 'up' | 'down' | 'flat',
-  tolerance: number,
-): boolean {
-  if (direction === 'flat' || prices.length < 2) return true;
-  for (let i = 1; i < prices.length; i += 1) {
-    const prev = prices[i - 1];
-    const curr = prices[i];
-    if (direction === 'up' && curr < prev * (1 - tolerance)) return false;
-    if (direction === 'down' && curr > prev * (1 + tolerance)) return false;
-  }
-  return true;
 }
 
 /** Mean per-bar relative amplitude ((high - low) / low) across the candles. */
@@ -350,7 +335,7 @@ function linearRegression(points: readonly RegPoint[]): RegLine | null {
  * extreme (highest high / lowest low) so each edge is single-valued for
  * regression. Returns an empty array when there are fewer than 2n + 1 bars (not
  * enough fractal context) or a price is non-positive (structure math divides by
- * price).
+ * price). Each swing carries the close of its bar for the slope-break judgement.
  */
 export function detectSwings(candles: readonly Candlestick[], n: number): SwingPoint[] {
   const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
@@ -368,8 +353,8 @@ export function detectSwings(candles: readonly Candlestick[], n: number): SwingP
       if (bar.low >= sorted[j].low) isLow = false;
       if (!isHigh && !isLow) break;
     }
-    if (isHigh) raw.push({ index: i, timestamp: bar.timestamp, price: bar.high, kind: 'high' });
-    if (isLow) raw.push({ index: i, timestamp: bar.timestamp, price: bar.low, kind: 'low' });
+    if (isHigh) raw.push({ index: i, timestamp: bar.timestamp, price: bar.high, kind: 'high', close: bar.close });
+    if (isLow) raw.push({ index: i, timestamp: bar.timestamp, price: bar.low, kind: 'low', close: bar.close });
   }
 
   // Collapse consecutive same-direction swings to the extreme. Strict fractal
@@ -390,10 +375,113 @@ export function detectSwings(candles: readonly Candlestick[], n: number): SwingP
   return deduped;
 }
 
+/** Reference edge lines of a swing segment, for the backscan's slope-break check. */
+function referenceLines(
+  swings: readonly SwingPoint[],
+): { highLine: RegLine | null; lowLine: RegLine | null } {
+  const highs = swings.filter((swing) => swing.kind === 'high');
+  const lows = swings.filter((swing) => swing.kind === 'low');
+  return {
+    highLine: linearRegression(highs.map((swing) => ({ x: swing.index, y: swing.price }))),
+    lowLine: linearRegression(lows.map((swing) => ({ x: swing.index, y: swing.price }))),
+  };
+}
+
+/**
+ * Backward-scan window determination: from the most recent swing (current), scan
+ * backward over the complete swing sequence to find the continuous segment where
+ * the convergence form holds. This replaces the old "fixed most-recent-8 swings"
+ * window with a structure-driven boundary.
+ *
+ * Two phases:
+ *
+ * 1. **Base structure** — walk i from the end backward and take the FIRST suffix
+ *    `swings[i..end]` that `classifyStructure` accepts. This is the current
+ *    structure (its last swing is the current bar, so the recency gate holds).
+ *    If no suffix forms a structure → null (no form at the current position).
+ *
+ * 2. **Extend backward** — keep including the next-earlier swing while it belongs
+ *    to the same form. Each candidate swing is judged against the CURRENT
+ *    segment's edge trend lines (the established structure, NOT recomputed with
+ *    the candidate — otherwise an INTC-style 103 spike would pull the regression
+ *    toward itself and sneak in):
+ *      - a high swing breaks when its bar CLOSE pokes above the high edge by
+ *        more than `structureTolerance × width` at that bar;
+ *      - a low swing breaks when its close pokes below the low edge by more than
+ *        that tolerance.
+ *    A close that recovers inside the tolerance is a wick 毛刺 and the swing is
+ *    kept. After a candidate passes the close check it is included and the
+ *    extended segment is re-classified (must still form the SAME structure kind);
+ *    if either check fails the extension stops and the structure starts after the
+ *    breaking swing.
+ *
+ * The result is the swing subsequence of the continuous form segment (the
+ * structure's swing points, ending at the current swing), or null.
+ */
+export function backscanWindow(
+  swings: readonly SwingPoint[],
+  candles: readonly Candlestick[],
+  params: StructureParams,
+): SwingPoint[] | null {
+  if (swings.length < 4) return null;
+  const currentIndex = params.currentIndex ?? candles.length - 1;
+
+  // Phase 1: base structure — the most recent suffix that classifies.
+  let baseStart = -1;
+  let baseKind: 'triangle' | 'box' | null = null;
+  for (let i = swings.length - 1; i >= 0; i -= 1) {
+    const segment = swings.slice(i);
+    const result = classifyStructure(segment, { ...params, currentIndex });
+    if (result) {
+      baseStart = i;
+      baseKind = result.structure;
+      break;
+    }
+  }
+  if (baseStart < 0 || baseKind === null) return null;
+
+  // Phase 2: extend backward while the candidate swing keeps the same form.
+  let start = baseStart;
+  const tolerance = params.structureTolerance ?? DEFAULT_STRUCTURE_TOLERANCE;
+  for (let i = baseStart - 1; i >= 0; i -= 1) {
+    const candidate = swings[i];
+    const current = swings.slice(start);
+    const { highLine, lowLine } = referenceLines(current);
+    if (!highLine || !lowLine) break; // degenerate segment (can't evaluate the break)
+
+    const width = highLine.slope * candidate.index + highLine.intercept -
+      (lowLine.slope * candidate.index + lowLine.intercept);
+    if (width <= 0) break; // crossed at the candidate's bar — not a valid extension
+
+    const lineValue =
+      candidate.kind === 'high'
+        ? highLine.slope * candidate.index + highLine.intercept
+        : lowLine.slope * candidate.index + lowLine.intercept;
+    const breaks =
+      candidate.kind === 'high'
+        ? candidate.close > lineValue + tolerance * width
+        : candidate.close < lineValue - tolerance * width;
+    if (breaks) break; // 真破 — the structure starts after this swing
+
+    // Include the swing; it must still form the SAME structure kind.
+    const extended = swings.slice(i);
+    const extendedResult = classifyStructure(extended, { ...params, currentIndex });
+    if (!extendedResult || extendedResult.structure !== baseKind) break;
+    start = i;
+  }
+
+  return swings.slice(start);
+}
+
 /**
  * Classifies a swing sequence into a box or a triangle, returning a fully
  * scored `StructureResult` when a structure is present, or null when the swing
  * geometry does not form either shape.
+ *
+ * The sequence passed in is expected to be the backscanned continuous segment
+ * (see `backscanWindow`) — this function no longer windows to the most recent
+ * swings, so callers that pass a full sequence including an old regime must
+ * backscan it first.
  *
  * Box:   both edge regressions are flat (edge total drift across the swing span
  *        / meanPrice <= slopeTolerance), the box height is narrow relative to
@@ -403,6 +491,20 @@ export function detectSwings(candles: readonly Candlestick[], n: number): SwingP
  *        (rising triangle: flat highs + rising lows; falling triangle: falling
  *        highs + flat lows). The trending side must be beyond the flat tolerance,
  *        so a near-box is not mislabelled a triangle. Each edge >= touchMin.
+ *
+ * Unified slope-break / edge-validity gate (replaces the old percentage
+ * `monotonicTolerance`): every edge swing's bar CLOSE must stay inside the
+ * structure channel. A swing whose close pokes through its edge trend line by
+ * more than `structureTolerance × width` (the distance between the two trend
+ * lines at that bar) is a genuine break — 单根反向 + 容忍度, the same judgement the
+ * backscan uses for a noise spike. This catches the HEI deep-low spike, the HFT
+ * narrow-band rebound, and an INTC-style pre-trend spike far above a flat edge,
+ * while letting genuine triangles (bars close inside the wedge) and boxes (bars
+ * close on/near their edges) pass.
+ *
+ * B gate: the segment's span (last swing index - first swing index, in K bars)
+ * must be >= the structure kind's minimum formation span — `minSpanTriangle`
+ * (13) or `minSpanBox` (5).
  *
  * Position: box = (lastPrice - boxLow) / (boxHigh - boxLow); triangle = where
  * lastPrice sits between the two trend lines at the current bar.
@@ -414,9 +516,7 @@ export function detectSwings(candles: readonly Candlestick[], n: number): SwingP
  * Everything is anchored to the CURRENT bar (`params.currentIndex`, the last
  * candle index), not the last swing: trend lines are extrapolated to where price
  * is now, so a triangle whose apex is already behind the current bar (width <= 0
- * at the current bar) is rejected as resolved, and the convergence score measures
- * the width that remains at the current bar instead of saturating at the
- * narrowest swing point.
+ * at the current bar) is rejected as resolved.
  *
  * The `priorAmplitude` low-volatility gate is applied only when a finite value is
  * supplied (probeStructure always supplies it). Absent, the gate is skipped so a
@@ -427,22 +527,18 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
   // fewer than 4 swings the geometry cannot be verified (2 high + 2 low minimum).
   if (swings.length < 4) return null;
 
-  // Window to the most recent swings: older ones describe an earlier regime (e.g.
-  // the trend that preceded the consolidation) and would tilt the edge regressions.
-  const recent = swings.slice(-DEFAULT_MAX_STRUCTURE_SWINGS);
-  const highs = recent.filter((swing) => swing.kind === 'high');
-  const lows = recent.filter((swing) => swing.kind === 'low');
+  const highs = swings.filter((swing) => swing.kind === 'high');
+  const lows = swings.filter((swing) => swing.kind === 'low');
   const touchMin = Math.max(params.touchMin, 2);
   if (highs.length < touchMin || lows.length < touchMin) return null;
 
   // Anchor everything to the current bar. probeStructure injects the last candle
   // index; a direct call without it falls back to the last swing index.
-  const currentIndex = params.currentIndex ?? recent[recent.length - 1].index;
+  const currentIndex = params.currentIndex ?? swings[swings.length - 1].index;
   // Recency gate (both structure kinds): the structure's last swing must be close
-  // enough to the current bar to be 现役. A touch far in the past describes an
-  // old, already-resolved shape whose trend lines only extrapolate by chance.
+  // enough to the current bar to be 现役.
   const maxRecentBars = params.maxRecentBars ?? DEFAULT_MAX_RECENT_BARS;
-  if (currentIndex - recent[recent.length - 1].index > maxRecentBars) return null;
+  if (currentIndex - swings[swings.length - 1].index > maxRecentBars) return null;
 
   const highLine = linearRegression(highs.map((swing) => ({ x: swing.index, y: swing.price })));
   const lowLine = linearRegression(lows.map((swing) => ({ x: swing.index, y: swing.price })));
@@ -453,20 +549,15 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
   const meanHigh = mean(highPrices);
   const meanLow = mean(lowPrices);
   // Total edge drift across its swing span, as a fraction of the edge's mean
-  // price. Total (not per-bar) drift keeps long, slowly-tilting structures from
-  // looking flat — a 100-bar edge tilting 10% has a tiny per-bar slope yet is
-  // clearly trending, and would be mislabelled a box by any per-bar tolerance.
+  // price.
   const highSpan = highs[highs.length - 1].index - highs[0].index;
   const lowSpan = lows[lows.length - 1].index - lows[0].index;
   const highDrift = (Math.abs(highLine.slope) * highSpan) / meanHigh;
   const lowDrift = (Math.abs(lowLine.slope) * lowSpan) / meanLow;
   // An edge is flat only when its net drift is small BOTH as a fraction of its
   // own mean price (slopeTolerance) AND relative to the coin's own past
-  // amplitude (maxFlatDriftRatio). The slopeTolerance bound alone (fixed 2% of
-  // price) is too wide for low-volatility coins: XRP 1H's 0.9% slow decline is
-  // only 0.9% of price (passes slopeTolerance) yet 1.6× its 0.56% own amplitude
-  // — a clear trend, not a flat falling-triangle low edge. priorAmplitude absent
-  // (direct classifier call without candle context) skips the relative gate.
+  // amplitude (maxFlatDriftRatio). priorAmplitude absent (direct classifier call
+  // without candle context) skips the relative gate.
   const prior = params.priorAmplitude;
   const driftRatioAvailable = prior !== undefined && Number.isFinite(prior) && prior > 0;
   const maxFlatDriftRatio = params.maxFlatDriftRatio ?? DEFAULT_MAX_FLAT_DRIFT_RATIO;
@@ -481,14 +572,38 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
   const highFalling = highLine.slope < 0 && highDrift > params.slopeTolerance;
   const lowRising = lowLine.slope > 0 && lowDrift > params.slopeTolerance;
   const touchCount = highs.length + lows.length;
-  const lastPrice = params.lastPrice ?? recent[recent.length - 1].price;
+  const lastPrice = params.lastPrice ?? swings[swings.length - 1].price;
+
+  // ---- unified slope-break / edge-validity gate (replaces monotonicTolerance) ----
+  // Channel width between the two trend lines at bar x.
+  const widthAt = (x: number) =>
+    (highLine.slope - lowLine.slope) * x + (highLine.intercept - lowLine.intercept);
+  const structureTolerance = params.structureTolerance ?? DEFAULT_STRUCTURE_TOLERANCE;
+  // Upper edge (flat or falling): a high swing whose bar CLOSE is above the edge
+  // by more than tolerance×width has broken out — 真破, not 蓄力.
+  for (const swing of highs) {
+    const width = widthAt(swing.index);
+    if (width <= 0) continue; // crossed/degenerate region; the narrowing gate handles it
+    const lineValue = highLine.slope * swing.index + highLine.intercept;
+    if (swing.close > lineValue + structureTolerance * width) return null;
+  }
+  // Lower edge (flat or rising): a low swing whose bar CLOSE is below the edge by
+  // more than tolerance×width has broken down.
+  for (const swing of lows) {
+    const width = widthAt(swing.index);
+    if (width <= 0) continue;
+    const lineValue = lowLine.slope * swing.index + lowLine.intercept;
+    if (swing.close < lineValue - structureTolerance * width) return null;
+  }
+
+  // B gate: minimum formation span (in K bars) for the structure kind.
+  const structureSpan = swings[swings.length - 1].index - swings[0].index;
 
   // ---- box ----
   if (highFlat && lowFlat) {
+    if (structureSpan < (params.minSpanBox ?? DEFAULT_MIN_SPAN_BOX)) return null;
     // Range gate: a box edge must stay in a narrow band, not merely regress to
-    // ~0 slope. A slow drift plus one deep spike nets a zero regression slope
-    // yet visibly is not a horizontal channel, so each edge's max-min spread
-    // (relative to its mean price) is also bounded.
+    // ~0 slope.
     const boxRangeTolerance = params.boxRangeTolerance ?? DEFAULT_BOX_RANGE_TOLERANCE;
     const highRange = (maxValue(highPrices) - minValue(highPrices)) / meanHigh;
     const lowRange = (maxValue(lowPrices) - minValue(lowPrices)) / meanLow;
@@ -501,8 +616,8 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
       const boxRelativeHeight = boxHeight / midPrice;
       // priorAmplitude is optional data: probeStructure always supplies it, but
       // a direct unit-test call without candle context must not be spuriously
-      // rejected — absent prior data, the low-volatility gate is skipped.
-      const prior = params.priorAmplitude;
+      // rejected — absent prior data, the low-volatility gate is skipped. `prior`
+      // is the outer const computed above for the drift-ratio gates.
       const lowVolatility =
         prior === undefined ||
         !Number.isFinite(prior) ||
@@ -514,7 +629,6 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
         const boxTolerance = 0.1 * boxHeight;
         if (lastPrice < boxLow - boxTolerance || lastPrice > boxHigh + boxTolerance) return null;
         // 收缩比: how much the box has compressed against the coin's own past.
-        // ratio -> 0 (much tighter than its own amplitude) = strongest tension.
         const compressionRatio =
           prior !== undefined && Number.isFinite(prior) && prior > 0 ? boxRelativeHeight / prior : 1;
         const compressionContribution = clamp01(1 - compressionRatio);
@@ -534,54 +648,24 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
   const rising = highFlat && lowRising; // 上升三角: flat highs, rising lows
   const falling = highFalling && lowFlat; // 下降三角: falling highs, flat lows
   if (symmetric || rising || falling) {
+    if (structureSpan < (params.minSpanTriangle ?? DEFAULT_MIN_SPAN_TRIANGLE)) return null;
     // Range gate for a triangle's flat edge: a side that is supposed to be flat
-    // must actually stay in a narrow band, not merely regress to ~0 slope. A deep
-    // spike inside the edge (HEI's 0.1969 → 0.1816 深跌毛刺) can pull the OLS slope
-    // flat while the edge visibly spans far more than a flat line would, so the
-    // flat side gets the same (max − min) / mean spread bound as a box edge. The
+    // must actually stay in a narrow band, not merely regress to ~0 slope. The
     // symmetric branch has no flat side (both edges trend) and keeps only its
-    // monotonicity gate — a wide-amplitude symmetric wedge is legitimate.
+    // edge-validity gate.
     const boxRangeTolerance = params.boxRangeTolerance ?? DEFAULT_BOX_RANGE_TOLERANCE;
     if (rising && (maxValue(highPrices) - minValue(highPrices)) / meanHigh > boxRangeTolerance) return null;
     if (falling && (maxValue(lowPrices) - minValue(lowPrices)) / meanLow > boxRangeTolerance) return null;
-    // Monotonicity gate: a triangle's trending edges must move point-by-point
-    // in the required direction within `monotonicTolerance`. An outlier swing
-    // (HEI's 0.1969 → 0.1816 deep-low dip, HFT's post-crash rebound) can pull
-    // the OLS slope into the right sign while the edge is not actually
-    // monotonic, so the regression test is paired with a per-swing check. A
-    // flat edge may wiggle inside its flat tolerance and is not checked: for a
-    // rising triangle only the rising lows are verified, for a falling triangle
-    // only the falling highs, for a symmetric triangle both.
-    const monotonicTolerance = params.monotonicTolerance ?? DEFAULT_MONOTONIC_TOLERANCE;
-    const highDirection = symmetric || falling ? 'down' : 'flat';
-    const lowDirection = symmetric || rising ? 'up' : 'flat';
-    if (
-      !isDirectionalMonotonic(highPrices, highDirection, monotonicTolerance) ||
-      !isDirectionalMonotonic(lowPrices, lowDirection, monotonicTolerance)
-    ) {
-      return null;
-    }
-    const firstIndex = recent[0].index;
+    const firstIndex = swings[0].index;
     // Channel width between the two trend lines at bar x.
-    const widthAt = (x: number) =>
-      (highLine.slope - lowLine.slope) * x + (highLine.intercept - lowLine.intercept);
     const widthStart = widthAt(firstIndex);
     const widthCurrent = widthAt(currentIndex);
     // 收敛度: fraction of the starting width already collapsed by the CURRENT bar.
-    // Anchoring at currentIndex (not the last swing) is what rejects the SPCX
-    // "降弹平带" false positive: a rebound low line (slope ≈ 0.15/bar) extrapolated
-    // to the current bar crosses the flat high line → widthCurrent <= 0 → already
-    // resolved, not 蓄力. widthStart > 0 + widthCurrent < widthStart reject a
-    // degenerate/parallel pair; widthCurrent > 0 rejects a crossed/resolved pair
-    // (whose position would also divide by a non-positive width).
     if (widthStart > 0 && widthCurrent > 0 && widthCurrent < widthStart) {
       const upper = highLine.slope * currentIndex + highLine.intercept;
       const lower = lowLine.slope * currentIndex + lowLine.intercept;
       const width = upper - lower;
-      // 价格在结构内: the extrapolated lines bound the current price. A lastPrice
-      // far outside (beyond 10% of the structure width) has broken out or
-      // collapsed — not 蓄力待突破. This uses the extrapolated lines, so a
-      // price that has already punched through one side is rejected.
+      // 价格在结构内: the extrapolated lines bound the current price.
       const priceTolerance = 0.1 * width;
       if (lastPrice < lower - priceTolerance || lastPrice > upper + priceTolerance) return null;
       const convergenceContribution = clamp01((widthStart - widthCurrent) / widthStart);
@@ -599,15 +683,16 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
  * Combination entry point: probes every candidate fractal N and returns the most
  * regular structure found (or null when no N produces one).
  *
- * Selection priority (design): 有结构 > 触碰次数多 > swing 对数多 > score 强, with
- * a final tie-break toward the smaller N (防大 N 过度平滑). Each coin/timeframe
- * discovers its own structure scale — a small consolidation resolves at a small
- * N, a large one at a large N — without a pre-fixed window.
+ * For each candidate N the full swing sequence is detected once, then
+ * `backscanWindow` determines the continuous form segment ending at the current
+ * bar, and `classifyStructure` scores that segment.
+ *
+ * Selection priority (design): 触碰次数多 > 结构跨度长 > N 小 (防大 N 过度平滑). Each
+ * coin/timeframe discovers its own structure scale — a small consolidation
+ * resolves at a small N, a large one at a large N — without a pre-fixed window.
  *
  * `priorAmplitude`, `lastPrice` and `currentIndex` are measured here from the
- * completed candles and injected into `classifyStructure`, which stays a pure
- * function of swings + params. `currentIndex` is the last candle's index, so the
- * classifier anchors trend lines at the current bar (see `classifyStructure`).
+ * completed candles and injected into `backscanWindow`/`classifyStructure`.
  */
 export function probeStructure(candles: readonly Candlestick[], params: StructureParams): StructureResult | null {
   const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
@@ -616,23 +701,20 @@ export function probeStructure(candles: readonly Candlestick[], params: Structur
 
   const lastPrice = sorted[sorted.length - 1].close;
   const currentIndex = sorted.length - 1;
-  // "该币自身前期波动": mean per-bar amplitude across the scanned window. A box is
-  // 低波动 only relative to this own-amplitude baseline — an always-quiet coin
-  // (amplitude ≈ box width) has no "从大波动收敛到小" process and is rejected.
+  // "该币自身前期波动": mean per-bar amplitude across the scanned window.
   const priorAmplitude = meanAmplitude(sorted);
 
-  let best: { result: StructureResult; pairs: number; n: number } | null = null;
+  let best: { result: StructureResult; span: number; n: number } | null = null;
   for (const n of STRUCTURE_SWING_N) {
     const swings = detectSwings(sorted, n);
     if (swings.length < 4) continue;
-    const result = classifyStructure(swings, { ...params, lastPrice, priorAmplitude, currentIndex });
+    const segment = backscanWindow(swings, sorted, { ...params, lastPrice, priorAmplitude, currentIndex });
+    if (!segment) continue;
+    const result = classifyStructure(segment, { ...params, lastPrice, priorAmplitude, currentIndex });
     if (!result) continue;
-    const pairs = Math.min(
-      swings.filter((swing) => swing.kind === 'high').length,
-      swings.filter((swing) => swing.kind === 'low').length,
-    );
-    if (best === null || isBetterStructure(result, pairs, n, best.result, best.pairs, best.n)) {
-      best = { result, pairs, n };
+    const span = segment[segment.length - 1].index - segment[0].index;
+    if (best === null || isBetterStructure(result, span, n, best.result, best.span, best.n)) {
+      best = { result, span, n };
     }
   }
   return best === null ? null : best.result;
@@ -640,20 +722,19 @@ export function probeStructure(candles: readonly Candlestick[], params: Structur
 
 /**
  * Structure-regularity comparison for `probeStructure`. Priority: 触碰次数多 >
- * swing 对数多 > score 强 > N 小 (防大 N 过度平滑). All candidates here already have
- * a structure, so the "有结构" level of the priority is implicit.
+ * 结构跨度长 > N 小 (防大 N 过度平滑). All candidates here already have a
+ * structure, so the "有结构" level of the priority is implicit.
  */
 function isBetterStructure(
   a: StructureResult,
-  aPairs: number,
+  aSpan: number,
   aN: number,
   b: StructureResult,
-  bPairs: number,
+  bSpan: number,
   bN: number,
 ): boolean {
   if (a.touchCount !== b.touchCount) return a.touchCount > b.touchCount;
-  if (aPairs !== bPairs) return aPairs > bPairs;
-  if (a.score !== b.score) return a.score > b.score;
+  if (aSpan !== bSpan) return aSpan > bSpan;
   return aN < bN;
 }
 
@@ -667,9 +748,11 @@ export function defaultStructureParams(overrides?: Partial<StructureParams>): St
     slopeTolerance: DEFAULT_SLOPE_TOLERANCE,
     touchMin: DEFAULT_TOUCH_MIN,
     maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
-    monotonicTolerance: DEFAULT_MONOTONIC_TOLERANCE,
     boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
     maxFlatDriftRatio: DEFAULT_MAX_FLAT_DRIFT_RATIO,
+    minSpanTriangle: DEFAULT_MIN_SPAN_TRIANGLE,
+    minSpanBox: DEFAULT_MIN_SPAN_BOX,
+    structureTolerance: DEFAULT_STRUCTURE_TOLERANCE,
     ...overrides,
   };
 }

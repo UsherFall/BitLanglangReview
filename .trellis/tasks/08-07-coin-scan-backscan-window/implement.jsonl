@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Current window mechanism (fixed 8-swing) and classification gates. This task replaces window determination with backscan; read the algorithm section to know what to restructure and which gates to keep."}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Calibration constants table — B (min span) and tolerance X are new constants to add; the existing monotonicity/range/recency gates may be consolidated."}

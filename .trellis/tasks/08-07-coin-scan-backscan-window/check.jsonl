@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Verify the rewritten algorithm section matches: backscan window determination, break-slope tolerance, B min-span gates, and the calibration constants table."}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "Verify the 宁少勿滥 sorting/hiding rules and output contract (StructureResult) are unchanged despite the window mechanism rewrite."}

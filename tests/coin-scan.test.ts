@@ -1,14 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import {
+  backscanWindow,
   classifyStructure,
   DEFAULT_BOX_RANGE_TOLERANCE,
   DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
   DEFAULT_MAX_FLAT_DRIFT_RATIO,
   DEFAULT_MAX_RECENT_BARS,
   DEFAULT_MAX_STRUCTURE_SWINGS,
-  DEFAULT_MONOTONIC_TOLERANCE,
+  DEFAULT_MIN_SPAN_BOX,
+  DEFAULT_MIN_SPAN_TRIANGLE,
   DEFAULT_SLOPE_TOLERANCE,
+  DEFAULT_STRUCTURE_TOLERANCE,
   DEFAULT_TOUCH_MIN,
   defaultStructureParams,
   detectSwings,
@@ -101,9 +104,15 @@ function uptrendCandles(): Candlestick[] {
   ]);
 }
 
-/** Builds a SwingPoint directly, for the stateless classifier tests. */
-function swing(index: number, price: number, kind: 'high' | 'low'): SwingPoint {
-  return { index, timestamp: index * 3600_000, price, kind };
+/**
+ * Builds a SwingPoint directly, for the stateless classifier tests. `close`
+ * defaults to the swing's own `price` (a bar that closes at its extreme), so
+ * existing fixtures keep working; tests that exercise the unified close gate
+ * pass an explicit `close` (wick bars close back inside the channel, break bars
+ * close beyond their edge).
+ */
+function swing(index: number, price: number, kind: 'high' | 'low', close = price): SwingPoint {
+  return { index, timestamp: index * 3600_000, price, kind, close };
 }
 
 const boxSwings: SwingPoint[] = [
@@ -249,8 +258,8 @@ describe('detectSwings (single-N fractal)', () => {
       [100, 110], [100, 110], [100, 110],
     ]);
     expect(detectSwings(bars, 2)).toEqual([
-      { index: 2, timestamp: 2 * 3600_000, price: 120, kind: 'high' },
-      { index: 5, timestamp: 5 * 3600_000, price: 90, kind: 'low' },
+      { index: 2, timestamp: 2 * 3600_000, price: 120, kind: 'high', close: 106 },
+      { index: 5, timestamp: 5 * 3600_000, price: 90, kind: 'low', close: 101.5 },
     ]);
   });
 
@@ -312,15 +321,17 @@ describe('classifyStructure (swing geometry)', () => {
     // MRVL 15m 真三角(实盘验证过 score 0.93):highs 平 ~215(211.15/214.38/215/219.73
     // spread 很小),lows 抬升。flat-high 边的 net drift 相对 priorAmplitude(0.03)
     // 必须远小于 maxFlatDriftRatio 1.0 —— 真三角不能被新的相对振幅门误杀。
+    // close 落在通道内(真三角的 swing bar close 应落在楔形内,不触发 close 门):
+    // 219.73 尖峰 bar 的收盘收回通道内(212),是毛刺而非破位。
     const mrvlRising = [
-      swing(23, 210.02, 'high'),
-      swing(31, 202.13, 'low'),
-      swing(35, 219.73, 'high'),
-      swing(58, 208.55, 'low'),
-      swing(73, 215.0, 'high'),
-      swing(79, 211.15, 'low'),
-      swing(85, 214.38, 'high'),
-      swing(92, 211.88, 'low'),
+      swing(23, 210.02, 'high', 211),
+      swing(31, 202.13, 'low', 205),
+      swing(35, 219.73, 'high', 212), // 尖峰 bar 收盘收回通道内
+      swing(58, 208.55, 'low', 209.5),
+      swing(73, 215.0, 'high', 213.5),
+      swing(79, 211.15, 'low', 211.5),
+      swing(85, 214.38, 'high', 214),
+      swing(92, 211.88, 'low', 212.5),
     ];
     const result = classifyStructure(mrvlRising, { ...params, lastPrice: 215.62, priorAmplitude: 0.03, currentIndex: 98 });
     expect(result).not.toBeNull();
@@ -413,20 +424,19 @@ describe('classifyStructure (swing geometry)', () => {
 
   it('rejects the HEI 5m deep-low-dip pattern (regression)', () => {
     // Real HEI 5m swings (N=2): highs ~0.21 are roughly flat/descending, but the
-    // lows are NOT monotonic — 0.1969 → 0.1816 is a -7.8% deep-fall spike (深跌
-    // 毛刺) that breaks the "rising lows" requirement of any triangle. The OLS
-    // regression can be pulled into a misleading sign by such an outlier, so the
-    // point-by-point monotonicity gate is what guarantees this noisy 乱震 is not
-    // 蓄力. classifyStructure must return null.
+    // lows have a deep-fall spike — 0.1969 → 0.1816 (-7.8%) — whose bar CLOSES at
+    // its low (0.1818). The close pokes below the low edge by more than
+    // structureTolerance × channel width, so the unified close gate (replacing the
+    // old percentage monotonicity gate) rejects this noisy 乱震 as 蓄力.
     const hei = [
-      swing(0, 0.2136, 'high'),
-      swing(2, 0.1950, 'low'),
-      swing(4, 0.2108, 'high'),
-      swing(6, 0.1969, 'low'),
-      swing(8, 0.2125, 'high'),
-      swing(10, 0.1816, 'low'), // 0.1969 → 0.1816 = -7.8% > monotonicTolerance 2%
-      swing(12, 0.2038, 'high'),
-      swing(14, 0.1957, 'low'),
+      swing(0, 0.2136, 'high', 0.2120),
+      swing(2, 0.1950, 'low', 0.1955),
+      swing(4, 0.2108, 'high', 0.2095),
+      swing(6, 0.1969, 'low', 0.1975),
+      swing(8, 0.2125, 'high', 0.2095),
+      swing(10, 0.1816, 'low', 0.1818), // deep-fall bar closes at its low → close gate fires
+      swing(12, 0.2038, 'high', 0.2025),
+      swing(14, 0.1957, 'low', 0.1965),
     ];
     expect(classifyStructure(hei, { ...params, lastPrice: 0.199 })).toBeNull();
   });
@@ -435,19 +445,19 @@ describe('classifyStructure (swing geometry)', () => {
     // The exact real HEI 5m swing layout (N=2) that slipped past the regression
     // slope: lows [0.1950, 0.1969, 0.1816, 0.1957] regress to ~0 drift (lowDrift
     // 0.013 <= slopeTolerance → lowFlat), so the falling-triangle branch is
-    // entered. But the 0.1816 深跌毛刺 gives the edge a max-min spread of 8% — a
-    // regression line "averaged flat" by an outlier is not a flat edge. Without
-    // the flat-edge range gate this exact layout classifies as a falling triangle
-    // (highDrift 0.034 > 0.02 → highFalling); the range gate must reject it.
+    // entered. The deep spike's bar closes back inside the channel (0.1910), so
+    // the unified close gate does NOT fire — the flat-edge RANGE gate is what
+    // rejects: the 0.1816 深跌毛刺 gives the edge a max-min spread of 8%, and a
+    // regression line "averaged flat" by an outlier is not a flat edge.
     const hei = [
-      swing(79, 0.1950, 'low'),
-      swing(80, 0.2108, 'high'),
-      swing(82, 0.1969, 'low'),
-      swing(84, 0.2125, 'high'),
-      swing(88, 0.1816, 'low'), // 0.1969 → 0.1816 = -7.8% deep-fall spike
-      swing(95, 0.2038, 'high'),
-      swing(96, 0.1957, 'low'),
-      swing(97, 0.2064, 'high'),
+      swing(79, 0.1950, 'low', 0.1955),
+      swing(80, 0.2108, 'high', 0.2090),
+      swing(82, 0.1969, 'low', 0.1975),
+      swing(84, 0.2125, 'high', 0.2110),
+      swing(88, 0.1816, 'low', 0.1910), // deep spike closes back inside → range gate decides
+      swing(95, 0.2038, 'high', 0.2020),
+      swing(96, 0.1957, 'low', 0.1965),
+      swing(97, 0.2064, 'high', 0.2050),
     ];
     expect(classifyStructure(hei, { ...params, lastPrice: 0.199, currentIndex: 97 })).toBeNull();
   });
@@ -521,38 +531,38 @@ describe('classifyStructure (swing geometry)', () => {
     expect(classifyStructure(overLimit, boundaryParams)).toBeNull();
   });
 
-  it('rejects the HFT 15m crash-rebound-narrow pattern (regression)', () => {
+  it('rejects the HFT 15m crash-rebound-narrow pattern via the close gate (regression)', () => {
     // Real HFT 15m: a violent 崩拉 (high@100 → crash low@40 → rebound high@95)
-    // then a suddenly narrow 收窄 band (highs 90/93, lows 78/80) with a big gap
-    // between the crash leg and the recovery. The regression sees "falling highs
-    // + rising lows" and would call it a symmetric triangle, but the edges are
-    // not monotonic: the narrow band wiggles against the required direction
-    // (90 → 93 = +3.3% breaks "highs falling", 80 → 78 = -2.5% breaks "lows
-    // rising"). 崩后平静 is not 蓄力 — classifyStructure must return null.
+    // then a suddenly narrow 收窄 band (highs 90/93, lows 78/80). The crash low's
+    // bar closes at its low (40) — a swing whose CLOSE pokes below the (outlier-
+    // pulled) low edge by more than structureTolerance × width. 崩后平静 is not
+    // 蓄力, so the unified close gate rejects it (the old monotonicity gate no
+    // longer exists — a single candle is enough when its close breaks the edge).
     const hft = [
-      swing(0, 100, 'high'),
-      swing(4, 40, 'low'),
-      swing(8, 95, 'high'),
-      swing(12, 75, 'low'),
-      swing(16, 90, 'high'),
-      swing(20, 80, 'low'),
-      swing(24, 93, 'high'), // 收窄区反弹: 90 → 93 = +3.3% > 2%
-      swing(28, 78, 'low'), // 收窄区回落: 80 → 78 = -2.5% > 2%
+      swing(0, 100, 'high', 98),
+      swing(4, 40, 'low', 40), // crash bar closes at its low → close gate
+      swing(8, 95, 'high', 93),
+      swing(12, 75, 'low', 76),
+      swing(16, 90, 'high', 91),
+      swing(20, 80, 'low', 79),
+      swing(24, 93, 'high', 92),
+      swing(28, 78, 'low', 79),
     ];
     expect(classifyStructure(hft, { ...params, lastPrice: 88, currentIndex: 28 })).toBeNull();
   });
 
-  it('lets a rising low pull back within monotonicTolerance and still be a triangle', () => {
+  it('lets a rising low pull back inside the channel and still be a triangle (wick)', () => {
     // convergingTriangleSwings lows (88 → 92 → 96 → 100) with a 1% pullback on
-    // the third low (92 → 91). 91 > 92 * (1 - 0.02) = 90.16, so the edge stays
-    // within the monotonic tolerance — a micro-pullback is noise, not a broken
-    // edge. The structure must still classify.
+    // the third low (92 → 91). The pullback bar's CLOSE (91) stays inside the
+    // channel — it does not poke below the low edge by more than tolerance ×
+    // width — so the unified close gate treats it as a wick 毛刺, not a break.
+    // The structure must still classify.
     const microPullback = [
       swing(6, 88, 'low'),
       swing(10, 122, 'high'),
       swing(11, 92, 'low'),
       swing(15, 118, 'high'),
-      swing(16, 91, 'low'), // -1.1% pullback, within DEFAULT_MONOTONIC_TOLERANCE 2%
+      swing(16, 91, 'low'), // -1.1% pullback; close stays inside the wedge
       swing(20, 114, 'high'),
       swing(21, 100, 'low'),
     ];
@@ -561,19 +571,19 @@ describe('classifyStructure (swing geometry)', () => {
     expect(result!.structure).toBe('triangle');
   });
 
-  it('rejects a rising low that breaks out by ~8% (monotonicity violated)', () => {
-    // Same shape but the third low collapses to 84.5: 92 → 84.5 = -8.2% is far
-    // beyond the 2% tolerance — a genuine 破位 that no longer looks like rising
-    // lows. The regression can still fit a positive slope, but the monotonicity
-    // gate rejects it.
+  it('rejects a rising low whose bar close breaks through the low edge (close gate)', () => {
+    // Same shape but the third low collapses to 84.5 (92 → 84.5 = -8.2%). Its
+    // bar closes at its low (85), poking below the low edge by more than
+    // structureTolerance × width — a genuine 破位, not a wick. The regression
+    // could still fit a positive slope, but the unified close gate rejects it.
     const obviousBreak = [
-      swing(6, 88, 'low'),
-      swing(10, 122, 'high'),
-      swing(11, 92, 'low'),
-      swing(15, 118, 'high'),
-      swing(16, 84.5, 'low'), // -8.2%, clearly beyond tolerance
-      swing(20, 114, 'high'),
-      swing(21, 100, 'low'),
+      swing(6, 88, 'low', 89),
+      swing(10, 122, 'high', 121),
+      swing(11, 92, 'low', 93),
+      swing(15, 118, 'high', 117),
+      swing(16, 84.5, 'low', 85), // -8.2% deep-fall bar closes at its low → close gate
+      swing(20, 114, 'high', 115),
+      swing(21, 100, 'low', 101),
     ];
     expect(classifyStructure(obviousBreak, { ...params, lastPrice: 109, currentIndex: 24 })).toBeNull();
   });
@@ -658,10 +668,12 @@ describe('classifyStructure (swing geometry)', () => {
     expect(classifyStructure([swing(6, 97, 'low'), swing(10, 113, 'high'), swing(16, 97, 'low')], params)).toBeNull();
   });
 
-  it('windows to the most recent swings so an old regime does not tilt the edges', () => {
-    // 10 swings: the oldest 3 are an earlier uptrend, the newest 7 are the box.
-    // classifyStructure must ignore the older highs/lows (window of 8) and still
-    // see the box.
+  it('excludes an old regime via backscan so it does not tilt the edges', () => {
+    // classifyStructure no longer windows internally — callers must backscan
+    // first. 13 swings: the oldest 5 are an earlier uptrend (highs 130/128), the
+    // newest 8 are the box. backscanWindow judges each candidate swing against
+    // the CURRENT box edges (NOT recomputed with the candidate), so the old
+    // regime highs break the extension and the returned segment excludes them.
     const withOldRegime = [
       swing(0, 90, 'low'),
       swing(1, 130, 'high'),
@@ -670,9 +682,139 @@ describe('classifyStructure (swing geometry)', () => {
       swing(5, 98, 'low'),
       ...boxSwings,
     ];
-    const result = classifyStructure(withOldRegime, { ...params, priorAmplitude: 0.28 });
+    const p = { ...params, priorAmplitude: 0.28, currentIndex: 26 };
+    const segment = backscanWindow(withOldRegime, [], p);
+    expect(segment).not.toBeNull();
+    expect(segment!.length).toBeLessThan(withOldRegime.length);
+    expect(segment!.every((sw) => sw.index >= 5)).toBe(true);
+    const result = classifyStructure(segment!, p);
     expect(result).not.toBeNull();
     expect(result!.structure).toBe('box');
+  });
+});
+
+describe('backscanWindow (backward structure boundary)', () => {
+  const params = defaultStructureParams({ lastPrice: 105 });
+
+  it('finds the continuous triangle segment starting after a breaking swing', () => {
+    // The newest 7 swings are a genuine converging triangle (lows 88 → 100
+    // rising, highs 122 → 114 falling, apex beyond currentIndex 30). An earlier
+    // low@6 crashes to 80 and closes at 70 — well below the extrapolated low edge
+    // by more than tolerance × width. backscanWindow must terminate there and
+    // return the triangle, not the crash.
+    const sequence = [
+      swing(6, 80, 'low', 70), // breaking swing: close pokes through the low edge
+      swing(10, 88, 'low'),
+      swing(14, 122, 'high'),
+      swing(15, 92, 'low'),
+      swing(19, 118, 'high'),
+      swing(20, 96, 'low'),
+      swing(24, 114, 'high'),
+      swing(25, 100, 'low'),
+    ];
+    const segment = backscanWindow(sequence, [], { ...params, currentIndex: 30 });
+    expect(segment).not.toBeNull();
+    expect(segment![0].index).toBe(10);
+    expect(segment!.some((sw) => sw.index === 6)).toBe(false);
+    const result = classifyStructure(segment!, { ...params, lastPrice: 109, currentIndex: 30 });
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('triangle');
+  });
+
+  it('terminates the extension at a low-side break (close beyond tolerance)', () => {
+    // A box (lows ~90, highs ~100) with an earlier crash low@6=85 that closes at
+    // 87 — below the box low edge by more than tolerance × width. The box starts
+    // after the crash.
+    const sequence = [
+      swing(6, 85, 'low', 87), // crash close pokes below the box low edge
+      swing(10, 90, 'low'),
+      swing(14, 100, 'high'),
+      swing(15, 91, 'low'),
+      swing(19, 100, 'high'),
+      swing(20, 90, 'low'),
+      swing(24, 100, 'high'),
+      swing(25, 90, 'low'),
+      swing(29, 100, 'high'),
+    ];
+    const p = { ...params, lastPrice: 95, currentIndex: 30 };
+    const segment = backscanWindow(sequence, [], p);
+    expect(segment).not.toBeNull();
+    expect(segment![0].index).toBe(10);
+    const result = classifyStructure(segment!, p);
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('box');
+  });
+
+  it('keeps a wick whose close recovers inside the tolerance (毛刺)', () => {
+    // An earlier low@6=89.5 pokes its PRICE below the box low edge (90) but
+    // closes back inside (90.5) — a wick, not a break. The extension must keep it
+    // and the box spans all the way back to index 6.
+    const sequence = [
+      swing(6, 89.5, 'low', 90.5), // wick: price pokes below, close recovers inside
+      swing(10, 90, 'low'),
+      swing(14, 100, 'high'),
+      swing(15, 91, 'low'),
+      swing(19, 100, 'high'),
+      swing(20, 90, 'low'),
+      swing(24, 100, 'high'),
+      swing(25, 90, 'low'),
+      swing(29, 100, 'high'),
+    ];
+    const p = { ...params, lastPrice: 95, currentIndex: 30 };
+    const segment = backscanWindow(sequence, [], p);
+    expect(segment).not.toBeNull();
+    expect(segment![0].index).toBe(6);
+    const result = classifyStructure(segment!, p);
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('box');
+  });
+
+  it('excludes an INTC-style spike high from the current box (regression)', () => {
+    // INTC 15m case: an earlier 103 spike far above the box's ~100 high edge. Its
+    // close (102) pokes through the flat high edge by more than tolerance × width
+    // → the box starts after it.
+    const sequence = [
+      swing(4, 88, 'low'),
+      swing(6, 103, 'high', 102), // 103 spike: close breaks the high edge
+      swing(10, 90, 'low'),
+      swing(14, 100, 'high'),
+      swing(15, 91, 'low'),
+      swing(19, 100, 'high'),
+      swing(20, 90, 'low'),
+      swing(24, 101, 'high'),
+      swing(25, 90, 'low'),
+      swing(29, 100, 'high'),
+    ];
+    const p = { ...params, priorAmplitude: 0.3, lastPrice: 95, currentIndex: 30 };
+    const segment = backscanWindow(sequence, [], p);
+    expect(segment).not.toBeNull();
+    expect(segment!.some((sw) => sw.index === 6)).toBe(false);
+    expect(segment![0].index).toBe(10);
+    const result = classifyStructure(segment!, p);
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('box');
+  });
+
+  it('rejects a structure whose formation span is below the B gate', () => {
+    // A tight 4-bar triangle: lows 100 → 102 → 104, highs 112 → 110 across span 4
+    // — far below minSpanTriangle 13. The geometry is triangular but the formation
+    // is too short to be a genuine 蓄力 structure.
+    const shortTriangle = [
+      swing(10, 100, 'low'),
+      swing(11, 112, 'high'),
+      swing(12, 102, 'low'),
+      swing(13, 110, 'high'),
+      swing(14, 104, 'low'),
+    ];
+    expect(classifyStructure(shortTriangle, { ...params, lastPrice: 107, currentIndex: 20 })).toBeNull();
+    // A 3-bar box (span 3 < minSpanBox 5) is also rejected.
+    const shortBox = [
+      swing(10, 97, 'low'),
+      swing(11, 113, 'high'),
+      swing(12, 97, 'low'),
+      swing(13, 113, 'high'),
+    ];
+    expect(classifyStructure(shortBox, { ...params, priorAmplitude: 0.28 })).toBeNull();
   });
 });
 
@@ -742,9 +884,11 @@ describe('Coin Scan structure defaults and types', () => {
     expect(DEFAULT_MAX_BOX_RELATIVE_HEIGHT).toBe(0.8);
     expect(DEFAULT_MAX_STRUCTURE_SWINGS).toBe(8);
     expect(DEFAULT_MAX_RECENT_BARS).toBe(12);
-    expect(DEFAULT_MONOTONIC_TOLERANCE).toBe(0.02);
     expect(DEFAULT_BOX_RANGE_TOLERANCE).toBe(0.05);
     expect(DEFAULT_MAX_FLAT_DRIFT_RATIO).toBe(1);
+    expect(DEFAULT_MIN_SPAN_TRIANGLE).toBe(13);
+    expect(DEFAULT_MIN_SPAN_BOX).toBe(5);
+    expect(DEFAULT_STRUCTURE_TOLERANCE).toBe(0.2);
   });
 
   it('defaultStructureParams fills every threshold from the file-top defaults', () => {
@@ -753,9 +897,11 @@ describe('Coin Scan structure defaults and types', () => {
       slopeTolerance: DEFAULT_SLOPE_TOLERANCE,
       touchMin: DEFAULT_TOUCH_MIN,
       maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
-      monotonicTolerance: DEFAULT_MONOTONIC_TOLERANCE,
       boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
       maxFlatDriftRatio: DEFAULT_MAX_FLAT_DRIFT_RATIO,
+      minSpanTriangle: DEFAULT_MIN_SPAN_TRIANGLE,
+      minSpanBox: DEFAULT_MIN_SPAN_BOX,
+      structureTolerance: DEFAULT_STRUCTURE_TOLERANCE,
     };
     expect(params).toEqual(expected);
     expect(defaultStructureParams({ touchMin: 3 }).touchMin).toBe(3);
