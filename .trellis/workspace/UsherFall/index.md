@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
-- **Last Active**: 2026-08-06
+- **Total Sessions**: 11
+- **Last Active**: 2026-08-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~499 | Active |
+| `journal-1.md` | ~662 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-08-09 | Session 11: 收敛结构-回溯窗口检测(破斜率终止+容忍度) | `11e1678` | `master` |
 | 10 | 2026-08-06 | 选币数据源替换为币安(黄金 XAUUSDT 必检) | `58bd68f`, `f79966e`, `e77c5ad` | `master` |
 | 9 | 2026-08-06 | 扫描收敛 v3.5:移除箱体门,收敛=压缩+收窄趋势 | `2c21aad`, `fb292ff` | `master` |
 | 8 | 2026-08-05 | 扫描收敛 v3/v3.5 + 成型bar修复 + UI滚动修复 | `33a3f7d`, `87ddb27`, `3d964a4` | `master` |

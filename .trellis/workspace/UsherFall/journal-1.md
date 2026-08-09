@@ -627,3 +627,36 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 **测试**: coin-scan.test.ts 45 个适配+新增(backscanWindow describe:已知三角段起点/破斜率终止/毛刺容忍/INTC 尖峰排除/B 门)。服务层接口不变零改动。
 
 [OK] 199 tests 全绿 + tsc 干净。QC 全过。spec coin-scan.md 已更新。待 commit + 归档。
+
+
+## Session 11: Session 11: 收敛结构-回溯窗口检测(破斜率终止+容忍度)
+
+**Date**: 2026-08-09
+**Task**: Session 11: 收敛结构-回溯窗口检测(破斜率终止+容忍度)
+**Branch**: `master`
+
+### Summary
+
+窗口机制重构:固定 8-swing 改 backscanWindow 回溯扫描,破斜率终止+容忍度 0.2×结构宽度,B 门(三角13/箱体5)。INTC 103 尖峰排除、HEI 深跌腿拒、毛刺容忍。199 tests + tsc 干净,QC 全过,spec 更新,已 commit。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `11e1678` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
