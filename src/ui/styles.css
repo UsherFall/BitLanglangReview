@@ -1111,6 +1111,7 @@ label,
 /* Coin scan (选币) */
 .coin-scan-panel {
   display: grid;
+  align-content: start;
   gap: 12px;
   padding: 12px;
   flex: 1 1 auto;
@@ -1125,8 +1126,9 @@ label,
   color: #8b949e;
 }
 
-.coin-scan-panel .save-button {
+.coin-scan-panel > .save-button {
   width: 100%;
+  min-height: 28px;
 }
 
 .coin-scan-params {
