@@ -1440,9 +1440,18 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     if (!visible) return null;
     const rect = chartRef.current?.getBoundingClientRect();
     if (pointerRef.current.inside && rect && rect.width > 0) {
-      const x = Math.min(Math.max(pointerRef.current.x - rect.left, 0), rect.width);
-      const time = chart.timeScale().coordinateToTime(x);
-      if (typeof time === 'number') return { time, ratio: x / rect.width };
+      const timeScale = chart.timeScale();
+      const scaleWidth = timeScale.width();
+      // The time axis is narrower than the chart: the right price axis takes
+      // its own column. Coordinate→time conversion runs in the time-scale's
+      // pixel space, so the anchor ratio must be relative to that width too —
+      // otherwise the reconstructed range in `visibleRangeForAnchor` is
+      // shifted by the price-axis width on every restore.
+      if (scaleWidth > 0) {
+        const x = Math.min(Math.max(pointerRef.current.x - rect.left, 0), scaleWidth);
+        const time = timeScale.coordinateToTime(x);
+        if (typeof time === 'number') return { time, ratio: x / scaleWidth };
+      }
     }
     return { time: (visible.from + visible.to) / 2, ratio: 0.5 };
   }

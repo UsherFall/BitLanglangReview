@@ -57,9 +57,16 @@ function timeframeTimeForTimestamp(timestamp: number, timeframe: ReviewTimeframe
 
 export function entryVisibleRange(entryTime: string, timeframe: ReviewTimeframe): { from: UTCTimestamp; to: UTCTimestamp } {
   const entry = Date.parse(entryTime);
+  // Snap the entry to the candle grid before computing the window. The raw
+  // entry minute (e.g. 16:31 for a 5m chart) is usually off-grid, and
+  // lightweight-charts' setVisibleRange converts an off-grid time by ceiling
+  // to the NEXT index (timeToIndex lowerBound), which would turn
+  // entry ± 150 bars into "first candle .. last candle" — i.e. the whole
+  // dataset — instead of a window centered on the trade.
+  const snappedEntry = floorTimestamp(entry, timeframe);
   return {
-    from: Math.floor((entry - timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
-    to: Math.floor((entry + timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
+    from: Math.floor((snappedEntry - timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
+    to: Math.floor((snappedEntry + timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
   };
 }
 
