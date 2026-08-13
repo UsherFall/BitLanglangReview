@@ -4,17 +4,20 @@ import {
   backscanWindow,
   classifyStructure,
   DEFAULT_BOX_RANGE_TOLERANCE,
-  DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
+  DEFAULT_CONVERGENCE_FLAT_RATIO,
+  DEFAULT_CONVERGENCE_LENGTH_SCALE,
+  DEFAULT_CONVERGENCE_MIN_RUN,
+  DEFAULT_CONVERGENCE_RATIO,
   DEFAULT_MAX_FLAT_DRIFT_RATIO,
   DEFAULT_MAX_RECENT_BARS,
   DEFAULT_MAX_STRUCTURE_SWINGS,
-  DEFAULT_MIN_SPAN_BOX,
   DEFAULT_MIN_SPAN_TRIANGLE,
   DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO,
   DEFAULT_SLOPE_TOLERANCE,
   DEFAULT_STRUCTURE_TOLERANCE,
   DEFAULT_TOUCH_MIN,
   defaultStructureParams,
+  detectConvergence,
   detectSwings,
   probeStructure,
   scanTimeframes,
@@ -72,6 +75,17 @@ function boxCandles(): Candlestick[] {
 }
 
 /**
+ * A volatility convergence: 20 volatile wide bars (the move) followed by 8 calm,
+ * flat bars (the convergence band). The volatile move dominates the window, so
+ * the band is genuinely calmer than the coin's typical bar — a real 收敛.
+ */
+function convergenceCandles(): Candlestick[] {
+  const leading: Array<readonly [number, number]> = Array.from({ length: 20 }, () => [50, 150]);
+  const band: Array<readonly [number, number]> = Array.from({ length: 8 }, () => [95, 105]);
+  return candles([...leading, ...band]);
+}
+
+/**
  * A symmetric triangle that is STILL converging at the last candle: swing highs
  * descend (122 -> 118 -> 114) and swing lows ascend (88 -> 92 -> 96 -> 100), each
  * on its own N=2 window. The convergence is slow enough that the apex (≈ index
@@ -115,17 +129,6 @@ function uptrendCandles(): Candlestick[] {
 function swing(index: number, price: number, kind: 'high' | 'low', close = price): SwingPoint {
   return { index, timestamp: index * 3600_000, price, kind, close };
 }
-
-const boxSwings: SwingPoint[] = [
-  swing(6, 97, 'low'),
-  swing(10, 113, 'high'),
-  swing(11, 97, 'low'),
-  swing(15, 113, 'high'),
-  swing(16, 97, 'low'),
-  swing(20, 113, 'high'),
-  swing(21, 97, 'low'),
-  swing(25, 113, 'high'),
-];
 
 const triangleSwings: SwingPoint[] = [
   swing(6, 88, 'low'),
@@ -274,22 +277,34 @@ describe('detectSwings (single-N fractal)', () => {
 describe('classifyStructure (swing geometry)', () => {
   const params = defaultStructureParams({ lastPrice: 105 });
 
-  it('classifies a horizontal box with both edges flat (AC2)', () => {
-    const result = classifyStructure(boxSwings, { ...params, priorAmplitude: 0.28 });
+  it('detects a flat calm band as a convergence (AC2)', () => {
+    // convergenceCandles: 20 volatile bars then 8 flat calm bars. The recent band
+    // is both flatter and calmer than the move before it (and calmer than the
+    // coin's typical bar) → a convergence.
+    const result = detectConvergence(convergenceCandles(), params);
     expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
-    expect(result!.position).toBeCloseTo(0.5, 5); // (105 - 97) / (113 - 97)
-    expect(result!.touchCount).toBe(8);
+    expect(result!.structure).toBe('convergence');
+    expect(result!.score).toBeGreaterThanOrEqual(0.7);
     expect(result!.qualified).toBe(true);
-    expect(result!.score).toBeGreaterThan(0);
-    expect(result!.score).toBeLessThanOrEqual(1);
   });
 
-  it('rejects a box whose height is not a convergence from larger volatility', () => {
-    // priorAmplitude ≈ the box's own relative height (a naturally quiet coin):
-    // ratio >= maxBoxRelativeHeight → no 蓄力 tension → rejected.
-    expect(classifyStructure(boxSwings, { ...params, priorAmplitude: 0.1 })).toBeNull();
-    expect(classifyStructure(boxSwings, { ...params, priorAmplitude: undefined })).not.toBeNull();
+  it('rejects a band whose volatility is unchanged from the preceding move', () => {
+    // A flat band preceded by an EQUALLY calm band (no volatility drop) is not a
+    // convergence — a quiet coin being quiet has no 蓄力 tension. Build candles:
+    // 10 calm bars, then 10 equally calm bars → the recent band is not calmer.
+    const calm: Array<readonly [number, number]> = Array.from({ length: 20 }, () => [49, 51]);
+    expect(detectConvergence(candles(calm), params)).toBeNull();
+  });
+
+  it('rejects a rising-low band (a triangle, not a convergence)', () => {
+    // 5 flat pre-bars, then 5 bars whose lows step up 100 → 108 while highs stay
+    // flat: a rising triangle, not a flat convergence band. The adaptive flatness
+    // gate must reject the recent rising band.
+    const rising: Array<readonly [number, number]> = [
+      [100, 110], [100, 110], [100, 110], [100, 110], [100, 110],
+      [100, 113], [102, 113], [104, 113], [106, 113], [108, 113],
+    ];
+    expect(detectConvergence(candles(rising), params)).toBeNull();
   });
 
   it('classifies a symmetric triangle (falling highs + rising lows) (AC1)', () => {
@@ -617,26 +632,6 @@ describe('classifyStructure (swing geometry)', () => {
     expect(classifyStructure(obviousBreak, { ...params, lastPrice: 109, currentIndex: 24 })).toBeNull();
   });
 
-  it('rejects a box whose edge regresses flat but has a deep spike (range gate)', () => {
-    // highs = [100, 100, 106, 100]: the regression slope is ≈ 0 (drift 1.77% <=
-    // slopeTolerance), so the edge passes the flat test, but the max-min spread
-    // is 6 / 101.5 ≈ 5.9% > DEFAULT_BOX_RANGE_TOLERANCE 5% — a "缓升 + 深尖峰"
-    // edge that nets zero slope is visibly not a horizontal box. priorAmplitude
-    // 0.5 keeps the low-volatility gate green (box 23.7% relative height vs 50%
-    // prior → ratio 0.47 < 0.8), so the range gate alone must reject it.
-    const spikyBox = [
-      swing(0, 100, 'high'),
-      swing(2, 80, 'low'),
-      swing(3, 100, 'high'),
-      swing(5, 80, 'low'),
-      swing(6, 106, 'high'),
-      swing(8, 80, 'low'),
-      swing(9, 100, 'high'),
-      swing(11, 80, 'low'),
-    ];
-    expect(classifyStructure(spikyBox, { ...params, priorAmplitude: 0.5, lastPrice: 100 })).toBeNull();
-  });
-
   it('rejects a triangle whose trend lines cross at the current bar (anchored)', () => {
     // A genuine converging triangle geometry (triangleSwings, apex ≈ 23) pushed
     // past its apex: at currentIndex 30 the high line is below the low line →
@@ -663,13 +658,6 @@ describe('classifyStructure (swing geometry)', () => {
     expect(result!.score).toBeGreaterThan(0.5);
   });
 
-  it('rejects a box whose last touch is stale (> maxRecentBars from current bar)', () => {
-    // boxSwings' last swing is at index 25; currentIndex 38 puts it 13 bars
-    // behind (> DEFAULT_MAX_RECENT_BARS 12) — the box has ended.
-    const result = classifyStructure(boxSwings, { ...params, priorAmplitude: 0.28, currentIndex: 38 });
-    expect(result).toBeNull();
-  });
-
   it('returns null when an edge has fewer than touchMin touches', () => {
     const singleHigh = [
       swing(6, 97, 'low'),
@@ -679,46 +667,22 @@ describe('classifyStructure (swing geometry)', () => {
     ];
     expect(classifyStructure(singleHigh, params)).toBeNull(); // 1 high < touchMin 2
 
-    // 2 highs + 4 lows on flat edges is a box geometry, but a raised touchMin
-    // rejects it while the default 2 accepts it.
+    // A rising triangle with 2 flat highs + 4 rising lows: a raised touchMin
+    // rejects it (2 highs < 3) while the default 2 accepts it.
     const twoHighs = [
-      swing(6, 97, 'low'),
+      swing(6, 90, 'low'),
       swing(10, 113, 'high'),
-      swing(11, 97, 'low'),
-      swing(15, 113, 'high'),
-      swing(16, 97, 'low'),
-      swing(21, 97, 'low'),
+      swing(11, 94, 'low'),
+      swing(16, 98, 'low'),
+      swing(20, 113, 'high'),
+      swing(21, 102, 'low'),
     ];
-    expect(classifyStructure(twoHighs, { ...params, touchMin: 3 })).toBeNull();
-    expect(classifyStructure(twoHighs, { ...params, touchMin: 2 })).not.toBeNull();
+    expect(classifyStructure(twoHighs, { ...params, lastPrice: 109, currentIndex: 24, touchMin: 3 })).toBeNull();
+    expect(classifyStructure(twoHighs, { ...params, lastPrice: 109, currentIndex: 24, touchMin: 2 })).not.toBeNull();
   });
 
   it('returns null with fewer than 4 swings', () => {
     expect(classifyStructure([swing(6, 97, 'low'), swing(10, 113, 'high'), swing(16, 97, 'low')], params)).toBeNull();
-  });
-
-  it('excludes an old regime via backscan so it does not tilt the edges', () => {
-    // classifyStructure no longer windows internally — callers must backscan
-    // first. 13 swings: the oldest 5 are an earlier uptrend (highs 130/128), the
-    // newest 8 are the box. backscanWindow judges each candidate swing against
-    // the CURRENT box edges (NOT recomputed with the candidate), so the old
-    // regime highs break the extension and the returned segment excludes them.
-    const withOldRegime = [
-      swing(0, 90, 'low'),
-      swing(1, 130, 'high'),
-      swing(3, 95, 'low'),
-      swing(4, 128, 'high'),
-      swing(5, 98, 'low'),
-      ...boxSwings,
-    ];
-    const p = { ...params, priorAmplitude: 0.28, currentIndex: 26 };
-    const segment = backscanWindow(withOldRegime, [], p);
-    expect(segment).not.toBeNull();
-    expect(segment!.length).toBeLessThan(withOldRegime.length);
-    expect(segment!.every((sw) => sw.index >= 5)).toBe(true);
-    const result = classifyStructure(segment!, p);
-    expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
   });
 });
 
@@ -750,80 +714,6 @@ describe('backscanWindow (backward structure boundary)', () => {
     expect(result!.structure).toBe('triangle');
   });
 
-  it('terminates the extension at a low-side break (close beyond tolerance)', () => {
-    // A box (lows ~90, highs ~100) with an earlier crash low@6=85 that closes at
-    // 87 — below the box low edge by more than tolerance × width. The box starts
-    // after the crash.
-    const sequence = [
-      swing(6, 85, 'low', 87), // crash close pokes below the box low edge
-      swing(10, 90, 'low'),
-      swing(14, 100, 'high'),
-      swing(15, 91, 'low'),
-      swing(19, 100, 'high'),
-      swing(20, 90, 'low'),
-      swing(24, 100, 'high'),
-      swing(25, 90, 'low'),
-      swing(29, 100, 'high'),
-    ];
-    const p = { ...params, lastPrice: 95, currentIndex: 30 };
-    const segment = backscanWindow(sequence, [], p);
-    expect(segment).not.toBeNull();
-    expect(segment![0].index).toBe(10);
-    const result = classifyStructure(segment!, p);
-    expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
-  });
-
-  it('keeps a wick whose close recovers inside the tolerance (毛刺)', () => {
-    // An earlier low@6=89.5 pokes its PRICE below the box low edge (90) but
-    // closes back inside (90.5) — a wick, not a break. The extension must keep it
-    // and the box spans all the way back to index 6.
-    const sequence = [
-      swing(6, 89.5, 'low', 90.5), // wick: price pokes below, close recovers inside
-      swing(10, 90, 'low'),
-      swing(14, 100, 'high'),
-      swing(15, 91, 'low'),
-      swing(19, 100, 'high'),
-      swing(20, 90, 'low'),
-      swing(24, 100, 'high'),
-      swing(25, 90, 'low'),
-      swing(29, 100, 'high'),
-    ];
-    const p = { ...params, lastPrice: 95, currentIndex: 30 };
-    const segment = backscanWindow(sequence, [], p);
-    expect(segment).not.toBeNull();
-    expect(segment![0].index).toBe(6);
-    const result = classifyStructure(segment!, p);
-    expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
-  });
-
-  it('excludes an INTC-style spike high from the current box (regression)', () => {
-    // INTC 15m case: an earlier 103 spike far above the box's ~100 high edge. Its
-    // close (102) pokes through the flat high edge by more than tolerance × width
-    // → the box starts after it.
-    const sequence = [
-      swing(4, 88, 'low'),
-      swing(6, 103, 'high', 102), // 103 spike: close breaks the high edge
-      swing(10, 90, 'low'),
-      swing(14, 100, 'high'),
-      swing(15, 91, 'low'),
-      swing(19, 100, 'high'),
-      swing(20, 90, 'low'),
-      swing(24, 101, 'high'),
-      swing(25, 90, 'low'),
-      swing(29, 100, 'high'),
-    ];
-    const p = { ...params, priorAmplitude: 0.3, lastPrice: 95, currentIndex: 30 };
-    const segment = backscanWindow(sequence, [], p);
-    expect(segment).not.toBeNull();
-    expect(segment!.some((sw) => sw.index === 6)).toBe(false);
-    expect(segment![0].index).toBe(10);
-    const result = classifyStructure(segment!, p);
-    expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
-  });
-
   it('rejects a structure whose formation span is below the B gate', () => {
     // A tight 4-bar triangle: lows 100 → 102 → 104, highs 112 → 110 across span 4
     // — far below minSpanTriangle 13. The geometry is triangular but the formation
@@ -836,25 +726,17 @@ describe('backscanWindow (backward structure boundary)', () => {
       swing(14, 104, 'low'),
     ];
     expect(classifyStructure(shortTriangle, { ...params, lastPrice: 107, currentIndex: 20 })).toBeNull();
-    // A 3-bar box (span 3 < minSpanBox 5) is also rejected.
-    const shortBox = [
-      swing(10, 97, 'low'),
-      swing(11, 113, 'high'),
-      swing(12, 97, 'low'),
-      swing(13, 113, 'high'),
-    ];
-    expect(classifyStructure(shortBox, { ...params, priorAmplitude: 0.28 })).toBeNull();
   });
 });
 
 describe('probeStructure (probe-type N scan over real candles)', () => {
-  it('detects a horizontal low-volatility box through the full pipeline (AC2)', () => {
-    const result = probeStructure(boxCandles(), defaultStructureParams());
+  it('detects a flat calm band as a convergence through the full pipeline (AC2)', () => {
+    // convergenceCandles: 20 volatile bars then 8 flat calm bars → the volatility
+    // convergence surfaces through the full probe.
+    const result = probeStructure(convergenceCandles(), defaultStructureParams());
     expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
-    expect(result!.position).toBeCloseTo(0.5, 5);
-    expect(result!.score).toBeCloseTo(0.812, 2);
-    expect(result!.touchCount).toBe(8);
+    expect(result!.structure).toBe('convergence');
+    expect(result!.score).toBeGreaterThanOrEqual(0.7);
     expect(result!.qualified).toBe(true);
   });
 
@@ -875,22 +757,16 @@ describe('probeStructure (probe-type N scan over real candles)', () => {
     expect(probeStructure(uptrendCandles(), defaultStructureParams())).toBeNull();
   });
 
-  it('rejects the SPCX 降弹平带 pattern through the full pipeline (regression)', () => {
+  it('reads the SPCX 降弹平带 rebound band as a convergence (regression)', () => {
     // Real-data case: a drop to ~108 then a rebound into a flat ~115 band. The
-    // swing geometry (flat highs + rebounding lows) would misclassify as an 上升
-    // 三角 if the trend lines were measured at the last swing; anchoring at the
-    // current bar (index 99) crosses them and rejects.
+    // swing geometry (flat highs + rebounding lows) is NOT a valid 上升三角 — the
+    // rising low line crosses the flat high line at the current bar, so the
+    // triangle reading is rejected. The flat ~115 band is however a genuine
+    // convergence: calmer than the preceding rebound, so the band surfaces.
     const result = probeStructure(spcxCandles(), defaultStructureParams());
-    expect(result).toBeNull();
-  });
-
-  it('lets a small consolidation show up at a small candidate N', () => {
-    // The box consolidation is ~13 bars of horizontal range; probeStructure must
-    // resolve it (at N=2) rather than the large-N over-smoothing it.
-    const result = probeStructure(boxCandles(), defaultStructureParams());
     expect(result).not.toBeNull();
-    expect(result!.structure).toBe('box');
-    expect(result!.touchCount).toBeGreaterThanOrEqual(4);
+    expect(result!.structure).toBe('convergence');
+    expect(result!.score).toBeGreaterThanOrEqual(0.7);
   });
 
   it('returns null with fewer than 4 candles or a non-positive price', () => {
@@ -910,15 +786,17 @@ describe('Coin Scan structure defaults and types', () => {
   it('exposes the calibrated classification constants', () => {
     expect(DEFAULT_SLOPE_TOLERANCE).toBe(0.02);
     expect(DEFAULT_TOUCH_MIN).toBe(2);
-    expect(DEFAULT_MAX_BOX_RELATIVE_HEIGHT).toBe(0.8);
     expect(DEFAULT_MAX_STRUCTURE_SWINGS).toBe(8);
     expect(DEFAULT_MAX_RECENT_BARS).toBe(12);
     expect(DEFAULT_BOX_RANGE_TOLERANCE).toBe(0.05);
     expect(DEFAULT_MAX_FLAT_DRIFT_RATIO).toBe(1);
     expect(DEFAULT_MIN_SPAN_TRIANGLE).toBe(13);
-    expect(DEFAULT_MIN_SPAN_BOX).toBe(5);
     expect(DEFAULT_STRUCTURE_TOLERANCE).toBe(0.2);
     expect(DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO).toBe(1);
+    expect(DEFAULT_CONVERGENCE_MIN_RUN).toBe(5);
+    expect(DEFAULT_CONVERGENCE_FLAT_RATIO).toBe(1.2);
+    expect(DEFAULT_CONVERGENCE_RATIO).toBe(0.8);
+    expect(DEFAULT_CONVERGENCE_LENGTH_SCALE).toBe(16);
   });
 
   it('defaultStructureParams fills every threshold from the file-top defaults', () => {
@@ -926,13 +804,15 @@ describe('Coin Scan structure defaults and types', () => {
     const expected: StructureParams = {
       slopeTolerance: DEFAULT_SLOPE_TOLERANCE,
       touchMin: DEFAULT_TOUCH_MIN,
-      maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
       boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
       maxFlatDriftRatio: DEFAULT_MAX_FLAT_DRIFT_RATIO,
       minSpanTriangle: DEFAULT_MIN_SPAN_TRIANGLE,
-      minSpanBox: DEFAULT_MIN_SPAN_BOX,
       structureTolerance: DEFAULT_STRUCTURE_TOLERANCE,
       priceToleranceFloorRatio: DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO,
+      minRun: DEFAULT_CONVERGENCE_MIN_RUN,
+      flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
+      convergenceRatio: DEFAULT_CONVERGENCE_RATIO,
+      lengthScale: DEFAULT_CONVERGENCE_LENGTH_SCALE,
     };
     expect(params).toEqual(expected);
     expect(defaultStructureParams({ touchMin: 3 }).touchMin).toBe(3);

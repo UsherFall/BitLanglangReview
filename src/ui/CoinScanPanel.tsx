@@ -354,8 +354,8 @@ function structureLabel(structure: ConvergenceStructure | null): string {
   switch (structure) {
     case 'triangle':
       return '三角';
-    case 'box':
-      return '箱体';
+    case 'convergence':
+      return '收敛';
     default:
       return '—';
   }

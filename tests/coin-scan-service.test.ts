@@ -15,13 +15,12 @@ import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-d
 // in tests/coin-scan.test.ts.
 // ---------------------------------------------------------------------------
 
+// A volatility convergence: 20 volatile wide bars (the move) then 8 calm flat
+// bars (the convergence band). The volatile move dominates the window, so the
+// band is genuinely calmer than the coin's typical bar → a convergence.
 const boxBars: ReadonlyArray<readonly [number, number]> = [
-  [100, 200], [100, 200], [100, 200], [100, 200], [100, 200], [100, 200],
-  [97, 110], [102, 108], [102, 108], [102, 108],
-  [102, 113], [97, 110], [102, 108], [102, 108], [102, 108],
-  [102, 113], [97, 110], [102, 108], [102, 108], [102, 108],
-  [102, 113], [97, 110], [102, 108], [102, 108], [102, 108],
-  [102, 113], [102, 108], [102, 108], [102, 108],
+  ...Array.from({ length: 20 }, () => [50, 150] as const),
+  ...Array.from({ length: 8 }, () => [95, 105] as const),
 ];
 
 // Triangle fixture must be STILL converging at the newest bar (index 24, apex ≈
@@ -135,9 +134,11 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
       expect(row.qualifiedCount).toBe(5);
       expect(row.qualified).toBe(true);
       for (const timeframe of scanTimeframes) {
-        expect(row.structures[timeframe].structure).toBe('box');
+        expect(row.structures[timeframe].structure).toBe('convergence');
         expect(row.structures[timeframe].qualified).toBe(true);
-        expect(row.structures[timeframe].score).toBeCloseTo(0.812, 2);
+        // The convergence fixture has 20 volatile bars then 8 calm bars, so the
+        // band is far calmer than the move before it → score saturates to 1.0.
+        expect(row.structures[timeframe].score).toBe(1);
       }
     }
     expect(result.qualifiedCount).toBe(2);
@@ -218,15 +219,17 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     const service = serviceFrom(source);
     const result = await service.scanShrink({ ...params, topN: 3 });
 
-    // BTC converges on 5 timeframes (0.812) → first. SOL and ETH converge on 1
-    // timeframe; SOL's triangle (0.825) is stronger than ETH's box (0.812) →
-    // SOL second, ETH third. All orderings come from the service, not the UI.
-    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'SOL-USDT-SWAP', 'ETH-USDT-SWAP']);
+    // BTC converges on 5 timeframes (convergence 1.0) → first. SOL and ETH converge
+    // on 1 timeframe; ETH's convergence (score saturates to 1.0) outscores SOL's
+    // triangle (0.825) → ETH second, SOL third. All orderings come from the
+    // service, not the UI.
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP']);
     expect(result.scanned[0].qualifiedCount).toBe(5);
     expect(result.scanned[1].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[2].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[1].bestScore).toBeGreaterThan(result.scanned[2].bestScore);
-    expect(result.scanned[1].bestScore).toBeCloseTo(0.825, 2);
+    expect(result.scanned[1].bestScore).toBe(1);
+    expect(result.scanned[2].bestScore).toBeCloseTo(0.825, 2);
   });
 
   it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {
@@ -238,14 +241,17 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
   });
 
   it('applies the minScore gate: weaker structures are filtered out when the knob is raised', async () => {
-    const source = buildSource(allBoxPlan);
+    // BTC converges as a convergence (score 1.0), ETH as a triangle (0.825).
+    // minScore 0.8 admits both; 0.9 filters out the triangle.
+    const source = buildSource((instrument, timeframe) =>
+      instrument === 'BTC-USDT-SWAP' ? 'box' : timeframe === '5m' ? 'triangle' : 'uptrend',
+    );
     const service = serviceFrom(source);
-    // Box score ≈ 0.812. With minScore 0.8 the coins qualify; with 0.9 none do.
     const permissive = await service.scanShrink({ ...params, minScore: 0.8 });
     expect(permissive.qualifiedCount).toBe(2);
     const strict = await service.scanShrink({ ...params, minScore: 0.9 });
-    expect(strict.scanned).toEqual([]);
-    expect(strict.qualifiedCount).toBe(0);
+    expect(strict.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
+    expect(strict.qualifiedCount).toBe(1);
   });
 
   it('applies a past anchor to every timeframe and echoes it in params', async () => {
@@ -263,7 +269,7 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
   });
 
   it('reports a single coin with different structures on different timeframes (AC5)', async () => {
-    // BTC: 5m triangle + 1H box, nothing elsewhere. One row carries both
+    // BTC: 5m triangle + 1H convergence, nothing elsewhere. One row carries both
     // structures; convergedTimeframes lists them in scanTimeframes order.
     const source = buildSource((instrument, timeframe) => {
       if (instrument !== 'BTC-USDT-SWAP') return 'uptrend';
@@ -279,10 +285,12 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     expect(row.convergedTimeframes).toEqual(['5m', '1H']);
     expect(row.qualifiedCount).toBe(2);
     expect(row.structures['5m'].structure).toBe('triangle');
-    expect(row.structures['1H'].structure).toBe('box');
-    expect(row.structures['5m'].score).toBeGreaterThan(row.structures['1H'].score);
-    // bestScore = strongest score across the qualified timeframes (the triangle).
-    expect(row.bestScore).toBeCloseTo(0.825, 2);
+    expect(row.structures['1H'].structure).toBe('convergence');
+    // The convergence fixture (20 volatile + 8 calm bars) saturates to 1.0 and
+    // outscores the triangle.
+    expect(row.structures['1H'].score).toBeGreaterThan(row.structures['5m'].score);
+    // bestScore = strongest score across the qualified timeframes (the convergence).
+    expect(row.bestScore).toBe(1);
   });
 
   it('fills neutral zeros for timeframes without a convergent structure', async () => {
@@ -294,7 +302,7 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     const row = result.scanned[0];
     expect(row.convergedTimeframes).toEqual(['5m']);
     expect(row.qualifiedCount).toBe(1);
-    expect(row.structures['5m'].structure).toBe('box');
+    expect(row.structures['5m'].structure).toBe('convergence');
     for (const timeframe of ['15m', '1H', '4H', '1D'] as ReviewTimeframe[]) {
       expect(row.structures[timeframe]).toEqual({
         structure: null,

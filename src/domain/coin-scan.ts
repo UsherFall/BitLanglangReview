@@ -4,14 +4,16 @@ import type { ReviewTimeframe } from './trade';
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
 /**
- * Kind of convergence structure. A coin is 蓄力待突破 when its swing structure has
- * collapsed into one of these two shapes:
+ * Kind of convergence structure. A coin is 蓄力待突破 when its price has collapsed
+ * into one of these two shapes:
  * - `triangle`: converging trend lines (lower highs + higher lows, or one side
  *   flat). Direction is not locked — both bullish and bearish wedges qualify.
- * - `box`: a horizontal channel (both edges slope ≈ 0) whose height is narrow
- *   relative to the coin's own past volatility.
+ * - `convergence`: a flat, calm band — the price has settled into a narrow
+ *   horizontal range (bar-to-bar volatility meaningfully below both the coin's
+ *   own typical level and the move before it). Volatility-based (bar-driven),
+ *   not fractal-based.
  */
-export type ConvergenceStructure = 'triangle' | 'box';
+export type ConvergenceStructure = 'triangle' | 'convergence';
 
 /**
  * One timeframe's convergence verdict. `structure === null` means that timeframe
@@ -33,24 +35,24 @@ export type StructureResult = {
 
 /**
  * Classification thresholds for `classifyStructure` / `backscanWindow` /
- * `probeStructure`.
+ * `probeStructure` / `detectConvergence`.
  *
- * `slopeTolerance`, `touchMin`, `maxBoxRelativeHeight`, `boxRangeTolerance`,
- * `maxFlatDriftRatio`, `minSpanTriangle`, `minSpanBox` and `structureTolerance`
+ * `slopeTolerance`, `touchMin`, `boxRangeTolerance`, `maxFlatDriftRatio`,
+ * `minSpanTriangle`, `structureTolerance`, `priceToleranceFloorRatio` and the
+ * convergence knobs (`minRun`, `flatRatio`, `convergenceRatio`, `lengthScale`)
  * are the calibration knobs the design keeps internal (not exposed in the UI);
  * `lastPrice`, `priorAmplitude` and `currentIndex` are data that `probeStructure`
  * measures from the candles and injects so the pure classifier can stay
- * stateless. Tests may pass them directly; when absent the box low-volatility
- * gate is skipped rather than guessed (see `classifyStructure`).
+ * stateless.
  */
 export type StructureParams = {
   /**
-   * Horizontal-drift tolerance for a box edge: an edge counts as flat when the
+   * Horizontal-drift tolerance for an edge: an edge counts as flat when the
    * regression line's TOTAL drift across the edge's swing span, normalized by
    * the edge's mean price, is <= slopeTolerance. Total-drift (not per-bar slope)
-   * is used so a long, slowly-tilting structure is not mistaken for a box — the
-   * drift is scale-free (relative to the edge's own price), so one value works
-   * for any timeframe and volatility level.
+   * is used so a long, slowly-tilting structure is not mistaken for a flat
+   * channel. The drift is scale-free (relative to the edge's own price), so one
+   * value works for any timeframe and volatility level.
    */
   slopeTolerance: number;
   /**
@@ -59,13 +61,6 @@ export type StructureParams = {
    * cannot feed a linear regression, so lower values are clamped to 2.
    */
   touchMin: number;
-  /**
-   * Box low-volatility gate: (boxHeight / midPrice) / priorAmplitude must be
-   * strictly less than this. The box must be a *convergence from larger
-   * volatility* — an always-quiet coin (box width ≈ its own amplitude) has no
-   * 蓄力 tension and is rejected.
-   */
-  maxBoxRelativeHeight: number;
   /** Data: latest completed close, used for `position`. Filled by probeStructure. */
   lastPrice?: number;
   /**
@@ -112,10 +107,6 @@ export type StructureParams = {
    */
   minSpanTriangle?: number;
   /**
-   * Minimum formation span (in K bars) for a box. Absent → `DEFAULT_MIN_SPAN_BOX`.
-   */
-  minSpanBox?: number;
-  /**
    * Slope-break / edge-validity tolerance, unified with the backscan's
    * noise-spike judgement. A swing's bar CLOSE may poke through its edge trend
    * line by up to this fraction of the structure width at that bar (the distance
@@ -136,6 +127,33 @@ export type StructureParams = {
    * `priorAmplitude` is absent (direct unit-test calls fall back to `0.1*width`).
    */
   priceToleranceFloorRatio?: number;
+  /**
+   * Minimum length (in K bars) of the calm band for a volatility convergence.
+   * Absent → `DEFAULT_CONVERGENCE_MIN_RUN`.
+   */
+  minRun?: number;
+  /**
+   * Adaptive flatness for a convergence band: an edge (the band's low regression
+   * drift, or high regression drift) counts as flat when its total drift is <=
+   * `flatRatio × coinVol`, where `coinVol` is the coin's own typical per-bar
+   * volatility (median over the scanned window). Scaling the tolerance by the
+   * coin's own volatility keeps the flatness meaningful across coins and
+   * timeframes. Absent → `DEFAULT_CONVERGENCE_FLAT_RATIO`.
+   */
+  flatRatio?: number;
+  /**
+   * Convergence gate: a calm band qualifies as a convergence only when its own
+   * median per-bar volatility is < `convergenceRatio ×` the median volatility of
+   * the SAME-LENGTH segment immediately before it — i.e. the price is meaningfully
+   * calmer than the move that preceded it. Absent → `DEFAULT_CONVERGENCE_RATIO`.
+   */
+  convergenceRatio?: number;
+  /**
+   * Score length scale for a convergence band: the length contribution
+   * `clamp01(runLen / lengthScale)` reaches full marks at this many bars. Absent →
+   * `DEFAULT_CONVERGENCE_LENGTH_SCALE`.
+   */
+  lengthScale?: number;
 };
 
 /**
@@ -220,13 +238,6 @@ export const DEFAULT_SLOPE_TOLERANCE = 0.02;
 /** Minimum touch points per edge for a mature structure (both edges). */
 export const DEFAULT_TOUCH_MIN = 2;
 /**
- * Box low-volatility gate: (boxHeight / midPrice) / priorAmplitude must be
- * strictly < this. 0.8 = the box must be meaningfully narrower than the coin's
- * own average bar amplitude, so an always-quiet coin (ratio ≈ 1) is rejected —
- * it has no "从大波动收敛到小" 蓄力 tension.
- */
-export const DEFAULT_MAX_BOX_RELATIVE_HEIGHT = 0.8;
-/**
  * Score-normalization scale for the touch contribution (this many touches = full
  * marks). Kept at 8 for backward compatibility with the old fixed-window constant
  * name; the backscan no longer windows to this many swings.
@@ -260,10 +271,6 @@ export const DEFAULT_MAX_FLAT_DRIFT_RATIO = 1.0;
  */
 export const DEFAULT_MIN_SPAN_TRIANGLE = 13;
 /**
- * Minimum formation span (in K bars) for a box.
- */
-export const DEFAULT_MIN_SPAN_BOX = 5;
-/**
  * Slope-break tolerance: a swing's bar CLOSE may poke through its edge trend line
  * by up to this fraction of the structure width at that bar before it counts as a
  * genuine break (单根反向 + 容忍度). 0.2 = 20% of the local channel width. A closer
@@ -280,6 +287,51 @@ export const DEFAULT_STRUCTURE_TOLERANCE = 0.2;
  * rejecting real breaks. Calibrated on real data (MU 15m near-apex triangle).
  */
 export const DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO = 1.0;
+/**
+ * Minimum length (in K bars) of the calm band for a volatility convergence. A
+ * band needs enough bars to be a real 蓄力 phase, not a 2-bar blip. Calibrated
+ * on real data (8/12 MU 15m box spans 13+ bars).
+ */
+export const DEFAULT_CONVERGENCE_MIN_RUN = 5;
+/**
+ * Adaptive flatness for a convergence band: an edge (low/high regression drift)
+ * counts as flat when its total drift is <= this × the coin's own typical
+ * per-bar volatility (median over the scanned window). 1.2 = an edge may drift at
+ * most 1.2 typical bars before it reads as a trend rather than a flat band.
+ * Scaling by the coin's own volatility keeps flatness meaningful across coins and
+ * timeframes. Calibrated on real data: 8/12's flat box (drift 0.34% vs coinVol
+ * 0.39%) passes, 8/13's rising-low triangle (drift 0.7% vs coinVol 0.40%) fails.
+ */
+export const DEFAULT_CONVERGENCE_FLAT_RATIO = 1.2;
+/**
+ * Convergence gate: a calm band qualifies as a convergence only when its own
+ * median per-bar volatility is < this × the median volatility of the SAME-LENGTH
+ * segment immediately before it. 0.8 = the band must be at least 20% calmer than
+ * the move that preceded it; a sub-range with unchanged volatility (a flat stretch
+ * inside a larger rise) is not a convergence.
+ */
+export const DEFAULT_CONVERGENCE_RATIO = 0.8;
+/**
+ * Score length scale for a convergence band: the length contribution
+ * `clamp01(runLen / lengthScale)` reaches full marks at this many bars. 16 = a
+ * ~4-hour 15m band scores full length marks.
+ */
+export const DEFAULT_CONVERGENCE_LENGTH_SCALE = 16;
+/**
+ * Absolute calm gate: a band qualifies as a convergence only when its own median
+ * per-bar volatility is < this × the coin's typical per-bar volatility (window
+ * median). A band must be genuinely QUIET — below the coin's normal bar size —
+ * not merely calmer than an immediate spike. This rejects flat tails that ride
+ * on the coin's usual volatility (e.g. a triangle fixture's flat filler bars, or
+ * 8/13's tail whose bars are larger than the coin's own typical bar).
+ */
+export const DEFAULT_CONVERGENCE_ABSOLUTE_RATIO = 0.8;
+/**
+ * Score weight for a convergence band's ABSOLUTE calmness relative to the coin's
+ * own typical volatility. A band whose bars are much smaller than the coin's
+ * typical bar is a genuinely quiet convergence and scores higher.
+ */
+export const DEFAULT_CONVERGENCE_ABSOLUTE_WEIGHT = 0.5;
 
 /** Score normalization for the touch contribution: this many touches = full marks. */
 const TOUCH_SCALE = DEFAULT_MAX_STRUCTURE_SWINGS;
@@ -309,12 +361,46 @@ function minValue(values: readonly number[]): number {
   return min;
 }
 
+/** Median of an array; 0 for an empty array. Robust to spikes. */
+function median(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
 /** Mean per-bar relative amplitude ((high - low) / low) across the candles. */
 function meanAmplitude(candles: readonly Candlestick[]): number {
   if (candles.length === 0) return 0;
   let sum = 0;
   for (const candle of candles) sum += (candle.high - candle.low) / candle.low;
   return sum / candles.length;
+}
+
+/**
+ * Total drift of a price series across a segment: the absolute slope of the
+ * OLS regression (x = bar index) times the segment span, normalized by the mean
+ * price. Used by `detectConvergence`'s adaptive flatness gate.
+ */
+function edgeDrift(prices: readonly number[], startIndex: number): number {
+  const n = prices.length;
+  if (n < 2) return 0;
+  let sumX = 0;
+  let sumY = 0;
+  let sumXY = 0;
+  let sumXX = 0;
+  for (let i = 0; i < n; i += 1) {
+    const x = startIndex + i;
+    sumX += x;
+    sumY += prices[i];
+    sumXY += x * prices[i];
+    sumXX += x * x;
+  }
+  const denominator = n * sumXX - sumX * sumX;
+  if (denominator === 0) return 0;
+  const slope = (n * sumXY - sumX * sumY) / denominator;
+  const meanPrice = sumY / n;
+  if (meanPrice === 0) return 0;
+  return (Math.abs(slope) * (n - 1)) / meanPrice;
 }
 
 type RegPoint = { x: number; y: number };
@@ -449,7 +535,7 @@ export function backscanWindow(
 
   // Phase 1: base structure — the most recent suffix that classifies.
   let baseStart = -1;
-  let baseKind: 'triangle' | 'box' | null = null;
+  let baseKind: ConvergenceStructure | null = null;
   for (let i = swings.length - 1; i >= 0; i -= 1) {
     const segment = swings.slice(i);
     const result = classifyStructure(segment, { ...params, currentIndex });
@@ -617,52 +703,8 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
     if (swing.close < lineValue - structureTolerance * width) return null;
   }
 
-  // B gate: minimum formation span (in K bars) for the structure kind.
+  // B gate: minimum formation span (in K bars) for the triangle.
   const structureSpan = swings[swings.length - 1].index - swings[0].index;
-
-  // ---- box ----
-  if (highFlat && lowFlat) {
-    if (structureSpan < (params.minSpanBox ?? DEFAULT_MIN_SPAN_BOX)) return null;
-    // Range gate: a box edge must stay in a narrow band, not merely regress to
-    // ~0 slope.
-    const boxRangeTolerance = params.boxRangeTolerance ?? DEFAULT_BOX_RANGE_TOLERANCE;
-    const highRange = (maxValue(highPrices) - minValue(highPrices)) / meanHigh;
-    const lowRange = (maxValue(lowPrices) - minValue(lowPrices)) / meanLow;
-    if (highRange > boxRangeTolerance || lowRange > boxRangeTolerance) return null;
-    const boxHigh = meanHigh;
-    const boxLow = meanLow;
-    const boxHeight = boxHigh - boxLow;
-    if (boxHeight > 0) {
-      const midPrice = (boxHigh + boxLow) / 2;
-      const boxRelativeHeight = boxHeight / midPrice;
-      // priorAmplitude is optional data: probeStructure always supplies it, but
-      // a direct unit-test call without candle context must not be spuriously
-      // rejected — absent prior data, the low-volatility gate is skipped. `prior`
-      // is the outer const computed above for the drift-ratio gates.
-      const lowVolatility =
-        prior === undefined ||
-        !Number.isFinite(prior) ||
-        prior <= 0 ||
-        boxRelativeHeight / prior < params.maxBoxRelativeHeight;
-      if (lowVolatility) {
-        // 价格在结构内: a lastPrice beyond a small tolerance outside the box edges
-        // has already broken out / collapsed — no longer 蓄力待突破.
-        const boxTolerance = 0.1 * boxHeight;
-        if (lastPrice < boxLow - boxTolerance || lastPrice > boxHigh + boxTolerance) return null;
-        // 收缩比: how much the box has compressed against the coin's own past.
-        const compressionRatio =
-          prior !== undefined && Number.isFinite(prior) && prior > 0 ? boxRelativeHeight / prior : 1;
-        const compressionContribution = clamp01(1 - compressionRatio);
-        // 水平度: closer to perfectly flat (drift -> 0) = higher.
-        const flatnessContribution = clamp01(1 - Math.max(highDrift, lowDrift) / params.slopeTolerance);
-        // 触碰: more edge touches = more mature box.
-        const touchContribution = clamp01(touchCount / TOUCH_SCALE);
-        const score = (compressionContribution + flatnessContribution + touchContribution) / 3;
-        const position = clamp01((lastPrice - boxLow) / boxHeight);
-        return { structure: 'box', position, score, touchCount, qualified: true };
-      }
-    }
-  }
 
   // ---- triangle ----
   const symmetric = highFalling && lowRising;
@@ -710,18 +752,90 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
 }
 
 /**
- * Combination entry point: probes every candidate fractal N and returns the most
- * regular structure found (or null when no N produces one).
+ * Volatility-based convergence (收敛) detection. Unlike the fractal triangle scan,
+ * this walks the RAW BARS and looks for a calm, flat band: the price has settled
+ * into a narrow horizontal range whose bar-to-bar volatility is meaningfully below
+ * both the coin's own typical level AND the move that preceded the band.
  *
- * For each candidate N the full swing sequence is detected once, then
- * `backscanWindow` determines the continuous form segment ending at the current
- * bar, and `classifyStructure` scores that segment.
+ * Sliding scan over every possible band start; a band must pass:
+ * - **Flatness**: the band's low-edge and high-edge regression drifts are both
+ *   <= `flatRatio × coinVol`, where `coinVol` is the coin's own typical per-bar
+ *   volatility (median over the scanned window). A rising-low or falling-high band
+ *   is a triangle/trend, not a convergence. Scaling by the coin's own volatility
+ *   keeps the tolerance meaningful across coins and timeframes.
+ * - **Convergence**: the band's median per-bar volatility is < `convergenceRatio ×`
+ *   the median volatility of the SAME-LENGTH segment immediately before it — the
+ *   price is meaningfully calmer than the move before. Internal spikes are absorbed
+ *   by the median, so an isolated volatile bar inside the band does not disqualify.
+ * - **Containment**: the current price is inside the band's [min low, max high]
+ *   range (with a small tolerance) — a price that has broken out is no longer 蓄力.
  *
- * Selection priority (design): 触碰次数多 > 结构跨度长 > N 小 (防大 N 过度平滑). Each
- * coin/timeframe discovers its own structure scale — a small consolidation
- * resolves at a small N, a large one at a large N — without a pre-fixed window.
+ * The best band (longest + calmest) is scored: relative calm (vs the preceding
+ * segment) + absolute calm (vs the coin's own typical volatility) + length.
+ * `probeStructure` compares this against the fractal triangle and reports the
+ * higher-scoring structure, so a genuine triangle outranks a weak calm tail while
+ * a strong flat convergence outranks a triangle that merely swallowed an old move.
+ */
+export function detectConvergence(candles: readonly Candlestick[], params: StructureParams): StructureResult | null {
+  const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
+  const minRun = params.minRun ?? DEFAULT_CONVERGENCE_MIN_RUN;
+  if (sorted.length < minRun) return null;
+  if (sorted.some((candle) => candle.low <= 0)) return null;
+
+  const vol = sorted.map((candle) => (candle.high - candle.low) / candle.low);
+  const coinVol = median(vol);
+  const flatTol = (params.flatRatio ?? DEFAULT_CONVERGENCE_FLAT_RATIO) * coinVol;
+  const convergenceRatio = params.convergenceRatio ?? DEFAULT_CONVERGENCE_RATIO;
+  const lengthScale = params.lengthScale ?? DEFAULT_CONVERGENCE_LENGTH_SCALE;
+  const last = sorted.length - 1;
+  const lastPrice = sorted[last].close;
+
+  let best: { score: number; runLen: number; rangeLow: number; rangeHigh: number } | null = null;
+  for (let start = last - minRun + 1; start >= 0; start -= 1) {
+    const runLen = last - start + 1;
+    const band = sorted.slice(start, last + 1);
+    // ---- flatness: low/high edge regression drift within tolerance ----
+    if (Math.max(edgeDrift(band.map((c) => c.low), start), edgeDrift(band.map((c) => c.high), start)) > flatTol) continue;
+    // ---- convergence: calmer than the SAME-LENGTH preceding segment ----
+    const runMed = median(vol.slice(start, last + 1));
+    const preStart = start - runLen;
+    if (preStart < 0) continue;
+    const preMed = median(vol.slice(preStart, start));
+    if (runMed >= convergenceRatio * preMed) continue;
+    // ---- absolute calm: the band must be genuinely quieter than the coin's
+    // typical bar (window median), not merely calmer than an immediate spike ----
+    if (runMed >= DEFAULT_CONVERGENCE_ABSOLUTE_RATIO * coinVol) continue;
+    // ---- containment: current price inside the band's [min low, max high] ----
+    const rangeLow = Math.min(...band.map((c) => c.low));
+    const rangeHigh = Math.max(...band.map((c) => c.high));
+    const tolerance = 0.1 * (rangeHigh - rangeLow);
+    if (lastPrice < rangeLow - tolerance || lastPrice > rangeHigh + tolerance) continue;
+    // ---- score: relative calm + absolute calm + length ----
+    const relativeCalm = clamp01(1 - runMed / preMed);
+    const absoluteCalm = clamp01(1 - runMed / coinVol);
+    const lengthContribution = clamp01(runLen / lengthScale);
+    const score = clamp01(relativeCalm + DEFAULT_CONVERGENCE_ABSOLUTE_WEIGHT * absoluteCalm + 0.1 * lengthContribution);
+    if (best === null || score > best.score) {
+      best = { score, runLen, rangeLow, rangeHigh };
+    }
+  }
+  if (best === null) return null;
+  const rangeHeight = best.rangeHigh - best.rangeLow;
+  const position = clamp01(rangeHeight > 0 ? (lastPrice - best.rangeLow) / rangeHeight : 0.5);
+  return { structure: 'convergence', position, score: best.score, touchCount: 0, qualified: true };
+}
+
+/**
+ * Combination entry point: probes the fractal triangle scan AND the volatility
+ * convergence detector, returning the higher-scoring structure.
  *
- * `priorAmplitude`, `lastPrice` and `currentIndex` are measured here from the
+ * Triangle scan: for each candidate fractal N, `detectSwings` → `backscanWindow`
+ * → `classifyStructure`. `detectConvergence` then scans the raw bars for a calm,
+ * flat band. The higher-scoring structure wins, so a genuine triangle outranks a
+ * weak calm tail while a strong flat convergence outranks a triangle that merely
+ * swallowed an old move.
+ *
+ * `lastPrice`, `priorAmplitude` and `currentIndex` are measured here from the
  * completed candles and injected into `backscanWindow`/`classifyStructure`.
  */
 export function probeStructure(candles: readonly Candlestick[], params: StructureParams): StructureResult | null {
@@ -740,20 +854,32 @@ export function probeStructure(candles: readonly Candlestick[], params: Structur
     if (swings.length < 4) continue;
     const segment = backscanWindow(swings, sorted, { ...params, lastPrice, priorAmplitude, currentIndex });
     if (!segment) continue;
-    const result = classifyStructure(segment, { ...params, lastPrice, priorAmplitude, currentIndex });
-    if (!result) continue;
     const span = segment[segment.length - 1].index - segment[0].index;
+    const result = classifyStructure(segment, {
+      ...params,
+      lastPrice,
+      priorAmplitude,
+      currentIndex,
+    });
+    if (!result) continue;
     if (best === null || isBetterStructure(result, span, n, best.result, best.span, best.n)) {
       best = { result, span, n };
     }
   }
-  return best === null ? null : best.result;
+  const bestTriangle = best === null ? null : best.result;
+  // Volatility convergence (bar-based): the higher-scoring structure wins.
+  const convergence = detectConvergence(sorted, params);
+  if (convergence !== null && (bestTriangle === null || convergence.score > bestTriangle.score)) {
+    return convergence;
+  }
+  return bestTriangle;
 }
 
 /**
- * Structure-regularity comparison for `probeStructure`. Priority: 触碰次数多 >
- * 结构跨度长 > N 小 (防大 N 过度平滑). All candidates here already have a
- * structure, so the "有结构" level of the priority is implicit.
+ * Structure-regularity comparison for `probeStructure`. Priority: 箱体 > 三角
+ * (classifyStructure is triangle-only). All candidates here already have a
+ * structure, so the "有结构" level of the priority is implicit. The volatility
+ * convergence is compared separately in `probeStructure` by score.
  */
 function isBetterStructure(
   a: StructureResult,
@@ -777,13 +903,15 @@ export function defaultStructureParams(overrides?: Partial<StructureParams>): St
   return {
     slopeTolerance: DEFAULT_SLOPE_TOLERANCE,
     touchMin: DEFAULT_TOUCH_MIN,
-    maxBoxRelativeHeight: DEFAULT_MAX_BOX_RELATIVE_HEIGHT,
     boxRangeTolerance: DEFAULT_BOX_RANGE_TOLERANCE,
     maxFlatDriftRatio: DEFAULT_MAX_FLAT_DRIFT_RATIO,
     minSpanTriangle: DEFAULT_MIN_SPAN_TRIANGLE,
-    minSpanBox: DEFAULT_MIN_SPAN_BOX,
     structureTolerance: DEFAULT_STRUCTURE_TOLERANCE,
     priceToleranceFloorRatio: DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO,
+    minRun: DEFAULT_CONVERGENCE_MIN_RUN,
+    flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
+    convergenceRatio: DEFAULT_CONVERGENCE_RATIO,
+    lengthScale: DEFAULT_CONVERGENCE_LENGTH_SCALE,
     ...overrides,
   };
 }

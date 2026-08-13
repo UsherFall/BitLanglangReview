@@ -696,3 +696,42 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - 箱体另案讨论：用户要「窄箱体/收敛到低波动」，8/12 07:15 15m 箱体受触碰不足 + 低波动门双重阻碍。
+
+---
+
+## Session 15: 窄箱体 → 波动率「收敛」重构
+
+**Date**: 2026-08-13
+**Task**: narrow-box-redesign
+**Branch**: `master`
+
+### Summary
+
+把 fractal 触碰式「箱体」检测整体换成**波动率驱动的「收敛」检测**（detectConvergence，纯 bar 滑动扫描）。4 道门：自适应平边（漂移≤1.2×coinVol，跨币种缩放）、相对前段收敛（中位数，允许尖刺）、绝对安静（<0.8×coinVol，拒平尾巴）、动态范围（min/max + 当前价在内）。结构类型 box→convergence，UI「箱体」→「收敛」，删 fractal 箱体分支。probeStructure 收敛与三角按分数比大小。真实数据：8/12 07:15-09:45 = 收敛（0.97-0.99，原三角 0.855），10:30 突破后收敛消失，8/13 00:30 = 三角 0.812 保留。196/196 测试 + tsc 干净。
+
+### Main Changes
+
+- `src/domain/coin-scan.ts`: 新增 detectConvergence；删 box 分支/boxConvergenceData/box 参数常量；
+  加收敛参数（minRun/flatRatio/convergenceRatio/lengthScale）；类型 box→convergence；
+  probeStructure 收敛与三角按分数比大小。
+- `src/ui/CoinScanPanel.tsx`: 「箱体」→「收敛」。
+- 测试: coin-scan/coin-scan-service 更新（删 box fixture 测试，加收敛回归测试，boxBars→收敛 fixture）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (见 git log) |
+
+### Testing
+
+- [OK] 196/196 tests (vitest) + tsc --noEmit
+- [OK] 真实数据 8/12 07:15/08:00/09:45 = 收敛；8/13 00:30 = 三角；8/12 10:30+ 突破后消失
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无
