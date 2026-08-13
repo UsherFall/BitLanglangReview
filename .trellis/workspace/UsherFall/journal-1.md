@@ -735,3 +735,34 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - 无
+
+---
+
+## Session 15b: 收敛分数饱和修复 + 短带过度检测排查
+
+**Date**: 2026-08-13
+**Task**: narrow-box-redesign (follow-up)
+**Branch**: `master`
+
+### Summary
+
+用户反馈当前扫描「好多是收敛、很多强度分是 1」。排查 top30：多数是真收敛（市场安静，ETH/XRP/SPCX 等 0.1-0.4% 窄幅），但两个真问题：
+1. **分数饱和**：原 `relCalm + 0.5×absCalm + 0.1×length` 权重和 1.6，大量收敛 clamp 到 1.0 失去区分。
+2. **短带过度检测**：5-8 根（75-120 分钟）短暂横盘 score≥0.7 入选且时间敏感（NBIS/MU 扫到 1.0 但 15 分钟后价格一动就消失）。
+
+修复：分数改 `0.85×lengthNorm + 0.15×calm`（权重和=1，不饱和）。短带（长度 <16 根按比例）天然 <0.7 不入选。验证：8/12 07:15/09:45 收敛 0.88-0.93 仍压过三角 0.855，8/13 三角保留，当前扫描 0 个分数=1.0，收敛数 16→11。197/197 测试 + tsc 干净。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c4aed63` | fix(scan): convergence score saturates to 1.0; length-weight it |
+
+### Status
+
+[OK] 已 commit。待办：后续跑 dev server 实际看扫描结果、评估剩余 11 个收敛是否可接受。
+
+### Next Steps
+
+- 跑 dev server 实际验证 UI 扫描结果
+- 用户决定剩余收敛数是否可接受 / 是否再收紧
