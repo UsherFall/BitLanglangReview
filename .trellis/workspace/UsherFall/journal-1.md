@@ -660,3 +660,39 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - None - task complete
+
+---
+
+## Session 14: 修复三角近-apex 价格容差塌陷
+
+**Date**: 2026-08-13
+**Task**: fix-triangle-price-tolerance
+**Branch**: `master`
+
+### Summary
+
+三角「价格在结构内」门容差 `0.1×width` 在 width→0（近 apex）时塌成 ~0，把接近完全收敛的三角误判为「已走完」。加地板 `max(0.1×width, priceToleranceFloorRatio×priorAmplitude×lastPrice)`，默认 ratio=1.0（一根平均 K 的毛刺余量）。真实复现：Binance MUUSDT 15m 8/13 00:30 +08 之前 probeStructure=null（三角候选被 price-inside 门拒：width≈0.02、价 2.56 破下轨、旧容差 0.002），修复后 = 三角 0.812。8/12 07:15 15m 也从 null 变三角 0.855（该结构本就是上升三角，用户想看的 8/12 箱体属另案讨论）。202 tests 全过，新增 3 个回归测试。
+
+### Main Changes
+
+- `src/domain/coin-scan.ts`: StructureParams 加 `priceToleranceFloorRatio`；新常量 `DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO=1.0`；三角分支容差加地板；defaultStructureParams 填默认。
+- `tests/coin-scan.test.ts`: defaults 精确匹配 + 常量断言补新字段；新增近-apex floor 放行 / 真突破仍拒 / 无 prior 退回旧行为 三用例。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| (见 git log) |
+
+### Testing
+
+- [OK] 202/202 tests (vitest)
+- [OK] 真实数据验证 8/13 00:30 15m = 三角 0.812（原 null）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 箱体另案讨论：用户要「窄箱体/收敛到低波动」，8/12 07:15 15m 箱体受触碰不足 + 低波动门双重阻碍。

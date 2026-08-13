@@ -124,6 +124,18 @@ export type StructureParams = {
    * `DEFAULT_STRUCTURE_TOLERANCE`.
    */
   structureTolerance?: number;
+  /**
+   * Price-inside gate floor for a triangle: the current-price poke tolerance is
+   * `max(0.1 * widthAt(currentBar), floorRatio * priorAmplitude * lastPrice)`.
+   * Near the apex the two trend lines converge and `0.1 * width` collapses to
+   * ~0, so a still-forming triangle is rejected on any 1-2 bar wiggle. The floor
+   * anchors the tolerance to the coin's own per-bar noise (one average bar's
+   * worth of 毛刺 room) so a nearly-converged triangle keeps its 蓄力 verdict
+   * while a genuine breakout (price moves several bars past the apex) is still
+   * rejected. Absent → `DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO`. Skipped when
+   * `priorAmplitude` is absent (direct unit-test calls fall back to `0.1*width`).
+   */
+  priceToleranceFloorRatio?: number;
 };
 
 /**
@@ -259,6 +271,15 @@ export const DEFAULT_MIN_SPAN_BOX = 5;
  * it is a true break and terminates the backscan. Calibrated on real data.
  */
 export const DEFAULT_STRUCTURE_TOLERANCE = 0.2;
+/**
+ * Price-inside gate floor for a triangle: `priceTolerance = max(0.1 * width,
+ * floorRatio * priorAmplitude * lastPrice)`. 1.0 = the current price may sit up
+ * to one average bar (the coin's own per-bar amplitude) outside a nearly-
+ * converged apex before the structure counts as broken. A genuine breakout moves
+ * price several bars past the apex, so the floor keeps 蓄力 verdicts while still
+ * rejecting real breaks. Calibrated on real data (MU 15m near-apex triangle).
+ */
+export const DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO = 1.0;
 
 /** Score normalization for the touch contribution: this many touches = full marks. */
 const TOUCH_SCALE = DEFAULT_MAX_STRUCTURE_SWINGS;
@@ -665,8 +686,17 @@ export function classifyStructure(swings: readonly SwingPoint[], params: Structu
       const upper = highLine.slope * currentIndex + highLine.intercept;
       const lower = lowLine.slope * currentIndex + lowLine.intercept;
       const width = upper - lower;
-      // 价格在结构内: the extrapolated lines bound the current price.
-      const priceTolerance = 0.1 * width;
+      // 价格在结构内: the extrapolated lines bound the current price. Near the
+      // apex the two lines converge and 0.1*width collapses to ~0, so the
+      // tolerance is floored at the coin's own per-bar amplitude — one average
+      // bar's worth of 毛刺 room so a nearly-converged triangle keeps its 蓄力
+      // verdict (a genuine breakout moves price several bars past the apex and is
+      // still rejected). Absent prior data (direct unit-test call), the old
+      // width-only tolerance applies.
+      const priceTolerance = Math.max(
+        0.1 * width,
+        driftRatioAvailable ? (params.priceToleranceFloorRatio ?? DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO) * prior * lastPrice : 0,
+      );
       if (lastPrice < lower - priceTolerance || lastPrice > upper + priceTolerance) return null;
       const convergenceContribution = clamp01((widthStart - widthCurrent) / widthStart);
       const touchContribution = clamp01(touchCount / TOUCH_SCALE);
@@ -753,6 +783,7 @@ export function defaultStructureParams(overrides?: Partial<StructureParams>): St
     minSpanTriangle: DEFAULT_MIN_SPAN_TRIANGLE,
     minSpanBox: DEFAULT_MIN_SPAN_BOX,
     structureTolerance: DEFAULT_STRUCTURE_TOLERANCE,
+    priceToleranceFloorRatio: DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO,
     ...overrides,
   };
 }

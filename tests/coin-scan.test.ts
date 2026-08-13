@@ -10,6 +10,7 @@ import {
   DEFAULT_MAX_STRUCTURE_SWINGS,
   DEFAULT_MIN_SPAN_BOX,
   DEFAULT_MIN_SPAN_TRIANGLE,
+  DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO,
   DEFAULT_SLOPE_TOLERANCE,
   DEFAULT_STRUCTURE_TOLERANCE,
   DEFAULT_TOUCH_MIN,
@@ -500,6 +501,34 @@ describe('classifyStructure (swing geometry)', () => {
     expect(result!.qualified).toBe(true);
   });
 
+  it('passes a near-apex triangle whose price sits within one bar of the lower edge (floor regression)', () => {
+    // convergingTriangleSwings (apex ≈ index 29) anchored at currentIndex 28 keeps
+    // widthCurrent ≈ 2.0 > 0. The current price sits BELOW the lower edge by 2.2 —
+    // far beyond the old tolerance 0.1 × width (0.2), so the old price-inside gate
+    // rejected this still-forming triangle as "already-resolved". The tolerance
+    // floor (1.0 × priorAmplitude × lastPrice) keeps the 蓄力 verdict: a genuine
+    // MU-style near-apex triangle must not die on a sub-bar wiggle.
+    const p = { ...params, lastPrice: 103.4, priorAmplitude: 0.05, currentIndex: 28 };
+    const result = classifyStructure(convergingTriangleSwings, p);
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('triangle');
+  });
+
+  it('still rejects a near-apex triangle when the price is beyond the tolerance floor (real break)', () => {
+    // Same geometry, but the price is 7.6 below the lower edge — more than one
+    // average bar (floor = 0.05 × 98 = 4.9). A genuine breakdown stays rejected.
+    const p = { ...params, lastPrice: 98, priorAmplitude: 0.05, currentIndex: 28 };
+    expect(classifyStructure(convergingTriangleSwings, p)).toBeNull();
+  });
+
+  it('keeps the old width-only tolerance when priorAmplitude is absent', () => {
+    // No candle context (priorAmplitude absent) → the floor is skipped → the same
+    // price the floored tolerance would accept is rejected by 0.1 × width. Backward
+    // compatible with direct unit-test calls that carry no candle data.
+    const p = { ...params, lastPrice: 103.4, currentIndex: 28 };
+    expect(classifyStructure(convergingTriangleSwings, p)).toBeNull();
+  });
+
   it('boundary: a flat edge spread of exactly 5% passes, just above 5% is rejected', () => {
     // Identical falling triangles except the flat low edge's spread: the first has
     // lows [97.5, 102.5, 102.5, 97.5] (symmetric around 100 → regression slope 0,
@@ -889,6 +918,7 @@ describe('Coin Scan structure defaults and types', () => {
     expect(DEFAULT_MIN_SPAN_TRIANGLE).toBe(13);
     expect(DEFAULT_MIN_SPAN_BOX).toBe(5);
     expect(DEFAULT_STRUCTURE_TOLERANCE).toBe(0.2);
+    expect(DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO).toBe(1);
   });
 
   it('defaultStructureParams fills every threshold from the file-top defaults', () => {
@@ -902,6 +932,7 @@ describe('Coin Scan structure defaults and types', () => {
       minSpanTriangle: DEFAULT_MIN_SPAN_TRIANGLE,
       minSpanBox: DEFAULT_MIN_SPAN_BOX,
       structureTolerance: DEFAULT_STRUCTURE_TOLERANCE,
+      priceToleranceFloorRatio: DEFAULT_PRICE_TOLERANCE_FLOOR_RATIO,
     };
     expect(params).toEqual(expected);
     expect(defaultStructureParams({ touchMin: 3 }).touchMin).toBe(3);
