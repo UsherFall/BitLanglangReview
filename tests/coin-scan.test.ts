@@ -75,13 +75,15 @@ function boxCandles(): Candlestick[] {
 }
 
 /**
- * A volatility convergence: 20 volatile wide bars (the move) followed by 8 calm,
- * flat bars (the convergence band). The volatile move dominates the window, so
- * the band is genuinely calmer than the coin's typical bar — a real 收敛.
+ * A volatility convergence: 16 bars trending DOWN from [92,98] to [83,89] (a real
+ * move — distinct prices ~6% per bar, ending ~20% below the band, so any band
+ * spanning it fails the flatness gate), followed by 16 flat calm bars [99.5,
+ * 100.5] (~1% vol). The 16-bar band is long enough to be a real 蓄力 (length
+ * score full marks) and genuinely calmer than the move before it → a real 收敛.
  */
 function convergenceCandles(): Candlestick[] {
-  const leading: Array<readonly [number, number]> = Array.from({ length: 20 }, () => [50, 150]);
-  const band: Array<readonly [number, number]> = Array.from({ length: 8 }, () => [95, 105]);
+  const leading: Array<readonly [number, number]> = Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const);
+  const band: Array<readonly [number, number]> = Array.from({ length: 16 }, () => [99.5, 100.5] as const);
   return candles([...leading, ...band]);
 }
 
@@ -294,6 +296,19 @@ describe('classifyStructure (swing geometry)', () => {
     // 10 calm bars, then 10 equally calm bars → the recent band is not calmer.
     const calm: Array<readonly [number, number]> = Array.from({ length: 20 }, () => [49, 51]);
     expect(detectConvergence(candles(calm), params)).toBeNull();
+  });
+
+  it('scores a short band below minScore (length-weighted maturity)', () => {
+    // A short 8-bar calm band is not a strong 蓄力: the length-weighted score
+    // keeps it below the default minScore (0.7) even when the band is calm.
+    const shortBandCandles = candles([
+      ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
+      ...Array.from({ length: 8 }, () => [99.5, 100.5] as const),
+    ]);
+    const result = detectConvergence(shortBandCandles, params);
+    expect(result).not.toBeNull();
+    expect(result!.structure).toBe('convergence');
+    expect(result!.score).toBeLessThan(0.7);
   });
 
   it('rejects a rising-low band (a triangle, not a convergence)', () => {

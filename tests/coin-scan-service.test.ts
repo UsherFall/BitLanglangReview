@@ -15,12 +15,13 @@ import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-d
 // in tests/coin-scan.test.ts.
 // ---------------------------------------------------------------------------
 
-// A volatility convergence: 20 volatile wide bars (the move) then 8 calm flat
-// bars (the convergence band). The volatile move dominates the window, so the
-// band is genuinely calmer than the coin's typical bar → a convergence.
+// A volatility convergence: 16 bars trending DOWN from [92,98] to [83,89] (a
+// real move, ~20% below the band) then 16 calm flat bars [99.5,100.5]. The
+// 16-bar band is long enough to score above minScore and genuinely calmer than
+// the move before it → a convergence.
 const boxBars: ReadonlyArray<readonly [number, number]> = [
-  ...Array.from({ length: 20 }, () => [50, 150] as const),
-  ...Array.from({ length: 8 }, () => [95, 105] as const),
+  ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
+  ...Array.from({ length: 16 }, () => [99.5, 100.5] as const),
 ];
 
 // Triangle fixture must be STILL converging at the newest bar (index 24, apex ≈
@@ -136,9 +137,9 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
       for (const timeframe of scanTimeframes) {
         expect(row.structures[timeframe].structure).toBe('convergence');
         expect(row.structures[timeframe].qualified).toBe(true);
-        // The convergence fixture has 20 volatile bars then 8 calm bars, so the
-        // band is far calmer than the move before it → score saturates to 1.0.
-        expect(row.structures[timeframe].score).toBe(1);
+        // The convergence fixture has 20 volatile bars then 16 calm bars: a long,
+        // genuinely calm band → the length-weighted convergence score is ~0.99.
+        expect(row.structures[timeframe].score).toBeCloseTo(0.977, 3);
       }
     }
     expect(result.qualifiedCount).toBe(2);
@@ -219,16 +220,16 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     const service = serviceFrom(source);
     const result = await service.scanShrink({ ...params, topN: 3 });
 
-    // BTC converges on 5 timeframes (convergence 1.0) → first. SOL and ETH converge
-    // on 1 timeframe; ETH's convergence (score saturates to 1.0) outscores SOL's
-    // triangle (0.825) → ETH second, SOL third. All orderings come from the
-    // service, not the UI.
+    // BTC converges on 5 timeframes (convergence ~0.99) → first. SOL and ETH
+    // converge on 1 timeframe; ETH's convergence (~0.99) outscores SOL's triangle
+    // (0.825) → ETH second, SOL third. All orderings come from the service, not
+    // the UI.
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP']);
     expect(result.scanned[0].qualifiedCount).toBe(5);
     expect(result.scanned[1].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[2].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[1].bestScore).toBeGreaterThan(result.scanned[2].bestScore);
-    expect(result.scanned[1].bestScore).toBe(1);
+    expect(result.scanned[1].bestScore).toBeCloseTo(0.977, 3);
     expect(result.scanned[2].bestScore).toBeCloseTo(0.825, 2);
   });
 
@@ -286,11 +287,10 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     expect(row.qualifiedCount).toBe(2);
     expect(row.structures['5m'].structure).toBe('triangle');
     expect(row.structures['1H'].structure).toBe('convergence');
-    // The convergence fixture (20 volatile + 8 calm bars) saturates to 1.0 and
-    // outscores the triangle.
+    // The convergence fixture (20 volatile + 16 calm bars) outscores the triangle.
     expect(row.structures['1H'].score).toBeGreaterThan(row.structures['5m'].score);
     // bestScore = strongest score across the qualified timeframes (the convergence).
-    expect(row.bestScore).toBe(1);
+    expect(row.bestScore).toBeCloseTo(0.977, 3);
   });
 
   it('fills neutral zeros for timeframes without a convergent structure', async () => {

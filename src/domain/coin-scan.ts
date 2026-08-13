@@ -326,13 +326,6 @@ export const DEFAULT_CONVERGENCE_LENGTH_SCALE = 16;
  * 8/13's tail whose bars are larger than the coin's own typical bar).
  */
 export const DEFAULT_CONVERGENCE_ABSOLUTE_RATIO = 0.8;
-/**
- * Score weight for a convergence band's ABSOLUTE calmness relative to the coin's
- * own typical volatility. A band whose bars are much smaller than the coin's
- * typical bar is a genuinely quiet convergence and scores higher.
- */
-export const DEFAULT_CONVERGENCE_ABSOLUTE_WEIGHT = 0.5;
-
 /** Score normalization for the touch contribution: this many touches = full marks. */
 const TOUCH_SCALE = DEFAULT_MAX_STRUCTURE_SWINGS;
 
@@ -810,11 +803,17 @@ export function detectConvergence(candles: readonly Candlestick[], params: Struc
     const rangeHigh = Math.max(...band.map((c) => c.high));
     const tolerance = 0.1 * (rangeHigh - rangeLow);
     if (lastPrice < rangeLow - tolerance || lastPrice > rangeHigh + tolerance) continue;
-    // ---- score: relative calm + absolute calm + length ----
+    // ---- score: length-weighted maturity + calm. Length dominates — a long
+    // quiet band is a strong 蓄力 while a 5-8 bar pause is not, so short bands
+    // stay below the default minScore (0.7) while 8/12-style long convergences
+    // score high. The weights sum to 1 (length 0.85 + calm 0.15), so the score
+    // does not saturate to 1.0 for every convergence (previous formula summed
+    // weights > 1 and clamped most convergences to 1.0).
     const relativeCalm = clamp01(1 - runMed / preMed);
     const absoluteCalm = clamp01(1 - runMed / coinVol);
     const lengthContribution = clamp01(runLen / lengthScale);
-    const score = clamp01(relativeCalm + DEFAULT_CONVERGENCE_ABSOLUTE_WEIGHT * absoluteCalm + 0.1 * lengthContribution);
+    const calm = (relativeCalm + absoluteCalm) / 2;
+    const score = clamp01(0.85 * lengthContribution + 0.15 * calm);
     if (best === null || score > best.score) {
       best = { score, runLen, rangeLow, rangeHigh };
     }
