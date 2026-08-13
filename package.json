@@ -17,6 +17,7 @@
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",
+    "undici": "^7.29.0",
     "vite": "latest",
     "xlsx": "latest"
   },

@@ -1,4 +1,4 @@
-type FetchJson = (url: string) => Promise<unknown>;
+import { defaultFetchJson, type FetchJson } from './http';
 
 type OkxInstrumentsResponse = {
   data?: Array<{ instId?: string }>;
@@ -12,14 +12,4 @@ export class OkxInstrumentService {
     return [...new Set((response.data ?? []).map((item) => item.instId).filter((instId): instId is string => Boolean(instId)))]
       .sort();
   }
-}
-
-async function defaultFetchJson(url: string): Promise<unknown> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
-  const response = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timeout));
-  if (!response.ok) {
-    throw new Error(`OKX request failed: ${response.status}`);
-  }
-  return response.json();
 }
