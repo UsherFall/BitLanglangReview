@@ -1,9 +1,8 @@
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { CandlestickStore } from './candlestick-store';
+import { defaultFetchJson, type FetchJson } from './http';
 import type { CandleRequest, CandleSource } from './market-data';
-
-type FetchJson = (url: string) => Promise<unknown>;
 
 type Request = CandleRequest;
 
@@ -19,7 +18,7 @@ export class CandlestickService implements CandleSource {
 
   async getCandlesticks(request: Request): Promise<Candlestick[]> {
     const cached = this.listCached(request);
-    if (cached.length >= request.limit) {
+    if (cached.length >= request.limit && isCacheFresh(request, cached)) {
       return cached;
     }
 
@@ -47,6 +46,20 @@ export class CandlestickService implements CandleSource {
       : this.store.listAfter({ instrument: request.instrument, timeframe: request.timeframe, after: request.anchor, limit: request.limit });
     return contiguousCandles(cached, request.anchor, request.timeframe, request.direction);
   }
+}
+
+/**
+ * Same cache-freshness gate as `BinanceCandleSource`: a full cache is reused
+ * only when it covers the moment being read. A "current" read whose newest bar
+ * lags the anchor by more than two steps is stale and must refresh; a historical
+ * anchor (fixed point in the past) is always fresh. `cached` is ascending.
+ */
+function isCacheFresh(request: Request, cached: Candlestick[]): boolean {
+  if (request.direction !== 'earlier') return true;
+  const step = timeframeMs(request.timeframe);
+  if (request.anchor <= Date.now() - step * 2) return true; // historical anchor
+  const newest = cached[cached.length - 1]?.timestamp ?? 0;
+  return request.anchor - newest <= step * 2;
 }
 
 function contiguousCandles(candles: Candlestick[], anchor: number, timeframe: ReviewTimeframe, direction: Request['direction']): Candlestick[] {
@@ -86,16 +99,6 @@ function toCandlestick(instrument: string, timeframe: ReviewTimeframe, row: stri
     close: Number(row[4]),
     volume: Number(row[5] ?? 0),
   };
-}
-
-async function defaultFetchJson(url: string): Promise<unknown> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
-  const response = await fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timeout));
-  if (!response.ok) {
-    throw new Error(`OKX request failed: ${response.status}`);
-  }
-  return response.json();
 }
 
 export function timeframeMs(timeframe: ReviewTimeframe): number {

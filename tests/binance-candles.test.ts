@@ -37,6 +37,31 @@ describe('BinanceCandleSource', () => {
     expect(url).toContain('endTime=');
   });
 
+  it('refreshes a stale cache when scanning "now" but reuses a fresh one', async () => {
+    const store = new CandlestickStore(':memory:');
+    const step = STEP;
+    const nowBoundary = Math.floor(Date.now() / step) * step;
+    // Seed the store with OLD bars whose newest is 3 steps behind the current
+    // 5m boundary — a "now" scan must NOT reuse them.
+    store.save([
+      { instrument: 'XAUUSDT', timeframe: '5m' as const, timestamp: nowBoundary - 4 * step, open: 1, high: 2, low: 0.5, close: 1, volume: 10 },
+      { instrument: 'XAUUSDT', timeframe: '5m' as const, timestamp: nowBoundary - 3 * step, open: 1, high: 2, low: 0.5, close: 1, volume: 10 },
+    ]);
+    const fetchJson = vi.fn(async () => [
+      kline(nowBoundary - step, '29480', '20'),
+      kline(nowBoundary - 2 * step, '29350', '12'),
+    ]);
+    const source = new BinanceCandleSource(store, fetchJson);
+
+    await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor: nowBoundary, direction: 'earlier', limit: 2 });
+    // The cache was stale (newest bar 3 steps old) → a fresh fetch happened.
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+
+    // The refetch saved current bars; a second "now" scan reuses them.
+    await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor: nowBoundary, direction: 'earlier', limit: 2 });
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
   it('drops the still-forming bar (openTime + step > anchor)', async () => {
     const store = new CandlestickStore(':memory:');
     const fetchJson = vi.fn(async (_url: string) => [

@@ -15,20 +15,12 @@ import type { CandleSource, TickerSource } from './market-data';
 const SCAN_CONCURRENCY = 10;
 
 /**
- * Probe-type candle window per timeframe — no fixed 13 bars. The structure scale
- * is discovered from the swing fractal N (STRUCTURE_SWING_N goes up to 12), so the
- * window must hold enough bars to contain a full consolidation plus fractal
- * context at the largest N. 5m/15m/1H/4H: ~100 bars (small consolidations evolve
- * quickly); 1D: ~40 bars (a daily consolidation needs far fewer bars of context).
+ * Candle window per (coin, timeframe) — a single value for EVERY timeframe
+ * (user decision: the lookback must not vary with the period). The volatility
+ * detector needs a band + a same-length preceding stretch, so the window must
+ * hold both at a reasonable band length.
  */
-function perTimeframeLimit(timeframe: ReviewTimeframe): number {
-  switch (timeframe) {
-    case '1D':
-      return 40;
-    default:
-      return 100;
-  }
-}
+const SCAN_WINDOW = 100;
 
 /** Neutral placeholders for a timeframe with no convergence structure. */
 function neutralStructure(): StructureResult {
@@ -42,10 +34,10 @@ export class CoinScanService {
   ) {}
 
   /**
-   * Multi-timeframe convergence-structure scan: pulls the top-N pool's candles
-   * once per timeframe (parallel pool over the shared candle cache), probes each
-   * (coin, timeframe) window for a convergent triangle/box structure, and returns
-   * one row per coin that converges on at least one timeframe, sorted by
+   * Multi-timeframe convergence scan: pulls the top-N pool's candles once per
+   * timeframe (parallel pool over the shared candle cache), probes each
+   * (coin, timeframe) window for a volatility convergence (波动率越来越小), and
+   * returns one row per coin that converges on at least one timeframe, sorted by
    * qualifiedCount desc then bestScore desc (score larger = stronger).
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
@@ -71,7 +63,7 @@ export class CoinScanService {
         timeframe,
         anchor,
         direction: 'earlier',
-        limit: perTimeframeLimit(timeframe),
+        limit: SCAN_WINDOW,
       });
       // Drop the still-forming bar by time (timestamp + step > anchor). The
       // candle cache may or may not contain the forming bar, so slicing the

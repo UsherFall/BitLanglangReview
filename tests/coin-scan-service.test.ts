@@ -8,40 +8,27 @@ import { CoinScanService } from '../src/server/coin-scan-service';
 import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-data';
 
 // ---------------------------------------------------------------------------
-// Real-structure synthetic bars (shared with the pure-algorithm tests): a
-// horizontal low-volatility box, a symmetric triangle, and a trending channel
-// that must NOT classify as a structure. The service test only needs the box
-// and the triangle to be reliably detected — the exact geometry is calibrated
-// in tests/coin-scan.test.ts.
+// Synthetic bars for the volatility convergence detector: a strong band (far
+// quieter than the preceding stretch), a weak band (only mildly quieter), and a
+// trending channel that must NOT classify.
 // ---------------------------------------------------------------------------
 
-// A volatility convergence: 16 bars trending DOWN from [92,98] to [83,89] (a
-// real move, ~20% below the band) then 16 calm flat bars [99.5,100.5]. The
-// 16-bar band is long enough to score above minScore and genuinely calmer than
-// the move before it → a convergence.
-const boxBars: ReadonlyArray<readonly [number, number]> = [
+// Strong convergence: 16 volatile bars (~6.9% per bar) then 16 flat calm bars
+// (~1%) → the band is far quieter than the stretch before it (score ≈ 0.9).
+const strongBars: ReadonlyArray<readonly [number, number]> = [
   ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
   ...Array.from({ length: 16 }, () => [99.5, 100.5] as const),
 ];
 
-// Triangle fixture must be STILL converging at the newest bar (index 24, apex ≈
-// 29) — anchoring trend lines at the current bar rejects the old fixture whose
-// apex (≈ 23) had already passed the newest bar (27).
-const triangleBars: ReadonlyArray<readonly [number, number]> = [
-  [108, 110], [108, 110], [108, 110], [108, 110], [108, 110], [108, 110],
-  [88, 109], [108, 110], [108, 110], [108, 110],
-  [108, 122], [92, 109], [108, 110], [108, 110], [108, 110],
-  [108, 118], [96, 109], [108, 110], [108, 110], [108, 110],
-  [108, 114], [100, 109], [108, 110], [108, 110], [108, 110],
+// Weak convergence: same volatile lead, but a band only ~1.7× quieter → detected
+// but scored below the default minScore 0.7.
+const weakBars: ReadonlyArray<readonly [number, number]> = [
+  ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
+  ...Array.from({ length: 16 }, () => [98, 102] as const),
 ];
 
-const uptrendBars: ReadonlyArray<readonly [number, number]> = [
-  [108, 110], [108, 110], [108, 110], [108, 110], [108, 110], [108, 110],
-  [90, 109], [108, 110], [108, 110], [108, 110],
-  [108, 114], [96, 109], [108, 110], [108, 110], [108, 110],
-  [108, 120], [102, 109], [108, 110], [108, 110], [108, 110],
-  [108, 126], [108, 110], [108, 110], [108, 110],
-];
+// Trending channel: no volatility shrink anywhere → never a convergence.
+const uptrendBars: ReadonlyArray<readonly [number, number]> = Array.from({ length: 40 }, (_, i) => [100 + i * 2, 106 + i * 2] as const);
 
 /**
  * Builds completed candles for `bars` whose newest bar closes exactly at
@@ -72,12 +59,12 @@ function candlesAt(
   return out;
 }
 
-/** A structure-kind plan per (coin, timeframe): which synthetic shape to serve. */
-type Shape = 'box' | 'triangle' | 'uptrend' | 'none';
+/** A shape plan per (coin, timeframe): which synthetic bars to serve. */
+type Shape = 'strong' | 'weak' | 'uptrend' | 'none';
 
 const shapeBars: Record<Exclude<Shape, 'none'>, ReadonlyArray<readonly [number, number]>> = {
-  box: boxBars,
-  triangle: triangleBars,
+  strong: strongBars,
+  weak: weakBars,
   uptrend: uptrendBars,
 };
 
@@ -119,11 +106,11 @@ const params: ShrinkScanParams = {
   minQuoteVolume24h: 0,
 };
 
-const allBoxPlan = () => 'box' as const;
+const allStrongPlan = () => 'strong' as const;
 
-describe('CoinScanService (convergence structure, multi-timeframe)', () => {
+describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
   it('scans top-N coins across all 5 timeframes and reports every qualified structure', async () => {
-    const source = buildSource((instrument, timeframe) => (instrument === 'SOL-USDT-SWAP' ? 'uptrend' : allBoxPlan()));
+    const source = buildSource((instrument, timeframe) => (instrument === 'SOL-USDT-SWAP' ? 'uptrend' : allStrongPlan()));
     const service = serviceFrom(source);
     const result = await service.scanShrink(params);
 
@@ -137,9 +124,9 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
       for (const timeframe of scanTimeframes) {
         expect(row.structures[timeframe].structure).toBe('convergence');
         expect(row.structures[timeframe].qualified).toBe(true);
-        // The convergence fixture has 20 volatile bars then 16 calm bars: a long,
-        // genuinely calm band → the length-weighted convergence score is ~0.99.
-        expect(row.structures[timeframe].score).toBeCloseTo(0.977, 3);
+        // The strong fixture's band is far quieter than its preceding stretch →
+        // calm-dominant score (0.7×calm + 0.3×length) ≈ 0.9.
+        expect(row.structures[timeframe].score).toBeGreaterThan(0.85);
       }
     }
     expect(result.qualifiedCount).toBe(2);
@@ -148,19 +135,16 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     expect(result.params).toEqual({ ...params, anchor: expect.any(Number) });
   });
 
-  it('fetches each (coin, timeframe) with the probe-type per-timeframe limit', async () => {
-    const source = buildSource(allBoxPlan);
+  it('fetches each (coin, timeframe) with a uniform window for every timeframe', async () => {
+    const source = buildSource(allStrongPlan);
     const service = serviceFrom(source);
     await service.scanShrink(params);
 
-    for (const timeframe of ['5m', '15m', '1H', '4H'] as ReviewTimeframe[]) {
+    for (const timeframe of scanTimeframes) {
       expect(source.getCandlesticks).toHaveBeenCalledWith(
         expect.objectContaining({ timeframe, limit: 100, direction: 'earlier', anchor: expect.any(Number) }),
       );
     }
-    expect(source.getCandlesticks).toHaveBeenCalledWith(
-      expect.objectContaining({ timeframe: '1D', limit: 40, direction: 'earlier' }),
-    );
     expect(source.getCandlesticks).toHaveBeenCalledWith(
       expect.objectContaining({ instrument: 'BTC-USDT-SWAP', timeframe: '5m' }),
     );
@@ -169,8 +153,8 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
   it('drops the still-forming bar by time without dropping the newest completed bar', async () => {
     const anchor = Date.parse('2026-08-04T00:00:00Z');
     // Same data, once with a forming bar appended at `anchor` and once without.
-    const withForming = buildSource(allBoxPlan, true);
-    const withoutForming = buildSource(allBoxPlan, false);
+    const withForming = buildSource(allStrongPlan, true);
+    const withoutForming = buildSource(allStrongPlan, false);
     const a = serviceFrom(withForming);
     const b = serviceFrom(withoutForming);
     const [resultWith, resultWithout] = await Promise.all([
@@ -187,7 +171,7 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
   });
 
   it('carries the 24h change percentage and last price from the ticker onto each row', async () => {
-    const source = buildSource(allBoxPlan);
+    const source = buildSource(allStrongPlan);
     const service = serviceFrom(source);
     const result = await service.scanShrink(params);
     const btc = result.scanned.find((row) => row.instrument === 'BTC-USDT-SWAP');
@@ -199,9 +183,9 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     expect(eth?.quoteVolume24h).toBe(90000000 * 3500);
   });
 
-  it('hides coins with no convergent structure on any timeframe (宁少勿滥)', async () => {
+  it('hides coins with no convergence on any timeframe (宁少勿滥)', async () => {
     const source = buildSource((instrument, timeframe) =>
-      instrument === 'BTC-USDT-SWAP' ? 'box' : 'uptrend',
+      instrument === 'BTC-USDT-SWAP' ? 'strong' : 'uptrend',
     );
     const service = serviceFrom(source);
     const result = await service.scanShrink({ ...params, topN: 3 });
@@ -210,53 +194,51 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     expect(result.qualifiedCount).toBe(1);
   });
 
-  it('sorts by qualifiedCount desc, then bestScore desc, across structure strength', async () => {
+  it('sorts by qualifiedCount desc, then bestScore desc', async () => {
     const source = buildSource((instrument, timeframe) => {
-      if (instrument === 'BTC-USDT-SWAP') return 'box'; // all 5 timeframes
-      if (instrument === 'ETH-USDT-SWAP') return timeframe === '5m' ? 'box' : 'uptrend'; // 1 tf, weak
-      if (instrument === 'SOL-USDT-SWAP') return timeframe === '5m' ? 'triangle' : 'uptrend'; // 1 tf, strong
+      if (instrument === 'BTC-USDT-SWAP') return 'strong'; // all 5 timeframes, strong
+      if (instrument === 'ETH-USDT-SWAP') return timeframe === '5m' ? 'strong' : 'uptrend'; // 1 tf, strong
+      if (instrument === 'SOL-USDT-SWAP') return timeframe === '5m' ? 'weak' : 'uptrend'; // 1 tf, weak
       return 'none';
     });
     const service = serviceFrom(source);
     const result = await service.scanShrink({ ...params, topN: 3 });
 
-    // BTC converges on 5 timeframes (convergence ~0.99) → first. SOL and ETH
-    // converge on 1 timeframe; ETH's convergence (~0.99) outscores SOL's triangle
-    // (0.825) → ETH second, SOL third. All orderings come from the service, not
-    // the UI.
+    // BTC (5 timeframes) first; ETH and SOL both converge on 5m only, ETH's strong
+    // band outscores SOL's weak band → ETH second, SOL third.
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP']);
     expect(result.scanned[0].qualifiedCount).toBe(5);
     expect(result.scanned[1].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[2].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[1].bestScore).toBeGreaterThan(result.scanned[2].bestScore);
-    expect(result.scanned[1].bestScore).toBeCloseTo(0.977, 3);
-    expect(result.scanned[2].bestScore).toBeCloseTo(0.825, 2);
+    expect(result.scanned[1].bestScore).toBeGreaterThan(0.85);
+    expect(result.scanned[2].bestScore).toBeLessThan(0.7);
   });
 
   it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {
-    const source = buildSource(allBoxPlan);
+    const source = buildSource(allStrongPlan);
     const service = serviceFrom(source);
     // BTC quote-volume = 150M * 60000 = 9e12; ETH = 90M * 3500 = 3.15e11.
     const result = await service.scanShrink({ ...params, minQuoteVolume24h: 5e11 });
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
   });
 
-  it('applies the minScore gate: weaker structures are filtered out when the knob is raised', async () => {
-    // BTC converges as a convergence (score 1.0), ETH as a triangle (0.825).
-    // minScore 0.8 admits both; 0.9 filters out the triangle.
+  it('applies the minScore gate: weaker convergences are filtered out when the knob is raised', async () => {
+    // BTC converges strongly (score ≈ 0.9), ETH weakly (score ≈ 0.6).
+    // minScore 0.5 admits both; 0.7 filters out the weak one.
     const source = buildSource((instrument, timeframe) =>
-      instrument === 'BTC-USDT-SWAP' ? 'box' : timeframe === '5m' ? 'triangle' : 'uptrend',
+      instrument === 'BTC-USDT-SWAP' ? 'strong' : timeframe === '5m' ? 'weak' : 'uptrend',
     );
     const service = serviceFrom(source);
-    const permissive = await service.scanShrink({ ...params, minScore: 0.8 });
+    const permissive = await service.scanShrink({ ...params, minScore: 0.5 });
     expect(permissive.qualifiedCount).toBe(2);
-    const strict = await service.scanShrink({ ...params, minScore: 0.9 });
+    const strict = await service.scanShrink({ ...params, minScore: 0.7 });
     expect(strict.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
     expect(strict.qualifiedCount).toBe(1);
   });
 
   it('applies a past anchor to every timeframe and echoes it in params', async () => {
-    const source = buildSource(allBoxPlan);
+    const source = buildSource(allStrongPlan);
     const service = serviceFrom(source);
     const pastAnchor = Date.parse('2026-08-04T00:00:00Z');
     const result = await service.scanShrink({ ...params, anchor: pastAnchor });
@@ -269,13 +251,11 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     expect(result.scanned.length).toBeGreaterThan(0);
   });
 
-  it('reports a single coin with different structures on different timeframes (AC5)', async () => {
-    // BTC: 5m triangle + 1H convergence, nothing elsewhere. One row carries both
-    // structures; convergedTimeframes lists them in scanTimeframes order.
+  it('reports one coin converging on multiple timeframes as a single row', async () => {
+    // BTC converges on 5m and 1H, nothing elsewhere. One row carries both.
     const source = buildSource((instrument, timeframe) => {
       if (instrument !== 'BTC-USDT-SWAP') return 'uptrend';
-      if (timeframe === '5m') return 'triangle';
-      if (timeframe === '1H') return 'box';
+      if (timeframe === '5m' || timeframe === '1H') return 'strong';
       return 'uptrend';
     });
     const service = serviceFrom(source);
@@ -285,17 +265,14 @@ describe('CoinScanService (convergence structure, multi-timeframe)', () => {
     const row = result.scanned[0];
     expect(row.convergedTimeframes).toEqual(['5m', '1H']);
     expect(row.qualifiedCount).toBe(2);
-    expect(row.structures['5m'].structure).toBe('triangle');
+    expect(row.structures['5m'].structure).toBe('convergence');
     expect(row.structures['1H'].structure).toBe('convergence');
-    // The convergence fixture (20 volatile + 16 calm bars) outscores the triangle.
-    expect(row.structures['1H'].score).toBeGreaterThan(row.structures['5m'].score);
-    // bestScore = strongest score across the qualified timeframes (the convergence).
-    expect(row.bestScore).toBeCloseTo(0.977, 3);
+    expect(row.bestScore).toBeGreaterThan(0.85);
   });
 
-  it('fills neutral zeros for timeframes without a convergent structure', async () => {
+  it('fills neutral zeros for timeframes without a convergence', async () => {
     const source = buildSource((instrument, timeframe) =>
-      instrument === 'BTC-USDT-SWAP' && timeframe === '5m' ? 'box' : 'uptrend',
+      instrument === 'BTC-USDT-SWAP' && timeframe === '5m' ? 'strong' : 'uptrend',
     );
     const service = serviceFrom(source);
     const result = await service.scanShrink({ ...params, topN: 1 });

@@ -339,8 +339,8 @@ function shortInstrument(instrument: string): string {
   return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
 }
 
-// 收敛结构 column: each qualified timeframe shown with its structure type, e.g.
-// "5m三角 1H箱体". Rows always have >= 1 qualified timeframe, but a defensive
+// 收敛结构 column: each qualified timeframe shown with its structure type
+// (always 收敛 now). Rows always have >= 1 qualified timeframe, but a defensive
 // dash keeps the column readable if a row ever arrives empty.
 function formatConvergedStructures(row: ScanRow): string {
   const parts = row.convergedTimeframes.map((timeframe) => {
@@ -351,14 +351,7 @@ function formatConvergedStructures(row: ScanRow): string {
 }
 
 function structureLabel(structure: ConvergenceStructure | null): string {
-  switch (structure) {
-    case 'triangle':
-      return '三角';
-    case 'convergence':
-      return '收敛';
-    default:
-      return '—';
-  }
+  return structure === 'convergence' ? '收敛' : '—';
 }
 
 function formatPosition(value: number): string {

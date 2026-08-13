@@ -239,3 +239,39 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 ### Next Steps
 
 - None - task complete
+
+## Session 16: 收敛检测重构(纯波动收缩)+ 行情代理修复
+
+**Date**: 2026-08-13
+**Task**: 删三角、band vs 前段收敛、统一窗口、缓存刷新;另修 scan fetch failed 代理
+**Branch**: `master`
+
+### Summary
+
+两部分工作,均已实现、验证、待提交。
+
+1. **收敛检测重构(用户多轮反馈驱动)**:删除 fractal 三角模块(detectSwings/backscanWindow/
+   classifyStructure),改为纯波动率收缩:「安静带 vs 前段同长度」相对对比(band 中位数波动
+   < 0.9 × 前段中位数)。无币自身典型基线、无绝对阈值(用户强调每个币波动不同)。平边门按
+   波段自身噪声缩放,兼拒趋势与「大跌后喘息」(CBRS 意外被此门解决)。评分 0.7×安静度+0.3×长度,
+   平静主导。回看窗口统一 100 根(1D 原为 40)。默认 minScore 保持 0.7(用户决定),只显示强收缩
+   (AKE 0.79/APR 0.72);BR 是温和收缩(0.62)被门槛隐藏,可手动调低。
+
+2. **缓存过期修复**:binance-candles.ts 与 candlestick-service.ts(OKX)新增 isCacheFresh——
+   「现在」扫描缓存落后超 2 步强制刷新,历史锚点走缓存。
+
+3. **行情 fetch 代理**:http.ts 用 undici ProxyAgent 支持 HTTPS_PROXY,默认 http://127.0.0.1:7897
+   (用户 Clash 端口),修复 CN 网络下 fapi.binance.com fetch failed;undici 声明为直接依赖。
+
+### Git Commits
+
+(见 git log,待提交)
+
+### Testing
+
+- [OK] tsc 干净;全量 172/172 通过;真实扫描(实时数据)验证三角标签消失、CBRS 未复现、
+      缓存刷新生效。
+
+### Status
+
+[IN PROGRESS] 待提交

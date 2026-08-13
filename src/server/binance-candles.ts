@@ -31,7 +31,7 @@ export class BinanceCandleSource implements CandleSource {
 
   async getCandlesticks(request: CandleRequest): Promise<Candlestick[]> {
     const cached = this.listCached(request);
-    if (cached.length >= request.limit) {
+    if (cached.length >= request.limit && isCacheFresh(request, cached)) {
       return cached;
     }
 
@@ -71,6 +71,22 @@ export class BinanceCandleSource implements CandleSource {
       : this.store.listAfter({ instrument: request.instrument, timeframe: request.timeframe, after: request.anchor, limit: request.limit });
     return contiguousCandles(cached, request.anchor, request.timeframe, request.direction);
   }
+}
+
+/**
+ * Cache-freshness gate: a full cache is only reused when it covers the moment
+ * being read. A "current" scan (anchor near now) whose newest cached bar lags
+ * the anchor by more than two steps is STALE — a previous scan populated the
+ * store and repeat scans would otherwise keep returning old bars forever. A
+ * historical anchor (fixed point in the past) is always fresh: that data never
+ * changes. `cached` is ascending-sorted, so its last element is the newest bar.
+ */
+function isCacheFresh(request: CandleRequest, cached: Candlestick[]): boolean {
+  if (request.direction !== 'earlier') return true;
+  const step = timeframeMs(request.timeframe);
+  if (request.anchor <= Date.now() - step * 2) return true; // historical anchor
+  const newest = cached[cached.length - 1]?.timestamp ?? 0;
+  return request.anchor - newest <= step * 2;
 }
 
 function contiguousCandles(candles: Candlestick[], anchor: number, timeframe: ReviewTimeframe, direction: CandleRequest['direction']): Candlestick[] {
