@@ -31,7 +31,7 @@ export class BinanceCandleSource implements CandleSource {
 
   async getCandlesticks(request: CandleRequest): Promise<Candlestick[]> {
     const cached = this.listCached(request);
-    if (cached.length >= request.limit && isCacheFresh(request, cached)) {
+    if (!request.refresh && cached.length >= request.limit && isCacheFresh(request, cached)) {
       return cached;
     }
 

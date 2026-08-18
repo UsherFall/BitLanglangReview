@@ -27,6 +27,8 @@ export type CandleRequest = {
   anchor: number;
   direction: 'earlier' | 'later';
   limit: number;
+  /** Bypass the cache-freshness gate and always fetch from the market source. */
+  refresh?: boolean;
 };
 
 export interface CandleSource {

@@ -142,7 +142,7 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
 
     for (const timeframe of scanTimeframes) {
       expect(source.getCandlesticks).toHaveBeenCalledWith(
-        expect.objectContaining({ timeframe, limit: 100, direction: 'earlier', anchor: expect.any(Number) }),
+        expect.objectContaining({ timeframe, limit: 100, direction: 'earlier', anchor: expect.any(Number), refresh: true }),
       );
     }
     expect(source.getCandlesticks).toHaveBeenCalledWith(

@@ -18,7 +18,7 @@ export class CandlestickService implements CandleSource {
 
   async getCandlesticks(request: Request): Promise<Candlestick[]> {
     const cached = this.listCached(request);
-    if (cached.length >= request.limit && isCacheFresh(request, cached)) {
+    if (!request.refresh && cached.length >= request.limit && isCacheFresh(request, cached)) {
       return cached;
     }
 

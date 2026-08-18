@@ -37,6 +37,24 @@ describe('BinanceCandleSource', () => {
     expect(url).toContain('endTime=');
   });
 
+  it('bypasses the cache when refresh is requested so every scan can get fresh bars', async () => {
+      const store = new CandlestickStore(':memory:');
+      const fetchJson = vi.fn(async (_url: string) => [
+        kline(1653381000000, '29350', '12'),
+        kline(1653381300000, '29480', '20'),
+      ]);
+      const source = new BinanceCandleSource(store, fetchJson);
+
+      await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'earlier', limit: 2 });
+      expect(fetchJson).toHaveBeenCalledTimes(1);
+
+      // Even though the cache is fresh, refresh: true must hit the source again.
+      const refreshed = await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'earlier', limit: 2, refresh: true });
+
+      expect(fetchJson).toHaveBeenCalledTimes(2);
+      expect(refreshed.map((candle) => candle.timestamp)).toEqual([1653381000000, 1653381300000]);
+    });
+
   it('refreshes a stale cache when scanning "now" but reuses a fresh one', async () => {
     const store = new CandlestickStore(':memory:');
     const step = STEP;

@@ -33,6 +33,38 @@ describe('Candlestick Cache', () => {
     expect(fetchJson).toHaveBeenCalledTimes(1);
   });
 
+  it('bypasses a fresh OKX cache when refresh is requested', async () => {
+      const store = new CandlestickStore(':memory:');
+      const fetchJson = vi.fn(async (_url: string) => ({
+        data: [
+          ['1653381000000', '29300', '29400', '29200', '29350', '12'],
+          ['1653381300000', '29350', '29500', '29300', '29480', '20'],
+        ],
+      }));
+      const service = new CandlestickService(store, fetchJson);
+
+      await service.getCandlesticks({
+        instrument: 'BTC-USDT-SWAP',
+        timeframe: '5m',
+        anchor: 1653381600000,
+        direction: 'earlier',
+        limit: 2,
+      });
+      expect(fetchJson).toHaveBeenCalledTimes(1);
+
+      const refreshed = await service.getCandlesticks({
+        instrument: 'BTC-USDT-SWAP',
+        timeframe: '5m',
+        anchor: 1653381600000,
+        direction: 'earlier',
+        limit: 2,
+        refresh: true,
+      });
+
+      expect(fetchJson).toHaveBeenCalledTimes(2);
+      expect(refreshed.map((candle) => candle.close)).toEqual([29350, 29480]);
+    });
+
   it('loads earlier and later candlesticks around the current loaded range on demand', async () => {
     const store = new CandlestickStore(':memory:');
     const fetchJson = vi

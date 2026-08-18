@@ -52,8 +52,9 @@ export class CoinScanService {
     // qualified AND (minScore absent OR score >= minScore).
     const minScore = params.minScore ?? 0;
 
-    // One fetch task per (coin, timeframe). The candle source has its own cache,
-    // so repeat scans reuse already-fetched bars.
+    // One fetch task per (coin, timeframe). Current scans request a refresh so
+    // every click on 扫描 gets fresh bars; historical anchored scans still reuse
+    // the shared candle cache because that data does not change.
     const tasks = top.flatMap((ticker) =>
       scanTimeframes.map((timeframe) => ({ ticker, timeframe })),
     );
@@ -64,6 +65,12 @@ export class CoinScanService {
         anchor,
         direction: 'earlier',
         limit: SCAN_WINDOW,
+          // The user asks for a fresh scan every time they click 扫描, so bypass
+          // the shared candle cache freshness gate and update the local cache.
+          refresh: params.anchor === undefined,
+                    
+          // the shared candle cache freshness gate and update the local cache.
+  
       });
       // Drop the still-forming bar by time (timestamp + step > anchor). The
       // candle cache may or may not contain the forming bar, so slicing the
