@@ -19,10 +19,10 @@ type AlertConfig = {
 };
 
 export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentChange }: CoinScanPanelProps) {
-  const [topN, setTopN] = useState('50');
+  const [topN, setTopN] = useState('60');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
   // 结构强度阈值主旋钮:调高 = 宁少勿滥. Default 0.7 = prefer fewer, stronger structures.
-  const [minScore, setMinScore] = useState('0.7');
+  const [minScore, setMinScore] = useState('0.6');
   // Optional scan anchor (local datetime); empty = scan "now".
   const [anchorInput, setAnchorInput] = useState('');
   const [scanning, setScanning] = useState(false);

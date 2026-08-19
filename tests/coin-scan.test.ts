@@ -116,7 +116,7 @@ describe('detectConvergence (band vs preceding volatility)', () => {
 
   it('honestly scores a mild shrink (band ≈ 60% of preceding) below minScore', () => {
     // EWY 型: only ~1.7× quieter than the preceding stretch → detected but scores
-    // below the default minScore 0.7.
+    // honestly under 0.7 (a mild shrink isn't boosted).
     const result = detectConvergence(
       candles([
         ...Array.from({ length: 16 }, () => [94, 100] as const), // ~6.4%

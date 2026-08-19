@@ -154,7 +154,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (url.searchParams.get('method') !== 'shrink') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
-        const topN = parseScanParam(url.searchParams.get('topN'), 50);
+        const topN = parseScanParam(url.searchParams.get('topN'), 60);
         const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
         // anchor/minScore are optional. parseScanParam's Number(null) === 0
         // defect would turn an absent param into 0 and trip the guard, so parse

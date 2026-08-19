@@ -21,7 +21,7 @@ const strongBars: ReadonlyArray<readonly [number, number]> = [
 ];
 
 // Weak convergence: same volatile lead, but a band only ~1.7× quieter → detected
-// but scored below the default minScore 0.7.
+// but scored below the default minScore 0.6.
 const weakBars: ReadonlyArray<readonly [number, number]> = [
   ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
   ...Array.from({ length: 16 }, () => [98, 102] as const),
