@@ -102,15 +102,23 @@ describe('App Review Progress', () => {
     render(<App />);
 
     await progressPanel();
-    await waitFor(() => expect(document.querySelectorAll('.trade-marker-badge').length).toBeGreaterThan(0));
+    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+    ])));
 
+    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('Hide entry and exit markers'));
 
-    expect(document.querySelectorAll('.trade-marker-badge')).toHaveLength(0);
+    expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
 
+    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('Show entry and exit markers'));
 
-    await waitFor(() => expect(document.querySelectorAll('.trade-marker-badge').length).toBeGreaterThan(0));
+    expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+      expect.objectContaining({ text: expect.stringContaining('1') }),
+    ]));
   });
 
   it('keeps the Trade Review visible center when switching timeframe', async () => {
