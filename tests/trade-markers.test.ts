@@ -43,8 +43,8 @@ describe('Trade Markers', () => {
     const [activeEntry, activeExit, otherEntry, otherExit] = markers;
     expect(activeEntry.color).toBe('#22C55E');
     expect(activeExit.color).toBe('#EF4444');
-    expect(otherEntry.color).toBe('rgba(239, 68, 68, 0.65)');
-    expect(otherExit.color).toBe('rgba(34, 197, 94, 0.65)');
+    expect(otherEntry.color).toBe('#EF4444');
+    expect(otherExit.color).toBe('#22C55E');
     expect(activeEntry.position).toBe('atPriceBottom');
     expect(activeEntry.price).toBe(3100);
     expect(activeExit.position).toBe('atPriceTop');

@@ -1650,7 +1650,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        {shouldShowTradeMarkers && <TradeMarkerBadges markers={tradeMarkerList} chart={chartApiRef.current} series={seriesRef.current} version={overlayVersion} />}
+        {shouldShowTradeMarkers && <TradeMarkerBadges markers={tradeMarkerList} candles={renderedCandlesRef.current} chart={chartApiRef.current} series={seriesRef.current} version={overlayVersion} />}
         <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
@@ -1659,32 +1659,46 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
 }
 
 
-function TradeMarkerBadges({ markers, chart, series, version }: {
+function TradeMarkerBadges({ markers, candles, chart, series, version }: {
   markers: SeriesMarker<UTCTimestamp>[];
+  candles: Candlestick[];
   chart: IChartApi | null;
   series: ISeriesApi<'Candlestick'> | null;
   version: number;
 }) {
   void version;
   if (!chart || !series) return null;
+  const triangleSize = 6;
+  const gap = 3;
   return (
     <>
       {markers.flatMap((marker, index) => {
         if (marker.price == null) return [];
         const x = chart.timeScale().timeToCoordinate(marker.time);
-        const y = series.priceToCoordinate(marker.price);
-        if (x == null || y == null) return [];
+        if (x == null) return [];
         const text = marker.text ?? '';
         const [letter = '', ...priceParts] = text.split(' ');
         const priceText = priceParts.join(' ');
+        const isBuy = letter === 'B';
         const highlighted = marker.size === 2;
-        const size = highlighted ? 22 : 18;
-        const opacity = highlighted ? 1 : 0.65;
+        const size = highlighted ? 26 : 20;
+        const candle = candlestickAtTime(candles, marker.time);
+        const anchorPrice = isBuy ? candle?.low ?? marker.price : candle?.high ?? marker.price;
+        const anchorY = series.priceToCoordinate(anchorPrice);
+        if (anchorY == null) return [];
+        const centerY = isBuy
+          ? anchorY + gap + triangleSize + size / 2
+          : anchorY - gap - triangleSize - size / 2;
+        const top = centerY - size / 2;
+        const trianglePoints = isBuy
+          ? `${x},${anchorY + gap} ${x - triangleSize / 2},${top} ${x + triangleSize / 2},${top}`
+          : `${x},${anchorY - gap} ${x - triangleSize / 2},${top + size} ${x + triangleSize / 2},${top + size}`;
         return (
-          <g key={`${marker.time}-${marker.text}-${index}`} className="trade-marker-badge" opacity={opacity}>
-            <rect x={x - size / 2} y={y - size / 2} width={size} height={size} rx={5} fill={marker.color} stroke={highlighted ? '#FFFFFF' : 'none'} strokeWidth={highlighted ? 1.5 : 0} />
-            <text x={x} y={y + 1} fill="#FFFFFF" fontSize={highlighted ? 13 : 11} fontWeight="700" textAnchor="middle" dominantBaseline="middle">{letter}</text>
-            <text x={x + size / 2 + 5} y={y + 1} fill={marker.color} fontSize={highlighted ? 12 : 10} fontWeight={highlighted ? '700' : '500'} dominantBaseline="middle">{priceText}</text>
+          <g key={`${marker.time}-${marker.text}-${index}`} className="trade-marker-badge">
+            <polygon points={trianglePoints} fill={marker.color} />
+            <rect x={x - size / 2} y={top} width={size} height={size} rx={5} fill={marker.color} />
+            <text x={x} y={centerY + 1} fill="#FFFFFF" fontSize={highlighted ? 14 : 12} fontWeight="700" textAnchor="middle" dominantBaseline="middle">{letter}</text>
+            <text x={x + size / 2 + 5} y={centerY + 1} fill={marker.color} fontSize={highlighted ? 13 : 11} fontWeight={highlighted ? '700' : '500'} dominantBaseline="middle">{priceText}</text>
           </g>
         );
       })}
