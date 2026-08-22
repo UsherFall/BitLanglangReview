@@ -45,12 +45,14 @@ describe('Trade Markers', () => {
     expect(activeExit.color).toBe('#EF4444');
     expect(otherEntry.color).toBe('#EF4444');
     expect(otherExit.color).toBe('#22C55E');
-    expect(activeEntry.position).toBe('belowBar');
-    expect(activeExit.position).toBe('aboveBar');
-    expect(activeEntry.text).toBe('B 3100');
-    expect(activeExit.text).toBe('S 3500');
-    expect(otherEntry.text).toBe('S 3200');
-    expect(otherExit.text).toBe('B 3300');
+    expect(activeEntry.position).toBe('atPriceBottom');
+    expect(activeEntry.price).toBe(3100);
+    expect(activeExit.position).toBe('atPriceTop');
+    expect(activeExit.price).toBe(3500);
+    expect(activeEntry.text).toBe('开 3100');
+    expect(activeExit.text).toBe('平 3500');
+    expect(otherEntry.text).toBe('开 3200');
+    expect(otherExit.text).toBe('平 3300');
   });
 });
 

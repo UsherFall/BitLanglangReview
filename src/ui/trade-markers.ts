@@ -14,19 +14,21 @@ export function tradeMarkers(trade: ReviewedTrade, timeframe: ReviewTimeframe, c
   return [
     {
       time: markerTimeForEvent(trade.entryTime, timeframe, candles),
-      position: entryIsBuy ? 'belowBar' : 'aboveBar',
+      position: 'atPriceBottom',
+      price: trade.entryPrice,
       color: markerColor(entryIsBuy),
-      shape: 'square',
-      text: `${entryIsBuy ? 'B' : 'S'} ${trade.entryPrice}`,
-      size: highlighted ? 2 : 1.2,
+      shape: isLong ? 'arrowUp' : 'arrowDown',
+      text: `开 ${trade.entryPrice}`,
+      size: highlighted ? 2.5 : 1.2,
     },
     {
       time: markerTimeForEvent(trade.exitTime, timeframe, candles),
-      position: exitIsBuy ? 'belowBar' : 'aboveBar',
+      position: 'atPriceTop',
+      price: trade.exitPrice,
       color: markerColor(exitIsBuy),
-      shape: 'square',
-      text: `${exitIsBuy ? 'B' : 'S'} ${trade.exitPrice}`,
-      size: highlighted ? 2 : 1.2,
+      shape: isLong ? 'arrowDown' : 'arrowUp',
+      text: `平 ${trade.exitPrice}`,
+      size: highlighted ? 2.5 : 1.2,
     },
   ];
 }
