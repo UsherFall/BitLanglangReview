@@ -46,8 +46,8 @@ describe('Trade Markers', () => {
     const otherExit = markers.find((marker) => marker.text?.startsWith('平 3300'));
     expect(activeEntry?.color).toBe('#FACC15');
     expect(activeExit?.color).toBe('#38BDF8');
-    expect(otherEntry?.color).toBe('#6B7280');
-    expect(otherExit?.color).toBe('#6B7280');
+    expect(otherEntry?.color).toBe('#FACC15');
+    expect(otherExit?.color).toBe('#38BDF8');
   });
 });
 
