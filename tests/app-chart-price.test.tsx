@@ -18,7 +18,7 @@ vi.mock('lightweight-charts', () => ({
   createChart: (_container: HTMLElement, options: unknown) => {
     chartMocks.createChartOptions.push(options);
     return {
-      addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(() => 100) }),
+      addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
       remove: vi.fn(),
       priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
       subscribeCrosshairMove: vi.fn(),
@@ -31,7 +31,6 @@ vi.mock('lightweight-charts', () => ({
         setVisibleRange: vi.fn(),
         subscribeVisibleLogicalRangeChange: vi.fn(),
         subscribeVisibleTimeRangeChange: vi.fn(),
-        timeToCoordinate: vi.fn(() => 100),
         timeToIndex: vi.fn(() => 150),
         unsubscribeVisibleLogicalRangeChange: vi.fn(),
         unsubscribeVisibleTimeRangeChange: vi.fn(),

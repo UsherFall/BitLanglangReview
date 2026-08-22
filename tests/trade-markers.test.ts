@@ -40,19 +40,14 @@ describe('Trade Markers', () => {
       Date.parse('2024-05-21T04:00:00+08:00') / 1000,
       Date.parse('2024-05-21T08:00:00+08:00') / 1000,
     ]);
-    const [activeEntry, activeExit, otherEntry, otherExit] = markers;
-    expect(activeEntry.color).toBe('#22C55E');
-    expect(activeExit.color).toBe('#EF4444');
-    expect(otherEntry.color).toBe('#EF4444');
-    expect(otherExit.color).toBe('#22C55E');
-    expect(activeEntry.position).toBe('atPriceBottom');
-    expect(activeEntry.price).toBe(3100);
-    expect(activeExit.position).toBe('atPriceTop');
-    expect(activeExit.price).toBe(3500);
-    expect(activeEntry.text).toBe('开 3100');
-    expect(activeExit.text).toBe('平 3500');
-    expect(otherEntry.text).toBe('开 3200');
-    expect(otherExit.text).toBe('平 3300');
+    const activeEntry = markers.find((marker) => marker.text?.startsWith('开 3100'));
+    const activeExit = markers.find((marker) => marker.text?.startsWith('平 3500'));
+    const otherEntry = markers.find((marker) => marker.text?.startsWith('开 3200'));
+    const otherExit = markers.find((marker) => marker.text?.startsWith('平 3300'));
+    expect(activeEntry?.color).toBe('#FACC15');
+    expect(activeExit?.color).toBe('#38BDF8');
+    expect(otherEntry?.color).toBe('#6B7280');
+    expect(otherExit?.color).toBe('#6B7280');
   });
 });
 

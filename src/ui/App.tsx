@@ -1387,19 +1387,27 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   }
 
   useEffect(() => {
+    const series = seriesRef.current;
     const markers = markersRef.current;
-    if (!markers) return;
-    if (!renderedCandlesRef.current.length) {
-      markers.setMarkers(showAllMarkers || markersVisible ? currentMarkers() : []);
+    if (!series || !markers) return;
+    if (showAllMarkers) {
+      if (!renderedCandlesRef.current.length) return;
+      suppressAutoLoadRef.current = true;
+      renderCandles(timeframe, renderedCandlesRef.current, series, markers, true, currentMarkers());
+      window.setTimeout(() => {
+        suppressAutoLoadRef.current = false;
+      }, 0);
       return;
     }
-    const series = seriesRef.current;
-    if (!series) return;
-    suppressAutoLoadRef.current = true;
-    renderCandles(timeframe, renderedCandlesRef.current, series, markers, showAllMarkers || markersVisible, currentMarkers());
-    window.setTimeout(() => {
-      suppressAutoLoadRef.current = false;
-    }, 0);
+    if (renderedCandlesRef.current.length) {
+      suppressAutoLoadRef.current = true;
+      renderCandles(timeframe, renderedCandlesRef.current, series, markers, markersVisible, currentMarkers());
+      window.setTimeout(() => {
+        suppressAutoLoadRef.current = false;
+      }, 0);
+    } else {
+      markers.setMarkers(markersVisible ? currentMarkers() : []);
+    }
   }, [showAllMarkers, markersVisible, trade.id, timeframe, allTrades]);
 
   useEffect(() => {
@@ -1660,9 +1668,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   );
 }
 
-
 function CandlestickReadout({ candle, timeframe }: { candle: Candlestick | null; timeframe: ReviewTimeframe }) {
-
   if (!candle) return null;
   const fields = [
     ['开', candle.open],

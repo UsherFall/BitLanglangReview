@@ -24,7 +24,7 @@ Important local patterns:
 - Preserve the Chart Navigation Anchor when applying on-demand loaded candlesticks. See `visibleRangeForAnchor` and `visibleRangeForLatestAnchor` in `src/ui/chart-navigation-anchor.ts`.
 - In Free Replay, show only candles through the Free Replay Cursor. The cursor is a derived display boundary: the latest complete candlestick whose end time is not after `replay.progressTime`. Use `visibleCandlesForFreeReplay` from `src/ui/free-replay-chart.ts`.
 
-- `TradeChart` has an all open/close markers mode: a toolbar toggle fetches `/api/trades?instrument=...` (unfiltered), computes `allTradeMarkers` with the active Trade highlighted, and hides the single-trade Eye button while active. Keep the marker list in the pure helper `src/ui/trade-markers.ts` and update both series whitespace and markers when the all-trade set changes. Marker styling uses price-anchored green/red arrows with `开 <price>` / `平 <price>` labels, rendered through lightweight-charts' built-in canvas marker API so chart dragging stays smooth. The active Trade marker is larger than the others.
+- `TradeChart` has an all open/close markers mode: a toolbar toggle fetches `/api/trades?instrument=...` (unfiltered), computes `allTradeMarkers` with the active Trade highlighted, and hides the single-trade Eye button while active. Keep the marker list in the pure helper `src/ui/trade-markers.ts` and update both series whitespace and markers when the all-trade set changes.
 
 ### Free Replay Cursor Follow
 
