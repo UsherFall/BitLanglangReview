@@ -6,8 +6,8 @@ import { markerTimeForEvent } from './chart-time';
 
 const BUY_COLOR = '#22C55E';
 const SELL_COLOR = '#EF4444';
-const MUTED_BUY_COLOR = 'rgba(34, 197, 94, 0.45)';
-const MUTED_SELL_COLOR = 'rgba(239, 68, 68, 0.45)';
+const MUTED_BUY_COLOR = 'rgba(34, 197, 94, 0.65)';
+const MUTED_SELL_COLOR = 'rgba(239, 68, 68, 0.65)';
 
 export function tradeMarkers(trade: ReviewedTrade, timeframe: ReviewTimeframe, candles: Candlestick[], highlighted = true): SeriesMarker<UTCTimestamp>[] {
   const isLong = trade.direction === '多';
@@ -16,19 +16,21 @@ export function tradeMarkers(trade: ReviewedTrade, timeframe: ReviewTimeframe, c
   return [
     {
       time: markerTimeForEvent(trade.entryTime, timeframe, candles),
-      position: isLong ? 'belowBar' : 'aboveBar',
+      position: 'atPriceBottom',
+      price: trade.entryPrice,
       color: entryColor,
       shape: isLong ? 'arrowUp' : 'arrowDown',
-      text: highlighted ? `开 ${trade.entryPrice}` : undefined,
-      size: highlighted ? 2 : 1,
+      text: `开 ${trade.entryPrice}`,
+      size: highlighted ? 2 : 1.2,
     },
     {
       time: markerTimeForEvent(trade.exitTime, timeframe, candles),
-      position: isLong ? 'aboveBar' : 'belowBar',
+      position: 'atPriceTop',
+      price: trade.exitPrice,
       color: exitColor,
       shape: isLong ? 'arrowDown' : 'arrowUp',
-      text: highlighted ? `平 ${trade.exitPrice}` : undefined,
-      size: highlighted ? 2 : 1,
+      text: `平 ${trade.exitPrice}`,
+      size: highlighted ? 2 : 1.2,
     },
   ];
 }

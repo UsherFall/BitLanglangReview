@@ -43,10 +43,14 @@ describe('Trade Markers', () => {
     const [activeEntry, activeExit, otherEntry, otherExit] = markers;
     expect(activeEntry.color).toBe('#22C55E');
     expect(activeExit.color).toBe('#EF4444');
-    expect(otherEntry.color).toBe('rgba(239, 68, 68, 0.45)');
-    expect(otherExit.color).toBe('rgba(34, 197, 94, 0.45)');
-    expect(otherEntry.text).toBeUndefined();
-    expect(otherExit.text).toBeUndefined();
+    expect(otherEntry.color).toBe('rgba(239, 68, 68, 0.65)');
+    expect(otherExit.color).toBe('rgba(34, 197, 94, 0.65)');
+    expect(activeEntry.position).toBe('atPriceBottom');
+    expect(activeEntry.price).toBe(3100);
+    expect(activeExit.position).toBe('atPriceTop');
+    expect(activeExit.price).toBe(3500);
+    expect(otherEntry.text).toBe('开 3200');
+    expect(otherExit.text).toBe('平 3300');
   });
 });
 
