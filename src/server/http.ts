@@ -3,12 +3,12 @@ import { ProxyAgent, fetch as fetchWithDispatcher } from 'undici';
 export type FetchJson = (url: string) => Promise<unknown>;
 
 /**
- * Outbound proxy for market-data hosts (Binance fapi / OKX www). In CN
- * networks these are often unreachable directly, so outbound requests route
- * through a local mixed proxy (Clash) when one is configured. Resolution:
- *   1. `HTTPS_PROXY` / `https_proxy` / `HTTP_PROXY` / `http_proxy` env — set
- *      to an empty string to force a direct connection;
- *   2. default `http://127.0.0.1:7897` (the dev box's local proxy).
+ * Outbound proxy for market-data hosts (Binance fapi / OKX www). By default
+ * requests go direct, so a system-level transparent proxy (for example Clash
+ * TUN mode) can handle routing without this process knowing the proxy port.
+ * If an explicit proxy is needed, set `HTTPS_PROXY` / `https_proxy` /
+ * `HTTP_PROXY` / `http_proxy`; set one of them to an empty string to force a
+ * direct connection.
  * Server酱 notify keeps using global fetch — `ftqq.com` is reachable from CN.
  */
 export function resolveProxyUrl(
@@ -19,8 +19,7 @@ export function resolveProxyUrl(
     env.https_proxy ??
     env.HTTP_PROXY ??
     env.http_proxy;
-  if (fromEnv !== undefined) return fromEnv === '' ? undefined : fromEnv;
-  return 'http://127.0.0.1:7897';
+  return fromEnv === '' ? undefined : fromEnv;
 }
 
 const proxyUrl = resolveProxyUrl();

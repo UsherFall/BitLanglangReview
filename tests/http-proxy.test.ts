@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { resolveProxyUrl } from '../src/server/http';
 
 describe('resolveProxyUrl', () => {
-  it('defaults to the local 7897 mixed proxy when no proxy env is set', () => {
-    expect(resolveProxyUrl({})).toBe('http://127.0.0.1:7897');
+  it('uses a direct connection when no proxy env is set', () => {
+    expect(resolveProxyUrl({})).toBeUndefined();
   });
 
   it('prefers the standard HTTPS_PROXY / http_proxy env vars', () => {

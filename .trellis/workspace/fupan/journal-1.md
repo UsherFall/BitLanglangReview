@@ -260,7 +260,7 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 2. **缓存过期修复**:binance-candles.ts 与 candlestick-service.ts(OKX)新增 isCacheFresh——
    「现在」扫描缓存落后超 2 步强制刷新,历史锚点走缓存。
 
-3. **行情 fetch 代理**:http.ts 用 undici ProxyAgent 支持 HTTPS_PROXY,默认 http://127.0.0.1:7897
+3. **行情 fetch 代理**:http.ts 用 undici ProxyAgent 支持 HTTPS_PROXY;默认直连(依赖 Clash TUN 等系统级代理),不再默认 127.0.0.1:7897
    (用户 Clash 端口),修复 CN 网络下 fapi.binance.com fetch failed;undici 声明为直接依赖。
 
 ### Git Commits
