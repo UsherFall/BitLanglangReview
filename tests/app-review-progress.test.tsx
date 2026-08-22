@@ -19,7 +19,7 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(() => 100) }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: vi.fn(),
@@ -32,6 +32,7 @@ vi.mock('lightweight-charts', () => ({
       setVisibleRange: chartMocks.setVisibleRange,
       subscribeVisibleLogicalRangeChange: vi.fn(),
       subscribeVisibleTimeRangeChange: vi.fn(),
+      timeToCoordinate: vi.fn(() => 100),
       timeToIndex: chartMocks.timeToIndex,
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleTimeRangeChange: vi.fn(),
@@ -101,23 +102,15 @@ describe('App Review Progress', () => {
     render(<App />);
 
     await progressPanel();
-    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-    ])));
+    await waitFor(() => expect(document.querySelectorAll('.trade-marker-badge').length).toBeGreaterThan(0));
 
-    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('Hide entry and exit markers'));
 
-    expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
+    expect(document.querySelectorAll('.trade-marker-badge')).toHaveLength(0);
 
-    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('Show entry and exit markers'));
 
-    expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-    ]));
+    await waitFor(() => expect(document.querySelectorAll('.trade-marker-badge').length).toBeGreaterThan(0));
   });
 
   it('keeps the Trade Review visible center when switching timeframe', async () => {
