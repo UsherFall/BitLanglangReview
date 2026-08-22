@@ -40,14 +40,13 @@ describe('Trade Markers', () => {
       Date.parse('2024-05-21T04:00:00+08:00') / 1000,
       Date.parse('2024-05-21T08:00:00+08:00') / 1000,
     ]);
-    const activeEntry = markers.find((marker) => marker.text?.startsWith('开 3100'));
-    const activeExit = markers.find((marker) => marker.text?.startsWith('平 3500'));
-    const otherEntry = markers.find((marker) => marker.text?.startsWith('开 3200'));
-    const otherExit = markers.find((marker) => marker.text?.startsWith('平 3300'));
-    expect(activeEntry?.color).toBe('#FACC15');
-    expect(activeExit?.color).toBe('#38BDF8');
-    expect(otherEntry?.color).toBe('#6B7280');
-    expect(otherExit?.color).toBe('#6B7280');
+    const [activeEntry, activeExit, otherEntry, otherExit] = markers;
+    expect(activeEntry.color).toBe('#22C55E');
+    expect(activeExit.color).toBe('#EF4444');
+    expect(otherEntry.color).toBe('rgba(239, 68, 68, 0.45)');
+    expect(otherExit.color).toBe('rgba(34, 197, 94, 0.45)');
+    expect(otherEntry.text).toBeUndefined();
+    expect(otherExit.text).toBeUndefined();
   });
 });
 
