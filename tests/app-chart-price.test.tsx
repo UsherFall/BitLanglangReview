@@ -64,6 +64,25 @@ describe('App Chart Price', () => {
     expect(priceFormatterAt(1)).toBe(formatChartPrice);
   });
 
+  it('toggles the all open/close markers view and hides the single-trade eye button', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByLabelText('显示全部开平仓')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByLabelText('显示全部开平仓'));
+
+    await waitFor(() => expect(screen.getByLabelText('隐藏全部开平仓')).toBeInTheDocument());
+    expect(screen.queryByLabelText('Hide entry and exit markers')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Show entry and exit markers')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('隐藏全部开平仓'));
+
+    await waitFor(() => expect(screen.getByLabelText('显示全部开平仓')).toBeInTheDocument());
+    expect(screen.getByLabelText('Hide entry and exit markers')).toBeInTheDocument();
+  });
+
   it('toggles log scale and resets the Trade Review price scale to normal autoscale', async () => {
     vi.stubGlobal('fetch', makeFetch());
 

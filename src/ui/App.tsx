@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, MapPin, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
@@ -38,7 +38,7 @@ import {
 } from './free-replay-paper-trading';
 import { ReviewEditor } from './ReviewEditor';
 import { firstUnreviewedTrade, reviewProgress } from './review-progress';
-import { tradeMarkers } from './trade-markers';
+import { allTradeMarkers, tradeMarkers } from './trade-markers';
 
 type TradeResponse = {
   trades: ReviewedTrade[];
@@ -1238,10 +1238,38 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const [activeCandle, setActiveCandle] = useState<Candlestick | null>(null);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [markersVisible, setMarkersVisible] = useState(true);
+  const [showAllMarkers, setShowAllMarkers] = useState(false);
+  const [allTrades, setAllTrades] = useState<ReviewedTrade[]>([]);
+  const showAllMarkersRef = useRef(false);
+  const allTradesRef = useRef<ReviewedTrade[]>([]);
 
   useEffect(() => {
     markersVisibleRef.current = markersVisible;
   }, [markersVisible]);
+
+  useEffect(() => {
+    showAllMarkersRef.current = showAllMarkers;
+  }, [showAllMarkers]);
+
+  useEffect(() => {
+    allTradesRef.current = allTrades;
+  }, [allTrades]);
+
+  useEffect(() => {
+    if (!showAllMarkers) return;
+    let cancelled = false;
+    fetch(`/api/trades?${new URLSearchParams({ instrument: trade.instrument })}`)
+      .then((response) => response.json())
+      .then(({ trades: next }: { trades: ReviewedTrade[] }) => {
+        if (!cancelled) setAllTrades(next);
+      })
+      .catch(() => {
+        if (!cancelled) setAllTrades([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAllMarkers, trade.instrument]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1331,7 +1359,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
           ? centeredTimeRange(preservedCenterTime, timeframeMs(timeframe) / 1000, preservedVisibleBars)
           : entryVisibleRange(trade.entryTime, timeframe);
         suppressAutoLoadRef.current = true;
-        renderCandles(trade, timeframe, candlesRef.current, series, markersRef.current, markersVisibleRef.current);
+        renderCandles(timeframe, candlesRef.current, series, markersRef.current, showAllMarkersRef.current || markersVisibleRef.current, currentMarkers());
         if (preservedCenterTime !== null && preservedVisibleBars !== null) {
           const centerIndex = chart.timeScale().timeToIndex(preservedCenterTime as UTCTimestamp, true);
           if (centerIndex != null) {
@@ -1350,9 +1378,37 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       .catch(() => setStatus('K 线加载失败'));
   }, [trade.id, timeframe]);
 
+  function currentMarkers(): SeriesMarker<UTCTimestamp>[] {
+    if (showAllMarkersRef.current) {
+      const sameInstrumentTrades = allTradesRef.current.filter((item) => item.instrument === trade.instrument);
+      return allTradeMarkers(sameInstrumentTrades, trade.id, timeframe, renderedCandlesRef.current);
+    }
+    return tradeMarkers(trade, timeframe, renderedCandlesRef.current);
+  }
+
   useEffect(() => {
-    markersRef.current?.setMarkers(markersVisible ? tradeMarkers(trade, timeframe, renderedCandlesRef.current) : []);
-  }, [markersVisible, trade.id, timeframe]);
+    const series = seriesRef.current;
+    const markers = markersRef.current;
+    if (!series || !markers) return;
+    if (showAllMarkers) {
+      if (!renderedCandlesRef.current.length) return;
+      suppressAutoLoadRef.current = true;
+      renderCandles(timeframe, renderedCandlesRef.current, series, markers, true, currentMarkers());
+      window.setTimeout(() => {
+        suppressAutoLoadRef.current = false;
+      }, 0);
+      return;
+    }
+    if (renderedCandlesRef.current.length) {
+      suppressAutoLoadRef.current = true;
+      renderCandles(timeframe, renderedCandlesRef.current, series, markers, markersVisible, currentMarkers());
+      window.setTimeout(() => {
+        suppressAutoLoadRef.current = false;
+      }, 0);
+    } else {
+      markers.setMarkers(markersVisible ? currentMarkers() : []);
+    }
+  }, [showAllMarkers, markersVisible, trade.id, timeframe, allTrades]);
 
   useEffect(() => {
     const chart = chartApiRef.current;
@@ -1426,7 +1482,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     pendingRenderRef.current = false;
     renderedCandlesRef.current = candlesRef.current;
     suppressAutoLoadRef.current = true;
-    renderCandles(trade, timeframe, renderedCandlesRef.current, series, markersRef.current, markersVisibleRef.current);
+    renderCandles(timeframe, renderedCandlesRef.current, series, markersRef.current, showAllMarkersRef.current || markersVisibleRef.current, currentMarkers());
     if (visible && anchor) {
       chart.timeScale().setVisibleRange(visibleRangeForAnchor(anchor, visible.to - visible.from) as { from: UTCTimestamp; to: UTCTimestamp });
     }
@@ -1485,7 +1541,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
           if (!series) return;
           renderedCandlesRef.current = candlesRef.current;
           suppressAutoLoadRef.current = true;
-          renderCandles(trade, timeframe, renderedCandlesRef.current, series, markersRef.current, markersVisibleRef.current);
+          renderCandles(timeframe, renderedCandlesRef.current, series, markersRef.current, showAllMarkersRef.current || markersVisibleRef.current, currentMarkers());
           window.setTimeout(() => {
             suppressAutoLoadRef.current = false;
           }, 0);
@@ -1596,7 +1652,10 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
-        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-label={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+        <button type="button" className={showAllMarkers ? 'selected' : ''} title={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-label={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-pressed={showAllMarkers} onClick={() => setShowAllMarkers((current) => !current)}><MapPin size={16} /></button>
+        {!showAllMarkers ? (
+          <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-label={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+        ) : null}
       </div>
       <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
       <div ref={chartRef} className="chart" />
@@ -1738,8 +1797,7 @@ function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'
   return x == null || y == null ? null : { x, y };
 }
 
-function renderCandles(trade: ReviewedTrade, timeframe: ReviewTimeframe, candles: Candlestick[], series: ISeriesApi<'Candlestick'>, markers: ISeriesMarkersPluginApi<Time> | null, markersVisible = true) {
-  const nextMarkers = tradeMarkers(trade, timeframe, candles);
+function renderCandles(timeframe: ReviewTimeframe, candles: Candlestick[], series: ISeriesApi<'Candlestick'>, markers: ISeriesMarkersPluginApi<Time> | null, markersVisible: boolean, nextMarkers: SeriesMarker<UTCTimestamp>[]) {
   series.setData(chartDataWithWhitespace(candles, nextMarkers.map((marker) => Number(marker.time) * 1000)));
   markers?.setMarkers(markersVisible ? nextMarkers : []);
 }
