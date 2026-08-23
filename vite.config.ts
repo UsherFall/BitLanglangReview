@@ -8,6 +8,17 @@ export default defineConfig(({ mode }) => {
     plugins: [tradingReviewApiPlugin({ serverChanKey: env.SERVERCHAN_KEY }), react()],
     server: {
       port: 5173,
+      watch: {
+        ignored: [
+          '**/data/**',
+          '**/*.sqlite',
+          '**/*.sqlite-wal',
+          '**/*.sqlite-shm',
+          '**/*.log',
+          '**/.trellis/**',
+          '**/.scratch/**',
+        ],
+      },
     },
   };
 });
