@@ -89,13 +89,13 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:07' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
-    expect(screen.queryByText('Choose an instrument and start time to begin Free Replay')).not.toBeInTheDocument();
+    expect(screen.queryByText('选择交易对和开始时间，开始回溯复盘')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
@@ -149,17 +149,17 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
 
     await waitFor(() => expect(screen.getAllByText('+100.00 USDT').length).toBeGreaterThan(0));
     expect(screen.getAllByText('10.00%').length).toBeGreaterThan(0);
@@ -190,14 +190,14 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next candle' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
     chartMocks.setVisibleRange.mockClear();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
 
     const nextCursor = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
@@ -231,10 +231,10 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     const cursor = Date.parse('2024-05-21T09:55:00+08:00') / 1000;
     const step = 5 * 60;
@@ -266,29 +266,29 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
     await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ text: expect.stringContaining('100') }),
       expect.objectContaining({ text: expect.stringContaining('110') }),
     ])));
 
     chartMocks.setMarkers.mockClear();
-    fireEvent.click(screen.getByLabelText('Hide entry and exit markers'));
+    fireEvent.click(screen.getByLabelText('隐藏开平仓标记'));
 
     expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
 
     chartMocks.setMarkers.mockClear();
-    fireEvent.click(screen.getByLabelText('Show entry and exit markers'));
+    fireEvent.click(screen.getByLabelText('显示开平仓标记'));
 
     expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ text: expect.stringContaining('100') }),
@@ -319,21 +319,21 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
-    fireEvent.change(screen.getByLabelText('Stop loss price'), { target: { value: '95' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Place stop loss' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.change(screen.getByLabelText('止损价格'), { target: { value: '95' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交止损' }));
 
     expect(screen.getByText(/95/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
 
     await waitFor(() => expect(screen.getAllByText('-50.00 USDT').length).toBeGreaterThan(0));
     expect(screen.queryByLabelText('Cancel stop loss')).not.toBeInTheDocument();
@@ -362,11 +362,11 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
     const chartWrap = document.querySelector('.free-replay-workspace .chart-wrap') as HTMLElement;
     fireEvent.pointerMove(chartWrap, { clientY: 24 });
@@ -395,18 +395,18 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
     chartMocks.priceScaleApplyOptions.mockClear();
 
-    fireEvent.click(screen.getByLabelText('Toggle log price scale'));
+    fireEvent.click(screen.getByLabelText('切换对数价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
 
     chartMocks.priceScaleApplyOptions.mockClear();
-    fireEvent.click(screen.getByLabelText('Reset price scale'));
+    fireEvent.click(screen.getByLabelText('重置价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 0, autoScale: true })));
   });
 
@@ -439,17 +439,17 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Market open' })).toBeEnabled());
-    fireEvent.click(screen.getByRole('button', { name: 'Market open' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Market close' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
 
     await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith([
       expect.objectContaining({ time: Date.parse('2024-05-21T09:55:00+08:00') / 1000 }),
@@ -500,11 +500,11 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:35' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:35' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
     chartMocks.setVisibleRange.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '4H' }));
@@ -524,7 +524,7 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
 
     chartMocks.setVisibleRange.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
 
     const nextFourHourCursor = Date.parse('2024-05-21T08:00:00+08:00') / 1000;
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith(expect.objectContaining({
@@ -595,11 +595,11 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:35' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:35' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
     chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 260 });
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
@@ -635,11 +635,11 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:05' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:05' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
     await waitFor(() => expect(candleRequests.some((url) => url.includes('mode=initial'))).toBe(true));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
@@ -681,13 +681,13 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next candle' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next candle' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
 
     const revealedCursor = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
     await waitFor(() => {
@@ -722,13 +722,13 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start paper trading' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start paper trading' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
 
     await waitFor(() => {
       const bodies = sessionPutBodies();
@@ -762,14 +762,14 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
 
     fireEvent.click(screen.getByRole('button', { name: /^BTC-USDT-SWAP/ }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '15m' }).className).toContain('selected');
-    expect(screen.getByLabelText('Market open')).toBeInTheDocument();
+    expect(screen.getByLabelText('市价开仓')).toBeInTheDocument();
 
     const restoredCursor = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
     await waitFor(() => {
@@ -805,14 +805,14 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '15m' }).className).toContain('selected');
-    expect(screen.getByLabelText('Market open')).toBeInTheDocument();
+    expect(screen.getByLabelText('市价开仓')).toBeInTheDocument();
   });
 
   it('deletes the active session, stops replay, and does not re-save it', async () => {
@@ -839,20 +839,20 @@ describe('App Free Replay', () => {
 
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:00' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Next candle' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByLabelText('Delete session BTC-USDT-SWAP 2024-05-21 10:00')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('删除会话 BTC-USDT-SWAP 2024-05-21 10:00')).toBeInTheDocument());
 
     const beforeDelete = sessionPutBodies().length;
-    fireEvent.click(screen.getByLabelText('Delete session BTC-USDT-SWAP 2024-05-21 10:00'));
+    fireEvent.click(screen.getByLabelText('删除会话 BTC-USDT-SWAP 2024-05-21 10:00'));
 
-    await waitFor(() => expect(screen.getByText('Choose an instrument and start time to begin Free Replay')).toBeInTheDocument());
-    expect(screen.queryByLabelText('Start paper trading')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Delete session BTC-USDT-SWAP 2024-05-21 10:00')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('选择交易对和开始时间，开始回溯复盘')).toBeInTheDocument());
+    expect(screen.queryByLabelText('开始模拟交易')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('删除会话 BTC-USDT-SWAP 2024-05-21 10:00')).not.toBeInTheDocument();
 
     await new Promise((resolve) => window.setTimeout(resolve, 700));
     expect(sessionPutBodies().length).toBe(beforeDelete);

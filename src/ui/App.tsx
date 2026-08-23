@@ -12,10 +12,12 @@ import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange 
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
-import { centeredLogicalRange, centeredTimeRange, cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
+import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { CoinScanPanel, CoinScanResults } from './CoinScanPanel';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
+import { LeaderCoinPanel } from './LeaderCoinPanel';
+import { OtherCoinChart } from './OtherCoinChart';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
   cancelPendingOrder,
@@ -57,6 +59,7 @@ type DrawingDragTarget = 'body' | 'start' | 'end';
 type ReviewMode = 'trade' | 'freeReplay' | 'scan';
 
 const SIDEBAR_CONFIG_KEY = 'sidebar-config';
+const LEADER_COINS_KEY = 'leader-coins';
 const DEFAULT_SIDEBAR_WIDTH = 390;
 const MIN_SIDEBAR_WIDTH = 280;
 const COLLAPSED_SIDEBAR_WIDTH = 40;
@@ -101,6 +104,16 @@ function loadSidebarConfig(): SidebarConfig {
   }
 }
 
+function loadLeaderCoins(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(LEADER_COINS_KEY) ?? '[]') as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function isNarrowLayout(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_LAYOUT_QUERY).matches;
 }
@@ -121,6 +134,9 @@ export function App() {
   const selectedTradeRowRef = useRef<HTMLDivElement | null>(null);
   const sidebarDragRef = useRef<SidebarDrag | null>(null);
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
+  const [otherCoinOpen, setOtherCoinOpen] = useState(false);
+  const [leaderCoinOpen, setLeaderCoinOpen] = useState(false);
+  const [leaderCoins, setLeaderCoins] = useState<string[]>(() => loadLeaderCoins());
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
@@ -135,6 +151,21 @@ export function App() {
   // already in-flight auto-save PUT response resurrecting a deleted row in the
   // local list (stale freeReplaySessions).
   const deletedSessionKeysRef = useRef<Set<string>>(new Set());
+
+  function addLeaderCoin(instrument: string) {
+    const next = instrument.trim();
+    if (!next) return;
+    setLeaderCoins((current) => current.includes(next) ? current : [...current, next]);
+  }
+
+  function removeLeaderCoin(instrument: string) {
+    setLeaderCoins((current) => current.filter((item) => item !== instrument));
+  }
+
+  function toggleLeaderCoin(instrument: string) {
+    setLeaderCoins((current) => current.includes(instrument) ? current.filter((item) => item !== instrument) : [...current, instrument]);
+  }
+
   const selectedTrade = data.trades.find((trade) => trade.id === selectedId) ?? data.trades[0] ?? null;
   const progress = reviewProgress(data.trades, selectedTrade?.id ?? '');
   const nextUnreviewedTrade = firstUnreviewedTrade(data.trades);
@@ -144,6 +175,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_CONFIG_KEY, JSON.stringify(sidebarConfig));
   }, [sidebarConfig]);
+
+  useEffect(() => {
+    window.localStorage.setItem(LEADER_COINS_KEY, JSON.stringify(leaderCoins));
+  }, [leaderCoins]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -448,7 +483,7 @@ export function App() {
             <button type="button" className="sidebar-expand" aria-label="展开侧边栏" title="展开侧边栏" onClick={() => setSidebarCollapsed(false)}>
               <ChevronRight size={18} />
             </button>
-            <span className="sidebar-mode-label" title={reviewMode === 'trade' ? 'Trade Review' : 'Free Replay'}>{reviewMode === 'trade' ? 'TR' : 'FR'}</span>
+            <span className="sidebar-mode-label" title={reviewMode === 'trade' ? '交割单复盘' : '回溯复盘'}>{reviewMode === 'trade' ? '交' : '回'}</span>
           </div>
         ) : (
           <>
@@ -458,8 +493,8 @@ export function App() {
           </button>
         </div>
         <div className="mode-switch">
-          <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>Trade Review</button>
-          <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>Free Replay</button>
+          <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>交割单复盘</button>
+          <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>回溯复盘</button>
           <button className={reviewMode === 'scan' ? 'selected' : ''} onClick={() => setReviewMode('scan')}>选币</button>
         </div>
         {reviewMode === 'trade' ? (
@@ -518,7 +553,7 @@ export function App() {
             </div>
           </div>
         </div>
-        <div className="review-progress" aria-label="Review progress">
+        <div className="review-progress" aria-label="复盘进度">
           <div>
             <span>当前</span>
             <strong>{progress.current ? progress.current.toLocaleString() : '-'} / {progress.total.toLocaleString()}</strong>
@@ -553,7 +588,7 @@ export function App() {
                 <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
                 <strong>{trade.instrument}</strong>
                 <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
-                <span className="trade-meta">{formatLeverage(trade.leverage)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
+                <span className="trade-meta">{formatLeverage(trade.leverage)} · 保证金 {trade.margin.toFixed(2)} USDT · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
                 <span className={trade.profit >= 0 ? 'profit' : 'loss'}>{formatPercent(trade.returnRate)} / {trade.profit.toFixed(2)}</span>
                 <span className="tags">{trade.review?.tags.join(' · ') || '未标记'}</span>
               </button>
@@ -585,7 +620,7 @@ export function App() {
             <header className="detail-header">
               <div>
                 <h1>{freeReplay.instrument}</h1>
-                <p>Free Replay from {freeReplay.startTime}</p>
+                <p>回溯复盘 {freeReplay.startTime}</p>
               </div>
               <div className="timeframes">
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => switchFreeReplayTimeframe(item)}>{item}</button>)}
@@ -610,9 +645,9 @@ export function App() {
             </div>
           </>
         ) : (
-          <div className="empty-state">Choose an instrument and start time to begin Free Replay</div>
+          <div className="empty-state">选择交易对和开始时间，开始回溯复盘</div>
         ) : reviewMode === 'scan' ? (
-          <CoinScanResults result={scanResult} onSetAlertInstrument={setAlertInstrument} />
+          <CoinScanResults result={scanResult} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} onSetAlertInstrument={setAlertInstrument} />
         ) : selectedTrade ? (
           <>
             <header className="detail-header">
@@ -622,9 +657,13 @@ export function App() {
               </div>
               <div className="timeframes">
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => setTimeframe(item)}>{item}</button>)}
+                <button type="button" className={otherCoinOpen ? 'selected' : ''} onClick={() => setOtherCoinOpen((current) => !current)}>其他币</button>
+                <button type="button" className={leaderCoinOpen ? 'selected' : ''} onClick={() => setLeaderCoinOpen((current) => !current)}>龙头</button>
               </div>
             </header>
             <TradeChart trade={selectedTrade} timeframe={timeframe} />
+            {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
+            {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
             <div className="review-panel">
               <div className="metrics">
                 <Metric label="方向" value={selectedTrade.direction} />
@@ -686,13 +725,13 @@ function FreeReplayPaperTradingPanel({
   const stopLossHint = session.position ? stopLossInputHint(session.position) : '';
 
   return (
-    <aside className="paper-trading-panel" aria-label="Paper trading panel">
+    <aside className="paper-trading-panel" aria-label="模拟交易面板">
       <div className="paper-panel-header">
         <div>
           <h2>模拟交易</h2>
           <p>本金 1000 USDT</p>
         </div>
-        <button type="button" aria-label="Reset paper trading" onClick={onReset}>重置</button>
+        <button type="button" aria-label="重置模拟交易" onClick={onReset}>重置</button>
       </div>
 
       <div className="paper-stats">
@@ -703,29 +742,29 @@ function FreeReplayPaperTradingPanel({
       </div>
 
       {!session.active ? (
-        <button type="button" aria-label="Start paper trading" className="save-button paper-primary" onClick={onStart}>开始模拟</button>
+        <button type="button" aria-label="开始模拟交易" className="save-button paper-primary" onClick={onStart}>开始模拟</button>
       ) : (
         <>
           <div className="paper-section">
             <span className="paper-section-title">参数</span>
-            <div className="segmented-control" aria-label="Direction">
-              <button type="button" className={direction === 'long' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('long')}>Long</button>
-              <button type="button" className={direction === 'short' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('short')}>Short</button>
+            <div className="segmented-control" aria-label="方向">
+              <button type="button" className={direction === 'long' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('long')}>多</button>
+              <button type="button" className={direction === 'short' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('short')}>空</button>
             </div>
-            <PresetNumberInput label="仓位比例" ariaLabel="Position ratio" value={positionRatioPercent} min={1} max={100} suffix="%" presets={[10, 25, 50, 100]} onChange={setPositionRatioPercent} />
-            <PresetNumberInput label="杠杆" ariaLabel="Leverage" value={leverage} min={1} max={125} suffix="x" presets={[1, 2, 3, 5, 10, 20]} onChange={setLeverage} />
+            <PresetNumberInput label="仓位比例" ariaLabel="仓位比例" value={positionRatioPercent} min={1} max={100} suffix="%" presets={[10, 25, 50, 100]} onChange={setPositionRatioPercent} />
+            <PresetNumberInput label="杠杆" ariaLabel="杠杆" value={leverage} min={1} max={125} suffix="x" presets={[1, 2, 3, 5, 10, 20]} onChange={setLeverage} />
           </div>
 
           {!session.position ? (
             <div className="paper-section">
               <span className="paper-section-title">开仓</span>
-              <button type="button" aria-label="Market open" className="save-button paper-primary" disabled={!currentCandle} onClick={() => onMarketOpen(settings)}>市价开仓</button>
+              <button type="button" aria-label="市价开仓" className="save-button paper-primary" disabled={!currentCandle} onClick={() => onMarketOpen(settings)}>市价开仓</button>
               <label>
                 限价开仓
-                <input aria-label="Entry limit price" inputMode="decimal" value={entryLimit} onChange={(event) => setEntryLimit(event.target.value)} />
+                <input aria-label="限价开仓价格" inputMode="decimal" value={entryLimit} onChange={(event) => setEntryLimit(event.target.value)} />
               </label>
-              <button type="button" aria-label="Place entry limit" disabled={!canSubmitEntryLimit} onClick={() => onLimitOpen(entryLimitPrice, settings)}>提交限价开仓</button>
-              {session.pendingEntry && <PendingOrderView label="待开仓" price={session.pendingEntry.limitPrice} cancelLabel="Cancel entry limit" onCancel={() => onCancelOrder('entry')} />}
+              <button type="button" aria-label="提交限价开仓" disabled={!canSubmitEntryLimit} onClick={() => onLimitOpen(entryLimitPrice, settings)}>提交限价开仓</button>
+              {session.pendingEntry && <PendingOrderView label="待开仓" price={session.pendingEntry.limitPrice} cancelLabel="取消限价开仓" onCancel={() => onCancelOrder('entry')} />}
             </div>
           ) : (
             <div className="paper-section">
@@ -737,20 +776,20 @@ function FreeReplayPaperTradingPanel({
                 <span>保证金 {session.position.margin.toFixed(2)}</span>
                 <span className={profitTone(stats.floatingPnl ?? 0) ?? ''}>浮盈 {stats.floatingPnl === null ? '-' : formatSignedUsdt(stats.floatingPnl)}</span>
               </div>
-              <button type="button" aria-label="Market close" className="save-button paper-primary" disabled={!currentCandle} onClick={onMarketClose}>市价平仓</button>
+              <button type="button" aria-label="市价平仓" className="save-button paper-primary" disabled={!currentCandle} onClick={onMarketClose}>市价平仓</button>
               <label>
                 限价平仓
-                <input aria-label="Exit limit price" inputMode="decimal" value={exitLimit} onChange={(event) => setExitLimit(event.target.value)} />
+                <input aria-label="限价平仓价格" inputMode="decimal" value={exitLimit} onChange={(event) => setExitLimit(event.target.value)} />
               </label>
-              <button type="button" aria-label="Place exit limit" disabled={!canSubmitExitLimit} onClick={() => onLimitClose(exitLimitPrice)}>提交限价平仓</button>
-              {session.pendingExit && <PendingOrderView label="待平仓" price={session.pendingExit.limitPrice} cancelLabel="Cancel exit limit" onCancel={() => onCancelOrder('exit')} />}
+              <button type="button" aria-label="提交限价平仓" disabled={!canSubmitExitLimit} onClick={() => onLimitClose(exitLimitPrice)}>提交限价平仓</button>
+              {session.pendingExit && <PendingOrderView label="待平仓" price={session.pendingExit.limitPrice} cancelLabel="取消限价平仓" onCancel={() => onCancelOrder('exit')} />}
               <label>
                 止损
-                <input aria-label="Stop loss price" inputMode="decimal" placeholder={stopLossHint} value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} />
+                <input aria-label="止损价格" inputMode="decimal" placeholder={stopLossHint} value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} />
               </label>
               <span className="paper-help-text">{stopLossHint}</span>
-              <button type="button" aria-label="Place stop loss" disabled={!canSubmitStopLoss} onClick={() => onStopLoss(stopLossPrice)}>提交止损</button>
-              {session.pendingStopLoss && <PendingOrderView label="待止损" price={session.pendingStopLoss.limitPrice} cancelLabel="Cancel stop loss" onCancel={onCancelStopLoss} />}
+              <button type="button" aria-label="提交止损" disabled={!canSubmitStopLoss} onClick={() => onStopLoss(stopLossPrice)}>提交止损</button>
+              {session.pendingStopLoss && <PendingOrderView label="待止损" price={session.pendingStopLoss.limitPrice} cancelLabel="取消止损" onCancel={onCancelStopLoss} />}
             </div>
           )}
         </>
@@ -820,7 +859,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   const previousRangeKeyRef = useRef('');
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
-  const [status, setStatus] = useState('Loading candlesticks');
+  const [status, setStatus] = useState('加载 K 线');
   const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Normal);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
@@ -896,7 +935,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     previousRangeKeyRef.current = rangeKey;
     if (chart) resetChartPriceScale(chart);
     setPriceScaleMode(PriceScaleMode.Normal);
-    setStatus('Loading candlesticks');
+    setStatus('加载 K 线');
     setHoverPercentage(null);
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
@@ -908,9 +947,9 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
         const merged = mergeCandles(candles);
         updateLoadedCandles(merged);
         setRenderedCandles(merged);
-        setStatus(merged.length ? '' : 'No candlesticks');
+        setStatus(merged.length ? '' : '没有 K 线');
       })
-      .catch(() => setStatus('Candlestick loading failed'));
+      .catch(() => setStatus('K 线加载失败'));
   }, [replay.instrument, replay.startTime, replay.dataAnchorTime, timeframe]);
 
   useEffect(() => {
@@ -1029,7 +1068,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
         onCandlesLoaded(merged);
       })
       .catch(() => {
-        setStatus('Future candlestick loading failed');
+        setStatus('后续 K 线加载失败');
       })
       .finally(() => {
         loadingFutureRef.current = false;
@@ -1040,7 +1079,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
     const chart = chartApiRef.current;
     if (loadingEarlierRef.current || !chart || !loadedCandles.length) return;
     loadingEarlierRef.current = true;
-    setStatus('Loading earlier candlesticks');
+    setStatus('加载更早 K 线');
     const anchor = loadedCandles[0].timestamp;
     const params = new URLSearchParams({
       instrument: replay.instrument,
@@ -1060,7 +1099,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
       }
       setStatus('');
     } catch {
-      setStatus('Earlier candlestick loading failed');
+      setStatus('更早 K 线加载失败');
     } finally {
       loadingEarlierRef.current = false;
     }
@@ -1191,12 +1230,12 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
       <div className="drawing-toolbar">
-        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="Horizontal line" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
-        <button className={drawingTool === 'segment' ? 'selected' : ''} title="Segment" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
-        <button title="Delete selected drawing" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
-        <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
-        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
-        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-label={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
+        <button className={drawingTool === 'segment' ? 'selected' : ''} title="线段" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
+        <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
+        <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
+        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
       </div>
       {hoverPercentage !== null && <div className="hover-price-percentage">{formatHoverPricePercentage(hoverPercentage)}</div>}
       <div ref={chartRef} className="chart" />
@@ -1219,12 +1258,11 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   const renderedCandlesRef = useRef<Candlestick[]>([]);
   const loadingRef = useRef<{ earlier: boolean; later: boolean }>({ earlier: false, later: false });
   const lastLoadRangeRef = useRef<{ earlier: VisibleTimeRange | null; later: VisibleTimeRange | null }>({ earlier: null, later: null });
-  const pointerRef = useRef<{ inside: boolean; x: number }>({ inside: false, x: 0 });
+  const pointerRef = useRef<{ inside: boolean; x: number; y: number }>({ inside: false, x: 0, y: 0 });
   const pendingRenderRef = useRef(false);
   const idleTimerRef = useRef<number | null>(null);
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const activeKeyRef = useRef('');
-  const previousChartKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
   const dragRef = useRef<DrawingDrag | null>(null);
   const markersVisibleRef = useRef(true);
@@ -1328,12 +1366,6 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     setStatus('加载 K 线');
     const key = `${trade.id}:${timeframe}`;
     const chart = chartApiRef.current;
-    const previousKey = previousChartKeyRef.current;
-    const visible = chart ? currentVisibleRange(chart) : null;
-    const isTimeframeSwitch = Boolean(previousKey && previousKey !== key && previousKey.startsWith(`${trade.id}:`) && visible && chart);
-    const preservedCenterTime = isTimeframeSwitch && visible ? visibleRangeCenter(visible) : null;
-    const preservedVisibleBars = isTimeframeSwitch && chart ? visibleBarsForChart(chart, chartRef.current) : null;
-    previousChartKeyRef.current = key;
     if (chart) resetChartPriceScale(chart);
     setPriceScaleMode(PriceScaleMode.Normal);
     activeKeyRef.current = key;
@@ -1355,21 +1387,11 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         if (!series || !chart) return;
         candlesRef.current = mergeCandles(candles);
         renderedCandlesRef.current = candlesRef.current;
-        const entryRange = preservedCenterTime !== null && preservedVisibleBars !== null
-          ? centeredTimeRange(preservedCenterTime, timeframeMs(timeframe) / 1000, preservedVisibleBars)
-          : entryVisibleRange(trade.entryTime, timeframe);
+        const entryRange = entryVisibleRange(trade.entryTime, timeframe);
+        latestAnchorRef.current = { time: (entryRange.from + entryRange.to) / 2, ratio: 0.5 };
         suppressAutoLoadRef.current = true;
         renderCandles(timeframe, candlesRef.current, series, markersRef.current, showAllMarkersRef.current || markersVisibleRef.current, currentMarkers());
-        if (preservedCenterTime !== null && preservedVisibleBars !== null) {
-          const centerIndex = chart.timeScale().timeToIndex(preservedCenterTime as UTCTimestamp, true);
-          if (centerIndex != null) {
-            chart.timeScale().setVisibleLogicalRange(centeredLogicalRange(Number(centerIndex), preservedVisibleBars));
-          } else {
-            chart.timeScale().setVisibleRange(entryRange as { from: UTCTimestamp; to: UTCTimestamp });
-          }
-        } else {
-          chart.timeScale().setVisibleRange(entryRange as { from: UTCTimestamp; to: UTCTimestamp });
-        }
+        chart.timeScale().setVisibleRange(entryRange as { from: UTCTimestamp; to: UTCTimestamp });
         window.setTimeout(() => {
           suppressAutoLoadRef.current = false;
         }, 0);
@@ -1495,7 +1517,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     const visible = currentVisibleRange(chart);
     if (!visible) return null;
     const rect = chartRef.current?.getBoundingClientRect();
-    if (pointerRef.current.inside && rect && rect.width > 0) {
+    if (pointerRef.current.inside && rect && rect.width > 0 && pointerRef.current.y >= rect.top && pointerRef.current.y <= rect.bottom) {
       const timeScale = chart.timeScale();
       const scaleWidth = timeScale.width();
       // The time axis is narrower than the chart: the right price axis takes
@@ -1538,10 +1560,16 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
         candlesRef.current = mergeCandles([...candlesRef.current, ...candles]);
         if (direction === 'earlier') {
           const series = seriesRef.current;
-          if (!series) return;
+          const chart = chartApiRef.current;
+          if (!series || !chart) return;
+          const visible = currentVisibleRange(chart);
+          const anchor = latestAnchorRef.current ?? captureNavigationAnchor(chart);
           renderedCandlesRef.current = candlesRef.current;
           suppressAutoLoadRef.current = true;
           renderCandles(timeframe, renderedCandlesRef.current, series, markersRef.current, showAllMarkersRef.current || markersVisibleRef.current, currentMarkers());
+          if (visible && anchor) {
+            chart.timeScale().setVisibleRange(visibleRangeForAnchor(anchor, visible.to - visible.from) as { from: UTCTimestamp; to: UTCTimestamp });
+          }
           window.setTimeout(() => {
             suppressAutoLoadRef.current = false;
           }, 0);
@@ -1645,16 +1673,16 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   }
 
   return (
-    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX }; }} onPointerLeave={() => { pointerRef.current.inside = false; setActiveCandle(null); }}>
+    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { pointerRef.current.inside = false; setActiveCandle(null); }}>
       <div className="drawing-toolbar">
         <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
         <button className={drawingTool === 'segment' ? 'selected' : ''} title="线段" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
-        <button type="button" title="Reset price scale" aria-label="Reset price scale" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
-        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="Log price scale" aria-label="Toggle log price scale" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
+        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
         <button type="button" className={showAllMarkers ? 'selected' : ''} title={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-label={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-pressed={showAllMarkers} onClick={() => setShowAllMarkers((current) => !current)}><MapPin size={16} /></button>
         {!showAllMarkers ? (
-          <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-label={markersVisible ? 'Hide entry and exit markers' : 'Show entry and exit markers'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+          <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
         ) : null}
       </div>
       <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
@@ -1787,10 +1815,6 @@ function shouldLoadEarlierByLogicalRange(series: ISeriesApi<'Candlestick'>, rang
   return barsInfo !== null && barsInfo.barsBefore < threshold;
 }
 
-function visibleRangeCenter(range: NumericVisibleRange): number {
-  return (range.from + range.to) / 2;
-}
-
 function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'Candlestick'>): { x: number; y: number } | null {
   const x = chart.timeScale().timeToCoordinate(point.time as UTCTimestamp);
   const y = series.priceToCoordinate(point.price);
@@ -1858,7 +1882,7 @@ function formatSignedUsdt(value: number): string {
 }
 
 function formatPaperDirection(direction: PaperDirection): string {
-  return direction === 'long' ? 'Long' : 'Short';
+  return direction === 'long' ? '多' : '空';
 }
 
 function profitTone(value: number): 'good' | 'bad' | undefined {

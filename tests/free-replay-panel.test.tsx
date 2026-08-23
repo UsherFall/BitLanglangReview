@@ -24,8 +24,8 @@ describe('FreeReplayPanel', () => {
 
     render(<FreeReplayPanel timeframe="5m" />);
 
-    expect(screen.getByText('Loading instruments')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
+    expect(screen.getByText('加载交易对')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
     expect(screen.getByRole('option', { name: 'ETH-USDT-SWAP' })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith('/api/free-replay/instruments');
   });
@@ -36,9 +36,9 @@ describe('FreeReplayPanel', () => {
 
     render(<FreeReplayPanel timeframe="15m" onStart={onStart} />);
 
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:07' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     expect(onStart).toHaveBeenCalledWith({
       instrument: 'BTC-USDT-SWAP',
@@ -57,12 +57,12 @@ describe('FreeReplayPanel', () => {
 
     render(<FreeReplayPanel timeframe="5m" onStart={onStart} />);
 
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Search instrument'), { target: { value: 'eth' } });
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('搜索交易对'), { target: { value: 'eth' } });
     expect(screen.queryByRole('option', { name: 'BTC-USDT-SWAP' })).not.toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'ETH-USDT-SWAP' })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:07' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     expect(onStart).toHaveBeenCalledWith(expect.objectContaining({ instrument: 'ETH-USDT-SWAP' }));
   });
@@ -72,7 +72,7 @@ describe('FreeReplayPanel', () => {
 
     render(<FreeReplayPanel timeframe="5m" />);
 
-    const input = screen.getByLabelText('Start time');
+    const input = screen.getByLabelText('开始时间');
     fireEvent.input(input, { target: { value: '2024-05-21 10:07' } });
     expect(pickerMocks.close).not.toHaveBeenCalled();
 

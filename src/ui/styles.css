@@ -561,12 +561,236 @@ textarea {
 }
 
 .workspace {
+  position: relative;
   min-width: 0;
   min-height: 0;
   height: 100vh;
   display: grid;
   grid-template-rows: auto minmax(360px, 1fr) auto;
   overflow: hidden;
+}
+
+.other-coin-panel {
+  position: absolute;
+  top: 76px;
+  right: 18px;
+  z-index: 30;
+  width: min(520px, calc(100% - 36px));
+  height: 380px;
+  display: flex;
+  flex-direction: column;
+  background: #0b1017;
+  border: 1px solid #2d333b;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.other-coin-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2d333b;
+}
+
+.other-coin-search {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  padding: 0 8px;
+  color: #8b949e;
+}
+
+.other-coin-search:focus-within {
+  border-color: #3b82f6;
+}
+
+.other-coin-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #d6dee7;
+  padding: 7px 0;
+  outline: 0;
+}
+
+.other-coin-candidates {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #11161d;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.other-coin-candidates button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #d6dee7;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.other-coin-candidates button:hover {
+  background: #1f2937;
+}
+
+.other-coin-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #8b949e;
+  cursor: pointer;
+  flex: none;
+}
+
+.other-coin-close:hover {
+  color: #ffffff;
+  border-color: #4b5563;
+}
+
+.other-coin-title {
+  padding: 8px 12px 0;
+  color: #d6dee7;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.other-coin-chart {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.other-coin-status {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #8b949e;
+  pointer-events: none;
+  background: rgba(11, 16, 23, 0.65);
+}
+
+.leader-coin-panel {
+  position: absolute;
+  top: 76px;
+  left: 18px;
+  z-index: 30;
+  width: 320px;
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: #0b1017;
+  border: 1px solid #2d333b;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.leader-coin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2d333b;
+}
+
+.leader-coin-header strong {
+  color: #d6dee7;
+}
+
+.leader-coin-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 12px 0;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  padding: 0 8px;
+  color: #8b949e;
+}
+
+.leader-coin-search:focus-within {
+  border-color: #3b82f6;
+}
+
+.leader-coin-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #d6dee7;
+  padding: 7px 0;
+  outline: 0;
+}
+
+.leader-coin-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.leader-coin-empty {
+  color: #8b949e;
+  font-size: 13px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.leader-coin-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #11161d;
+  padding: 7px 10px;
+  color: #d6dee7;
+  font-size: 13px;
+}
+
+.leader-coin-item button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: #8b949e;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.leader-coin-item button:hover {
+  color: #fb7185;
+  background: rgba(251, 113, 133, 0.12);
 }
 
 .detail-header {

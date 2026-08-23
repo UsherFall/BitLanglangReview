@@ -55,10 +55,10 @@ describe('App Chart Price', () => {
     await waitFor(() => expect(chartMocks.createChartOptions).toHaveLength(1));
     expect(priceFormatterAt(0)).toBe(formatChartPrice);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free Replay' }));
-    await waitFor(() => expect(screen.getByLabelText('Instrument')).toHaveValue('LUNA-USDT-SWAP'));
-    fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '2024-05-21 10:07' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Free Replay' }));
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('LUNA-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     await waitFor(() => expect(chartMocks.createChartOptions).toHaveLength(2));
     expect(priceFormatterAt(1)).toBe(formatChartPrice);
@@ -74,13 +74,13 @@ describe('App Chart Price', () => {
     fireEvent.click(screen.getByLabelText('显示全部开平仓'));
 
     await waitFor(() => expect(screen.getByLabelText('隐藏全部开平仓')).toBeInTheDocument());
-    expect(screen.queryByLabelText('Hide entry and exit markers')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Show entry and exit markers')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('隐藏开平仓标记')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('显示开平仓标记')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('隐藏全部开平仓'));
 
     await waitFor(() => expect(screen.getByLabelText('显示全部开平仓')).toBeInTheDocument());
-    expect(screen.getByLabelText('Hide entry and exit markers')).toBeInTheDocument();
+    expect(screen.getByLabelText('隐藏开平仓标记')).toBeInTheDocument();
   });
 
   it('toggles log scale and resets the Trade Review price scale to normal autoscale', async () => {
@@ -91,11 +91,11 @@ describe('App Chart Price', () => {
     await waitFor(() => expect(chartMocks.createChartOptions).toHaveLength(1));
     chartMocks.priceScaleApplyOptions.mockClear();
 
-    fireEvent.click(screen.getByLabelText('Toggle log price scale'));
+    fireEvent.click(screen.getByLabelText('切换对数价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
 
     chartMocks.priceScaleApplyOptions.mockClear();
-    fireEvent.click(screen.getByLabelText('Reset price scale'));
+    fireEvent.click(screen.getByLabelText('重置价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 0, autoScale: true })));
   });
 });

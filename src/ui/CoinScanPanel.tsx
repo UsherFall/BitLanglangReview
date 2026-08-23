@@ -208,10 +208,12 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
 
 export type CoinScanResultsProps = {
   result: ScanResponse | null;
+  leaderCoins: string[];
+  onToggleLeaderCoin: (instrument: string) => void;
   onSetAlertInstrument: (instrument: string) => void;
 };
 
-export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResultsProps) {
+export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, onSetAlertInstrument }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
   const [expandedInstrument, setExpandedInstrument] = useState<string | null>(null);
 
@@ -271,6 +273,14 @@ export function CoinScanResults({ result, onSetAlertInstrument }: CoinScanResult
                       onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
                     >
                       {expandedInstrument === row.instrument ? '收起' : '详情'}
+                    </button>
+                    <button
+                      type="button"
+                      className="coin-scan-copy"
+                      title={leaderCoins.includes(row.instrument) ? `取消 ${shortInstrument(row.instrument)} 的龙头币标记` : `将 ${shortInstrument(row.instrument)} 记为龙头币`}
+                      onClick={() => onToggleLeaderCoin(row.instrument)}
+                    >
+                      {leaderCoins.includes(row.instrument) ? '已记' : '记龙头'}
                     </button>
                     <button
                       type="button"

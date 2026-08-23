@@ -75,8 +75,8 @@ describe('App Review Progress', () => {
     fireEvent.change(tagInput(), { target: { value: 'late' } });
     fireEvent.click(saveButton());
 
-    await waitFor(() => expect(screen.getByLabelText('Review progress')).toHaveTextContent('3 / 3'));
-    expect(screen.getByLabelText('Review progress')).toHaveTextContent('+4.00 USDT');
+    await waitFor(() => expect(screen.getByLabelText('复盘进度')).toHaveTextContent('3 / 3'));
+    expect(screen.getByLabelText('复盘进度')).toHaveTextContent('+4.00 USDT');
   });
 
   it('moves the Trade Review chart visible range by one candle with arrow keys', async () => {
@@ -107,12 +107,12 @@ describe('App Review Progress', () => {
     ])));
 
     chartMocks.setMarkers.mockClear();
-    fireEvent.click(screen.getByLabelText('Hide entry and exit markers'));
+    fireEvent.click(screen.getByLabelText('隐藏开平仓标记'));
 
     expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
 
     chartMocks.setMarkers.mockClear();
-    fireEvent.click(screen.getByLabelText('Show entry and exit markers'));
+    fireEvent.click(screen.getByLabelText('显示开平仓标记'));
 
     expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ text: expect.stringContaining('1') }),
@@ -120,7 +120,7 @@ describe('App Review Progress', () => {
     ]));
   });
 
-  it('keeps the Trade Review visible center when switching timeframe', async () => {
+  it('moves the Trade Review chart to the entry center when switching timeframe', async () => {
     vi.stubGlobal('fetch', makeFetch());
 
     render(<App />);
@@ -131,7 +131,7 @@ describe('App Review Progress', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
 
-    await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 70, to: 230 }));
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({ from: 1716121800, to: 1716391800 }));
   });
 
   it('does not move the Trade Review chart when arrow keys come from a form control', async () => {
@@ -207,11 +207,47 @@ describe('App Review Progress', () => {
 
     await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'center' }));
   });
+
+  it('opens the other coin K-line panel from the Trade Review toolbar', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await progressPanel();
+    fireEvent.click(screen.getByRole('button', { name: '其他币' }));
+
+    await waitFor(() => expect(screen.getByLabelText('其他币 K 线')).toBeInTheDocument());
+  });
+
+  it('shows margin in the Trade Review trade list', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await progressPanel();
+
+    expect(screen.getAllByText(/保证金 1\.00 USDT/).length).toBeGreaterThan(0);
+  });
+
+  it('adds a leader coin from the Trade Review toolbar panel', async () => {
+    vi.stubGlobal('fetch', makeFetch());
+
+    render(<App />);
+
+    await progressPanel();
+    fireEvent.click(screen.getByRole('button', { name: '龙头' }));
+
+    await waitFor(() => expect(screen.getByLabelText('龙头币列表')).toBeInTheDocument());
+    fireEvent.change(screen.getByPlaceholderText('搜索币种，如 ETH'), { target: { value: 'eth' } });
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'ETH-USDT-SWAP' }));
+
+    await waitFor(() => expect(screen.getByText('ETH-USDT-SWAP')).toBeInTheDocument());
+  });
 });
 
 async function progressPanel(): Promise<HTMLElement> {
-  await waitFor(() => expect(screen.getByLabelText('Review progress')).toBeInTheDocument());
-  return screen.getByLabelText('Review progress');
+  await waitFor(() => expect(screen.getByLabelText('复盘进度')).toBeInTheDocument());
+  return screen.getByLabelText('复盘进度');
 }
 
 function tagInput(): HTMLInputElement {
@@ -250,6 +286,7 @@ function makeFetch(options: { savedReview?: { tradeId: string; tags: string[]; n
       }));
     }
     if (url === '/api/reviews') return new Response(JSON.stringify(options.savedReview));
+    if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP'] }));
     if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [] }));
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
     return new Response(JSON.stringify({}));

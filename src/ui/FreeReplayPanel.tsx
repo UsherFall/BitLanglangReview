@@ -52,7 +52,7 @@ export function FreeReplayPanel({
   const [selectedInstrument, setSelectedInstrument] = useState('');
   const [instrumentSearch, setInstrumentSearch] = useState('');
   const [startTime, setStartTime] = useState('');
-  const [status, setStatus] = useState('Loading instruments');
+  const [status, setStatus] = useState('加载交易对');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const startInputRef = useRef<HTMLInputElement>(null);
   const startPickerRef = useRef<{ close(): void; destroy(): void } | null>(null);
@@ -66,7 +66,7 @@ export function FreeReplayPanel({
         setSelectedInstrument((current) => current || next.instruments[0] || '');
         setStatus('');
       })
-      .catch(() => setStatus('Failed to load instruments'));
+      .catch(() => setStatus('交易对加载失败'));
   }, []);
 
   const filteredInstruments = instruments.filter((instrument) => instrument.toLowerCase().includes(instrumentSearch.trim().toLowerCase()));
@@ -99,20 +99,20 @@ export function FreeReplayPanel({
   return (
     <div className="free-replay-panel">
       <label>
-        Search instrument
+        搜索交易对
         <input value={instrumentSearch} onChange={(event) => setInstrumentSearch(event.target.value)} />
       </label>
       <label>
-        Instrument
+        交易对
         <select value={selectedInstrument} onChange={(event) => setSelectedInstrument(event.target.value)}>
           {filteredInstruments.map((instrument) => <option key={instrument}>{instrument}</option>)}
         </select>
       </label>
       <label>
-        Start time
+        开始时间
         <input
           ref={startInputRef}
-          aria-label="Start time"
+          aria-label="开始时间"
           value={startTime}
           onInput={(event) => {
             setStartTime(event.currentTarget.value);
@@ -136,10 +136,10 @@ export function FreeReplayPanel({
           startCursorTime: cursorTime,
           cursorTime,
         });
-      }}>Start Free Replay</button>
+      }}>开始回溯复盘</button>
       <div className="replay-controls">
-        <button type="button" onClick={onRewind}>Previous candle</button>
-        <button type="button" onClick={onReveal}>Next candle</button>
+        <button type="button" onClick={onRewind}>上一根 K 线</button>
+        <button type="button" onClick={onReveal}>下一根 K 线</button>
       </div>
       <div className="free-replay-history" data-testid="free-replay-history">
         <button type="button" className="history-header" aria-expanded={!historyCollapsed} onClick={() => setHistoryCollapsed((current) => !current)}>
@@ -172,7 +172,7 @@ export function FreeReplayPanel({
                   <button
                     type="button"
                     className="history-delete"
-                    aria-label={`Delete session ${session.instrument} ${session.startTime}`}
+                    aria-label={`删除会话 ${session.instrument} ${session.startTime}`}
                     title="删除会话"
                     onClick={(event) => {
                       event.stopPropagation();
