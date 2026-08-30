@@ -105,8 +105,9 @@ scanShrink(params):
   anchor = params.anchor ?? Date.now()
   minScore = params.minScore ?? 0
   tasks = top × scanTimeframes
-  results = mapLimit(tasks, concurrency 10, ({ticker, timeframe}) => {
-    candles = candleSource.getCandlesticks({ instrument, timeframe, anchor, direction: 'earlier', limit: SCAN_WINDOW })
+  results = mapLimit(tasks, concurrency 5, ({ticker, timeframe}) => {
+    pacer.pace()   // ≥50ms between request starts → ≤20 req/s, avoids Binance 418 IP ban
+    candles = candleSource.getCandlesticks({ instrument, timeframe, anchor, direction: 'earlier', limit: SCAN_WINDOW, refresh: anchor === undefined })
     completed = candles.filter(c => c.timestamp + timeframeMs(timeframe) <= anchor)   // drop forming bar by time
     return probeStructure(completed, defaultStructureParams())
   })
@@ -121,7 +122,7 @@ scanShrink(params):
 
 - **Uniform candle window**: `SCAN_WINDOW = 100` bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The detector needs a band + a same-length preceding stretch, so the window holds both.
 - The forming bar is dropped **by time** (`timestamp + timeframeMs(timeframe) <= anchor`). Do not `slice(0, -1)` unconditionally — the candle cache may contain no forming bar.
-- **Concurrency**: 10 in-flight candle fetches (mapLimit-style); repeat scans reuse the shared candle cache.
+- **Concurrency**: 5 in-flight candle fetches (mapLimit-style). A module-scope **pacer** (`createRequestPacer`, `SCAN_MIN_INTERVAL_MS=50`) spaces request *starts* ≥50ms apart across all workers and concurrent scans — one click = 300 forced-fresh klines requests (topN 60 × 5 timeframes), and without pacing that burst trips Binance's IP auto-ban (HTTP 418). `SCAN_CONCURRENCY=5`, min-interval 50ms (~20 req/s, well under the 2400 weight/min budget), jitter 15ms.
 - **Sorting** is done by the service: `qualifiedCount` descending (cross-timeframe consistency is a stronger signal), then `bestScore` descending.
 
 ### Candle cache freshness

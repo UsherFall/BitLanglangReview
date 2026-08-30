@@ -11,8 +11,9 @@ coverage/
 *.log
 .playwright-mcp/
 
-# Local review data. Keep the database on this machine or migrate it manually.
-data/*.sqlite
+# Local review data. Keep the database and archive export on this machine.
+data/
+data.zip
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite-journal

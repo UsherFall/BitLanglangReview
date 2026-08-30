@@ -12,7 +12,20 @@ import { timeframeMs } from './candlestick-service';
 import type { CandleSource, TickerSource } from './market-data';
 
 /** Concurrency cap for the per-(coin, timeframe) candle fetches. */
-const SCAN_CONCURRENCY = 10;
+const SCAN_CONCURRENCY = 5;
+
+/**
+ * Minimum gap between consecutive market-data request starts (ms). One scan =
+ * topN × timeframes klines requests (default 60 × 5 = 300), all forced fresh;
+ * unpaced they burst well past Binance's ~20 req/s comfort zone and trip the IP
+ * auto-ban (HTTP 418). 50ms caps the burst at ~20 req/s — 300 requests finish in
+ * ~15s while using only a fraction of the 2400 weight/min budget (klines at
+ * limit=100 cost 1–2 weight). Shared across scans via the module-scope pacer.
+ */
+const SCAN_MIN_INTERVAL_MS = 50;
+
+/** Optional per-request jitter (ms) added on top of the min gap to de-align workers. */
+const SCAN_PACE_JITTER_MS = 15;
 
 /**
  * Candle window per (coin, timeframe) — a single value for EVERY timeframe
@@ -25,6 +38,32 @@ const SCAN_WINDOW = 100;
 /** Neutral placeholders for a timeframe with no convergence structure. */
 function neutralStructure(): StructureResult {
   return { structure: null, position: 0, score: 0, touchCount: 0, qualified: false };
+}
+
+/**
+ * Throttles request *starts* to at least `minIntervalMs` apart. Callers await
+ * `pace()` right before issuing a request; a global `nextAllowedAt` enforces the
+ * gap across ALL concurrent workers (and scans), so a burst of N requests lands
+ * spread over N × minIntervalMs instead of all at once. `jitterMs` adds a random
+ * extra delay to keep workers from aligning into sub-interval wavefronts.
+ */
+export function createRequestPacer(minIntervalMs: number, jitterMs: number): { pace: () => Promise<void> } {
+  let nextAllowedAt = 0;
+  return {
+    async pace(): Promise<void> {
+      const now = Date.now();
+      const wait = Math.max(0, nextAllowedAt - now) + Math.random() * jitterMs;
+      nextAllowedAt = Math.max(nextAllowedAt, now) + minIntervalMs;
+      if (wait > 0) await sleep(wait);
+    },
+  };
+}
+
+/** Shared pacer so concurrent scans share one request-rate budget. */
+const scanPacer = createRequestPacer(SCAN_MIN_INTERVAL_MS, SCAN_PACE_JITTER_MS);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class CoinScanService {
@@ -59,18 +98,18 @@ export class CoinScanService {
       scanTimeframes.map((timeframe) => ({ ticker, timeframe })),
     );
     const results = await mapLimit(tasks, SCAN_CONCURRENCY, async ({ ticker, timeframe }) => {
+      // Throttle request starts across the whole scan (and concurrent scans) so
+      // the 300-request burst no longer trips Binance's IP auto-ban (418).
+      await scanPacer.pace();
       const candles = await this.candleSource.getCandlesticks({
         instrument: ticker.instrument,
         timeframe,
         anchor,
         direction: 'earlier',
         limit: SCAN_WINDOW,
-          // The user asks for a fresh scan every time they click 扫描, so bypass
-          // the shared candle cache freshness gate and update the local cache.
-          refresh: params.anchor === undefined,
-                    
-          // the shared candle cache freshness gate and update the local cache.
-  
+        // Fresh bars on every 扫描 click: bypass the shared candle cache freshness
+        // gate and update the local cache (user decision).
+        refresh: params.anchor === undefined,
       });
       // Drop the still-forming bar by time (timestamp + step > anchor). The
       // candle cache may or may not contain the forming bar, so slicing the
