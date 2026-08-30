@@ -766,3 +766,36 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 
 - 跑 dev server 实际验证 UI 扫描结果
 - 用户决定剩余收敛数是否可接受 / 是否再收紧
+
+
+## Session 12: 币安扫描限流与重试优化 + data.zip 清理
+
+**Date**: 2026-08-30
+**Task**: 币安扫描限流与重试优化 + data.zip 清理
+**Branch**: `master`
+
+### Summary
+
+币安 418 修复: scan 限速(并发10->5, 50ms节流~20req/s), http 层 429/418 退避重试(418等满封禁只试一次)。data.zip 彻底清出历史(git filter-branch + force push), gitignore 加 data/ 与 data.zip。187 测试绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b60e962` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
