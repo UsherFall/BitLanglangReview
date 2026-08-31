@@ -103,6 +103,12 @@ export type ScanResponse = {
   qualifiedCount: number;
   params: ShrinkScanParams;
   scannedAt: string;
+  /**
+   * Rate-limit warnings raised DURING this scan (Binance HTTP 429 backoffs).
+   * The scan still succeeded, but the pipeline had to pause for the IP's weight
+   * window to cool down. Present only when at least one backoff occurred.
+   */
+  warnings?: string[];
 };
 
 /** Minimum band length (in K bars) for a volatility convergence. */

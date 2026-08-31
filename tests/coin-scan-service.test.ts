@@ -298,4 +298,21 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
     expect(result.scanned).toEqual([]);
     expect(result.qualifiedCount).toBe(0);
   });
+
+  it('discards stale rate-limit warnings and reports only those raised during the scan', async () => {
+    const source = buildSource(allStrongPlan);
+    const warnings: string[] = [];
+    const service = new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      { takeWarnings: () => warnings.splice(0) },
+    );
+    // A warning left over from an earlier scan / alert tick is dropped...
+    warnings.push('stale');
+    const resultPromise = service.scanShrink(params);
+    // ...while one raised mid-scan is surfaced on the response.
+    warnings.push('币安限频(HTTP 429)，已自动退避 10 秒');
+    const result = await resultPromise;
+    expect(result.warnings).toEqual(['币安限频(HTTP 429)，已自动退避 10 秒']);
+  });
 });

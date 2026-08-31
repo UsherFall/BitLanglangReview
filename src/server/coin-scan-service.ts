@@ -10,6 +10,7 @@ import {
 import type { ReviewTimeframe } from '../domain/trade';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, TickerSource } from './market-data';
+import { binanceRateGate, type RateGate } from './http';
 
 /** Concurrency cap for the per-(coin, timeframe) candle fetches. */
 const SCAN_CONCURRENCY = 5;
@@ -70,6 +71,7 @@ export class CoinScanService {
   constructor(
     private readonly tickerSource: TickerSource,
     private readonly candleSource: CandleSource,
+    private readonly rateLimitWarnings: Pick<RateGate, 'takeWarnings'> = binanceRateGate,
   ) {}
 
   /**
@@ -80,6 +82,12 @@ export class CoinScanService {
    * qualifiedCount desc then bestScore desc (score larger = stronger).
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
+    // Discard stale rate-limit warnings (e.g. left by an earlier scan or the
+    // alert monitor) so only warnings raised DURING this scan are reported.
+    this.rateLimitWarnings.takeWarnings();
+    // Throttle the ticker call too: it shares the scan's request-rate budget
+    // with the klines burst (the whole-market 24hr ticker costs 40 weight).
+    await scanPacer.pace();
     const tickers = await this.tickerSource.listTickers();
     const top = tickers
       .filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h)
@@ -156,7 +164,17 @@ export class CoinScanService {
     // Echo the effective params, including the resolved anchor (Date.now() when
     // absent), so the response.params.anchor always reflects what was actually used.
     const echoedParams = { ...params, anchor };
-    return { scanned, qualifiedCount: scanned.length, params: echoedParams, scannedAt: new Date().toISOString() };
+    const response: ScanResponse = {
+      scanned,
+      qualifiedCount: scanned.length,
+      params: echoedParams,
+      scannedAt: new Date().toISOString(),
+    };
+    // Surface any rate-limit backoffs the scan hit (Binance 429) — a scan can
+    // still succeed while the pipeline had to pause for the weight window.
+    const warnings = this.rateLimitWarnings.takeWarnings();
+    if (warnings.length > 0) response.warnings = warnings;
+    return response;
   }
 }
 

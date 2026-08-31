@@ -560,6 +560,10 @@ textarea {
   color: #fb7185;
 }
 
+.warn {
+  color: #fbbf24;
+}
+
 .workspace {
   position: relative;
   min-width: 0;

@@ -27,6 +27,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   const [anchorInput, setAnchorInput] = useState('');
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [scanWarnings, setScanWarnings] = useState<string[]>([]);
 
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
   const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
@@ -52,6 +53,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
     }
     setScanning(true);
     setError(null);
+    setScanWarnings([]);
     try {
       const query = new URLSearchParams({
         method: 'shrink',
@@ -63,6 +65,7 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
       const response = await fetch(`/api/scan?${query.toString()}`);
       const payload = (await response.json()) as ScanResponse & { error?: string };
       if (!response.ok) throw new Error(payload.error || '扫描失败');
+      setScanWarnings(payload.warnings ?? []);
       onScanned(payload);
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : '扫描失败');
@@ -157,6 +160,9 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
       </button>
+      {scanWarnings.length > 0 && scanWarnings.map((warning) => (
+        <p key={warning} className="panel-status warn">{warning}</p>
+      ))}
       {error && <p className="panel-status bad">{error}</p>}
       <div className="coin-scan-alerts">
         <h3>价格警报</h3>

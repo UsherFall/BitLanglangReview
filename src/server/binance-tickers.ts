@@ -34,11 +34,39 @@ type BinanceTicker24hr = {
  * Binance `quoteVolume` is already USDT-denominated (unlike OKX, where the scan
  * multiplies `volCcy24h * last`), and `priceChangePercent` is already a percent,
  * so no conversion is needed here.
+ *
+ * The full-market call costs 40 request weight on Binance, so the result is
+ * cached briefly. Both the coin scan and the alert monitor share one source
+ * instance, and 24h volume/price change move slowly enough that a 30s TTL never
+ * skews a scan — it just stops repeated scans (or a scan colliding with an alert
+ * tick) from burning 40 weight each time.
  */
+const TICKER_TTL_MS = 30_000;
+
 export class BinanceTickerSource implements TickerSource {
+  private cache: { at: number; tickers: Ticker[] } | null = null;
+  private inflight: Promise<Ticker[]> | null = null;
+
   constructor(private readonly fetchJson: FetchJson = defaultBinanceFetchJson) {}
 
   async listTickers(): Promise<Ticker[]> {
+    const now = Date.now();
+    if (this.cache && now - this.cache.at < TICKER_TTL_MS) return this.cache.tickers;
+    // Reuse an in-flight fetch so a scan and an alert tick landing together
+    // only ever produce one request.
+    if (this.inflight) return this.inflight;
+    this.inflight = this.fetchAndMap()
+      .then((tickers) => {
+        this.cache = { at: Date.now(), tickers };
+        return tickers;
+      })
+      .finally(() => {
+        this.inflight = null;
+      });
+    return this.inflight;
+  }
+
+  private async fetchAndMap(): Promise<Ticker[]> {
     const response = (await this.fetchJson('https://fapi.binance.com/fapi/v1/ticker/24hr')) as BinanceTicker24hr[];
     if (!Array.isArray(response)) return [];
     return response
