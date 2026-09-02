@@ -20,10 +20,14 @@ import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { OtherCoinChart } from './OtherCoinChart';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
+  availableMargin,
   cancelPendingOrder,
+  cancelStopLoss,
+  closeLegMarket,
   closeMarket,
   currentCursorCandle,
   initialPaperTradingSession,
+  normalizePaperTradingSession,
   openMarket,
   paperTradeMarkers,
   paperTradingStats,
@@ -32,8 +36,9 @@ import {
   placeStopLoss,
   processRevealedCandle,
   startPaperTrading,
-  cancelStopLoss,
   type PaperDirection,
+  type PaperLeg,
+  type PaperOrder,
   type PaperStats,
   type PaperTradingSettings,
   type PaperTradingSession,
@@ -363,7 +368,7 @@ export function App() {
       cursorTime: payload.cursorTime,
     });
     setTimeframe(payload.timeframe);
-    setPaperTrading(payload.paperTrading);
+    setPaperTrading(normalizePaperTradingSession(payload.paperTrading));
     setFreeReplayCandles([]);
   }
 
@@ -636,11 +641,12 @@ export function App() {
                 onReset={() => setPaperTrading(initialPaperTradingSession())}
                 onMarketOpen={(settings) => freeReplayCurrentCandle && setPaperTrading((current) => openMarket(current, freeReplayCurrentCandle, settings, freeReplay.progressTime))}
                 onLimitOpen={(limitPrice, settings) => setPaperTrading((current) => placeEntryLimit(current, limitPrice, settings, freeReplay.progressTime))}
-                onMarketClose={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle, freeReplay.progressTime))}
-                onLimitClose={(limitPrice) => setPaperTrading((current) => placeExitLimit(current, limitPrice, freeReplay.progressTime))}
+                onCloseAll={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle, freeReplay.progressTime))}
+                onCloseLeg={(legId, closeRatioPercent) => freeReplayCurrentCandle && setPaperTrading((current) => closeLegMarket(current, legId, freeReplayCurrentCandle, freeReplay.progressTime, closeRatioPercent))}
+                onLimitClose={(limitPrice, quantity) => setPaperTrading((current) => placeExitLimit(current, limitPrice, quantity, freeReplay.progressTime))}
                 onCancelOrder={(kind) => setPaperTrading((current) => cancelPendingOrder(current, kind))}
-                onStopLoss={(stopPrice) => setPaperTrading((current) => placeStopLoss(current, stopPrice, freeReplay.progressTime))}
-                onCancelStopLoss={() => setPaperTrading((current) => cancelStopLoss(current))}
+                onSetStopLoss={(legId, stopPrice) => freeReplayCurrentCandle && setPaperTrading((current) => placeStopLoss(current, legId, stopPrice, freeReplayCurrentCandle.close, freeReplay.progressTime))}
+                onCancelStopLoss={(legId) => setPaperTrading((current) => cancelStopLoss(current, legId))}
               />
             </div>
           </>
@@ -690,10 +696,11 @@ function FreeReplayPaperTradingPanel({
   onReset,
   onMarketOpen,
   onLimitOpen,
-  onMarketClose,
+  onCloseAll,
+  onCloseLeg,
   onLimitClose,
   onCancelOrder,
-  onStopLoss,
+  onSetStopLoss,
   onCancelStopLoss,
 }: {
   session: PaperTradingSession;
@@ -703,26 +710,39 @@ function FreeReplayPaperTradingPanel({
   onReset: () => void;
   onMarketOpen: (settings: PaperTradingSettings) => void;
   onLimitOpen: (limitPrice: number, settings: PaperTradingSettings) => void;
-  onMarketClose: () => void;
-  onLimitClose: (limitPrice: number) => void;
+  onCloseAll: () => void;
+  onCloseLeg: (legId: string, closeRatioPercent: number) => void;
+  onLimitClose: (limitPrice: number, quantity: number) => void;
   onCancelOrder: (kind: 'entry' | 'exit') => void;
-  onStopLoss: (stopPrice: number) => void;
-  onCancelStopLoss: () => void;
+  onSetStopLoss: (legId: string, stopPrice: number) => void;
+  onCancelStopLoss: (legId: string) => void;
 }) {
   const [direction, setDirection] = useState<PaperDirection>('long');
   const [positionRatioPercent, setPositionRatioPercent] = useState(100);
   const [leverage, setLeverage] = useState(1);
+  const [closeRatioPercent, setCloseRatioPercent] = useState(100);
   const [entryLimit, setEntryLimit] = useState('');
   const [exitLimit, setExitLimit] = useState('');
-  const [stopLoss, setStopLoss] = useState('');
   const settings = { direction, positionRatioPercent, leverage };
+  const available = availableMargin(session);
+  const position = session.position;
   const entryLimitPrice = Number(entryLimit);
   const exitLimitPrice = Number(exitLimit);
-  const stopLossPrice = Number(stopLoss);
+  const currentPrice = currentCandle?.close;
+  const positionQuantity = position?.quantity ?? 0;
+  const exitQuantity = positionQuantity * closeRatioPercent / 100;
+  const canOpenMarket = session.active && !session.position && !!currentCandle;
+  const canAddMarket = session.active && !!position && available > 0 && !!currentCandle;
   const canSubmitEntryLimit = session.active && !session.position && Number.isFinite(entryLimitPrice) && entryLimitPrice > 0;
-  const canSubmitExitLimit = session.active && !!session.position && Number.isFinite(exitLimitPrice) && exitLimitPrice > 0;
-  const canSubmitStopLoss = session.active && !!session.position && isValidStopLossInput(session.position, stopLossPrice);
-  const stopLossHint = session.position ? stopLossInputHint(session.position) : '';
+  const canSubmitAddLimit = session.active && !!position && available > 0 && Number.isFinite(entryLimitPrice) && entryLimitPrice > 0;
+  const canSubmitExitLimit = session.active && !!position
+    && Number.isFinite(exitLimitPrice) && exitLimitPrice > 0
+    && exitQuantity > 0 && exitQuantity <= positionQuantity + 1e-9;
+  // Each market/limit close submission consumes the chosen 平仓比例 once, then
+  // the control resets to 100% so a later close is a real full close instead
+  // of silently repeating an earlier 25/50/75% choice.
+  const submitLegClose = (legId: string) => { onCloseLeg(legId, closeRatioPercent); setCloseRatioPercent(100); };
+  const submitLimitClose = () => { onLimitClose(exitLimitPrice, exitQuantity); setCloseRatioPercent(100); };
 
   return (
     <aside className="paper-trading-panel" aria-label="模拟交易面板">
@@ -748,17 +768,17 @@ function FreeReplayPaperTradingPanel({
           <div className="paper-section">
             <span className="paper-section-title">参数</span>
             <div className="segmented-control" aria-label="方向">
-              <button type="button" className={direction === 'long' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('long')}>多</button>
-              <button type="button" className={direction === 'short' ? 'selected' : ''} disabled={!!session.position} onClick={() => setDirection('short')}>空</button>
+              <button type="button" className={direction === 'long' ? 'selected' : ''} disabled={!!position} onClick={() => setDirection('long')}>多</button>
+              <button type="button" className={direction === 'short' ? 'selected' : ''} disabled={!!position} onClick={() => setDirection('short')}>空</button>
             </div>
             <PresetNumberInput label="仓位比例" ariaLabel="仓位比例" value={positionRatioPercent} min={1} max={100} suffix="%" presets={[10, 25, 50, 100]} onChange={setPositionRatioPercent} />
             <PresetNumberInput label="杠杆" ariaLabel="杠杆" value={leverage} min={1} max={125} suffix="x" presets={[1, 2, 3, 5, 10, 20]} onChange={setLeverage} />
           </div>
 
-          {!session.position ? (
+          {!position ? (
             <div className="paper-section">
               <span className="paper-section-title">开仓</span>
-              <button type="button" aria-label="市价开仓" className="save-button paper-primary" disabled={!currentCandle} onClick={() => onMarketOpen(settings)}>市价开仓</button>
+              <button type="button" aria-label="市价开仓" className="save-button paper-primary" disabled={!canOpenMarket} onClick={() => onMarketOpen(settings)}>市价开仓</button>
               <label>
                 限价开仓
                 <input aria-label="限价开仓价格" inputMode="decimal" value={entryLimit} onChange={(event) => setEntryLimit(event.target.value)} />
@@ -767,30 +787,58 @@ function FreeReplayPaperTradingPanel({
               {session.pendingEntry && <PendingOrderView label="待开仓" price={session.pendingEntry.limitPrice} cancelLabel="取消限价开仓" onCancel={() => onCancelOrder('entry')} />}
             </div>
           ) : (
-            <div className="paper-section">
-              <span className="paper-section-title">持仓</span>
-              <div className="position-summary">
-                <span>{formatPaperDirection(session.position.direction)}</span>
-                <span>开仓 {session.position.entryPrice}</span>
-                <span>数量 {session.position.quantity.toFixed(4)}</span>
-                <span>保证金 {session.position.margin.toFixed(2)}</span>
-                <span className={profitTone(stats.floatingPnl ?? 0) ?? ''}>浮盈 {stats.floatingPnl === null ? '-' : formatSignedUsdt(stats.floatingPnl)}</span>
+            <>
+              <div className="paper-section">
+                <span className="paper-section-title">持仓</span>
+                <div className="position-summary">
+                  <span>{formatPaperDirection(position.direction)}</span>
+                  <span>均价 {position.entryPrice}</span>
+                  <span>数量 {position.quantity.toFixed(4)}</span>
+                  <span>保证金 {position.margin.toFixed(2)}</span>
+                  <span>可用 {available.toFixed(2)}</span>
+                  <span className={profitTone(stats.floatingPnl ?? 0) ?? ''}>浮盈 {stats.floatingPnl === null ? '-' : formatSignedUsdt(stats.floatingPnl)}</span>
+                </div>
               </div>
-              <button type="button" aria-label="市价平仓" className="save-button paper-primary" disabled={!currentCandle} onClick={onMarketClose}>市价平仓</button>
-              <label>
-                限价平仓
-                <input aria-label="限价平仓价格" inputMode="decimal" value={exitLimit} onChange={(event) => setExitLimit(event.target.value)} />
-              </label>
-              <button type="button" aria-label="提交限价平仓" disabled={!canSubmitExitLimit} onClick={() => onLimitClose(exitLimitPrice)}>提交限价平仓</button>
-              {session.pendingExit && <PendingOrderView label="待平仓" price={session.pendingExit.limitPrice} cancelLabel="取消限价平仓" onCancel={() => onCancelOrder('exit')} />}
-              <label>
-                止损
-                <input aria-label="止损价格" inputMode="decimal" placeholder={stopLossHint} value={stopLoss} onChange={(event) => setStopLoss(event.target.value)} />
-              </label>
-              <span className="paper-help-text">{stopLossHint}</span>
-              <button type="button" aria-label="提交止损" disabled={!canSubmitStopLoss} onClick={() => onStopLoss(stopLossPrice)}>提交止损</button>
-              {session.pendingStopLoss && <PendingOrderView label="待止损" price={session.pendingStopLoss.limitPrice} cancelLabel="取消止损" onCancel={onCancelStopLoss} />}
-            </div>
+              <div className="paper-section">
+                <span className="paper-section-title">加仓</span>
+                <button type="button" aria-label="市价加仓" className="save-button paper-primary" disabled={!canAddMarket} onClick={() => onMarketOpen(settings)}>市价加仓</button>
+                <label>
+                  限价加仓
+                  <input aria-label="限价加仓价格" inputMode="decimal" value={entryLimit} onChange={(event) => setEntryLimit(event.target.value)} />
+                </label>
+                <button type="button" aria-label="提交限价加仓" disabled={!canSubmitAddLimit} onClick={() => onLimitOpen(entryLimitPrice, settings)}>提交限价加仓</button>
+                {session.pendingEntry && <PendingOrderView label="待加仓" price={session.pendingEntry.limitPrice} cancelLabel="取消限价加仓" onCancel={() => onCancelOrder('entry')} />}
+              </div>
+              <div className="paper-section">
+                <span className="paper-section-title">平仓</span>
+                <button type="button" aria-label="全部市价平仓" className="save-button paper-primary" disabled={!currentCandle} onClick={onCloseAll}>全部市价平仓</button>
+                <PresetNumberInput label="平仓比例" ariaLabel="平仓比例" value={closeRatioPercent} min={1} max={100} suffix="%" presets={[25, 50, 75, 100]} onChange={setCloseRatioPercent} />
+                <span className="paper-help-text">平仓比例用于对下方某一仓减仓；提交后复位 100%</span>
+                <label>
+                  限价平仓
+                  <input aria-label="限价平仓价格" inputMode="decimal" value={exitLimit} onChange={(event) => setExitLimit(event.target.value)} />
+                </label>
+                <button type="button" aria-label="提交限价平仓" disabled={!canSubmitExitLimit} onClick={submitLimitClose}>提交限价平仓</button>
+                {session.pendingExit && <PendingOrderView label="待平仓" price={session.pendingExit.limitPrice} cancelLabel="取消限价平仓" onCancel={() => onCancelOrder('exit')} />}
+              </div>
+              <div className="paper-section">
+                <span className="paper-section-title">逐仓止损</span>
+                <p className="paper-help-text">每个开仓批次（仓）一个止损，数量自动为该仓剩余数量</p>
+                {position.legs.map((leg, index) => (
+                  <LegStopRow
+                    key={leg.id}
+                    leg={leg}
+                    index={index}
+                    currentPrice={currentPrice}
+                    direction={position.direction}
+                    closeRatioPercent={closeRatioPercent}
+                    onClose={submitLegClose}
+                    onSetStopLoss={onSetStopLoss}
+                    onCancelStopLoss={onCancelStopLoss}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </>
       )}
@@ -828,13 +876,60 @@ function PendingOrderView({ label, price, cancelLabel, onCancel }: { label: stri
   return <div className="pending-order"><span>{label} {price}</span><button type="button" aria-label={cancelLabel} onClick={onCancel}>取消</button></div>;
 }
 
-function isValidStopLossInput(position: NonNullable<PaperTradingSession['position']>, stopPrice: number): boolean {
-  if (!Number.isFinite(stopPrice) || stopPrice <= 0) return false;
-  return position.direction === 'long' ? stopPrice < position.entryPrice : stopPrice > position.entryPrice;
+function LegStopRow({ leg, index, currentPrice, direction, closeRatioPercent, onClose, onSetStopLoss, onCancelStopLoss }: {
+  leg: PaperLeg;
+  index: number;
+  currentPrice: number | undefined;
+  direction: PaperDirection;
+  closeRatioPercent: number;
+  onClose: (legId: string) => void;
+  onSetStopLoss: (legId: string, stopPrice: number) => void;
+  onCancelStopLoss: (legId: string) => void;
+}) {
+  const [price, setPrice] = useState(leg.stopPrice !== undefined ? String(leg.stopPrice) : '');
+  useEffect(() => {
+    setPrice(leg.stopPrice !== undefined ? String(leg.stopPrice) : '');
+  }, [leg.stopPrice]);
+  const priceNumber = Number(price);
+  const canSet = currentPrice !== undefined
+    && Number.isFinite(priceNumber) && priceNumber > 0
+    && isValidStopLossDirection(direction, priceNumber, currentPrice);
+  const hasStop = leg.stopPrice !== undefined;
+  const hint = currentPrice !== undefined ? stopLossDirectionHint(direction, currentPrice) : '';
+  return (
+    <div className="leg-stop-row">
+      <div className="leg-stop-meta">
+        <strong>仓 {index + 1}</strong>
+        <span>开 {leg.entryPrice}</span>
+        <span>量 {leg.quantity.toFixed(4)}</span>
+      </div>
+      <div className="leg-stop-control">
+        <button type="button" aria-label={`平仓仓${index + 1}`} disabled={currentPrice === undefined} onClick={() => onClose(leg.id)}>市价平 {closeRatioPercent}%</button>
+        <input aria-label={`仓${index + 1} 止损价`} inputMode="decimal" placeholder={hasStop ? undefined : hint} value={price} onChange={(event) => setPrice(event.target.value)} />
+        <button
+          type="button"
+          aria-label={`${hasStop ? '改' : '设'}仓${index + 1}止损`}
+          disabled={!canSet}
+          onClick={() => { onSetStopLoss(leg.id, priceNumber); setPrice(String(priceNumber)); }}
+        >
+          {hasStop ? '改价' : '设止损'}
+        </button>
+        {hasStop && (
+          <button type="button" aria-label={`删除仓${index + 1}止损`} onClick={() => onCancelStopLoss(leg.id)}>删除</button>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function stopLossInputHint(position: NonNullable<PaperTradingSession['position']>): string {
-  return position.direction === 'long' ? `低于开仓价 ${position.entryPrice}` : `高于开仓价 ${position.entryPrice}`;
+function isValidStopLossDirection(direction: PaperDirection, stopPrice: number, currentPrice: number): boolean {
+  if (!Number.isFinite(stopPrice) || stopPrice <= 0) return false;
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return false;
+  return direction === 'long' ? stopPrice < currentPrice : stopPrice > currentPrice;
+}
+
+function stopLossDirectionHint(direction: PaperDirection, currentPrice: number): string {
+  return direction === 'long' ? `低于当前价 ${currentPrice}` : `高于当前价 ${currentPrice}`;
 }
 
 function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; onCandlesLoaded: (candles: Candlestick[]) => void }) {

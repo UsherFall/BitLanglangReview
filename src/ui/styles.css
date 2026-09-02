@@ -977,6 +977,38 @@ p {
   padding: 8px;
 }
 
+.leg-stop-row {
+  display: grid;
+  gap: 6px;
+  padding: 7px 0;
+  border-top: 1px solid #252c36;
+  font-size: 13px;
+}
+
+.leg-stop-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  color: #8b949e;
+}
+
+.leg-stop-meta strong {
+  color: #e6edf3;
+  font-size: 13px;
+}
+
+.leg-stop-control {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.leg-stop-control input {
+  min-width: 0;
+}
+
 .paper-trade-list {
   max-height: 260px;
   overflow: auto;
