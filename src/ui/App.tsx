@@ -51,7 +51,28 @@ type TradeResponse = {
   trades: ReviewedTrade[];
   instruments: string[];
   tags: string[];
+  /** How many trades carry each tag. Drives the "N 笔" hint in the tag dropdown. */
+  tagCounts: Record<string, number>;
 };
+
+/** Response of `POST /api/tags/rename` and `POST /api/tags/delete`. */
+type TagMutationResponse = {
+  affected: number;
+  tags: string[];
+  tagCounts: Record<string, number>;
+};
+
+/** A global tag edit: rename when `to` is a name, delete when `to` is null. */
+type TagMutation = { from: string; to: string | null };
+
+/** Applies a global tag edit to one trade's review. Dedupes for the merge case. */
+function rewriteTradeTags(trade: ReviewedTrade, from: string, to: string | null): ReviewedTrade {
+  if (!trade.review) return trade;
+  const tags = to === null
+    ? trade.review.tags.filter((tag) => tag !== from)
+    : trade.review.tags.map((tag) => (tag === from ? to : tag));
+  return { ...trade, review: { ...trade.review, tags: [...new Set(tags)] } };
+}
 
 const sortLabels: Record<SortField, string> = {
   entryTime: '时间',
@@ -134,7 +155,7 @@ function sessionKey(instrument: string, startTime: string): string {
 
 export function App() {
   const [filters, setFilters] = useState<ReviewQueueOptions>({ sortField: 'entryTime', sortDirection: 'asc' });
-  const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [] });
+  const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [], tagCounts: {} });
   const [selectedId, setSelectedId] = useState<string>('');
   const selectedTradeRowRef = useRef<HTMLDivElement | null>(null);
   const sidebarDragRef = useRef<SidebarDrag | null>(null);
@@ -272,8 +293,37 @@ export function App() {
     setData((current) => ({
       ...current,
       tags: [...new Set([...current.tags, ...review.tags])].sort(),
+      tagCounts: { ...current.tagCounts },
       trades: current.trades.map((trade) => (trade.id === review.tradeId ? { ...trade, review } : trade)),
     }));
+  }
+
+  /**
+   * Renames (`to`) or deletes (`to === null`) a tag for EVERY trade, then patches
+   * the local snapshot with the server's post-mutation state: the tag list, per-tag
+   * counts, every loaded trade's tags, and the active tag filter (renaming the
+   * filtered tag keeps the queue; deleting it clears the filter so the queue does
+   * not silently empty out). The editor patches its own draft tags, so it is left
+   * alone here — remounting it would throw away an unsaved note.
+   */
+  async function mutateTag({ from, to }: TagMutation): Promise<void> {
+    const response = await fetch(to === null ? '/api/tags/delete' : '/api/tags/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(to === null ? { tag: from } : { from, to }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? '标签操作失败');
+    }
+    const result = (await response.json()) as TagMutationResponse;
+    setData((current) => ({
+      ...current,
+      tags: result.tags,
+      tagCounts: result.tagCounts,
+      trades: current.trades.map((trade) => rewriteTradeTags(trade, from, to)),
+    }));
+    setFilters((current) => (current.tag === from ? { ...current, tag: to ?? undefined } : current));
   }
 
   async function toggleStarred(trade: ReviewedTrade) {
@@ -679,7 +729,13 @@ export function App() {
                 <Metric label="收益" value={`${selectedTrade.profit.toFixed(2)} USDT`} tone={selectedTrade.profit >= 0 ? 'good' : 'bad'} />
                 <Metric label="持仓" value={`${selectedTrade.holdingMinutes} 分钟`} />
               </div>
-              <ReviewEditor trade={selectedTrade} availableTags={data.tags} onSaved={handleReviewSaved} />
+              <ReviewEditor
+                trade={selectedTrade}
+                availableTags={data.tags}
+                tagCounts={data.tagCounts}
+                onMutateTag={mutateTag}
+                onSaved={handleReviewSaved}
+              />
             </div>
           </>
         ) : <div className="empty-state">没有匹配的交易</div>}

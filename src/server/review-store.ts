@@ -78,9 +78,69 @@ export class ReviewStore {
     return rows.map(toReview);
   }
 
+  /**
+   * How many reviews carry each tag, keyed by tag name. Callers that already hold
+   * the reviews (e.g. the trades route) pass them in to avoid a second query.
+   */
+  listTagCounts(reviews: readonly TradeReview[] = this.listReviews()): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const review of reviews) {
+      for (const tag of review.tags) counts[tag] = (counts[tag] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  /**
+   * Renames a tag across EVERY review that carries it and returns the number of
+   * affected reviews. Tag names are shared globally (they live inside each
+   * review's `tags_json`), so renaming only the trade being looked at would split
+   * one tag into an old and a new name.
+   *
+   * Renaming onto a name that already exists merges the two: `uniqueCleanTags`
+   * dedupes, so a review that carried both ends up with only `to`.
+   */
+  renameTag(from: string, to: string): number {
+    const source = from.trim();
+    const target = to.trim();
+    if (!source || !target) throw new Error('Both the current and the new tag name are required');
+    return this.mapTags((tags) => tags.map((tag) => (tag === source ? target : tag)));
+  }
+
+  /** Removes a tag from every review that carries it; returns the affected count. */
+  deleteTag(tag: string): number {
+    const target = tag.trim();
+    if (!target) throw new Error('A tag name is required');
+    return this.mapTags((tags) => tags.filter((item) => item !== target));
+  }
+
+  /**
+   * Rewrites every review's tags through `map`, inside one transaction, and
+   * returns how many reviews actually changed. Reuses `saveReview` so trimming,
+   * dedupe, and `updated_at` handling stay in one place — note this bumps
+   * `updated_at` on affected rows, which is intended because their tags did change.
+   */
+  private mapTags(map: (tags: string[]) => string[]): number {
+    const apply = this.db.transaction((): number => {
+      let affected = 0;
+      for (const review of this.listReviews()) {
+        const tags = uniqueCleanTags(map(review.tags));
+        if (sameTags(tags, review.tags)) continue;
+        this.saveReview({ tradeId: review.tradeId, tags, note: review.note, starred: review.starred });
+        affected += 1;
+      }
+      return affected;
+    });
+    return apply();
+  }
+
   close(): void {
     this.db.close();
   }
+}
+
+/** Positional comparison; `map` above preserves order, so this is enough to skip no-op rows. */
+function sameTags(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((tag, index) => tag === b[index]);
 }
 
 function toReview(row: ReviewRow): TradeReview {

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
+import type { TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
@@ -59,10 +60,11 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
         const url = new URL(req.url ?? '', 'http://local');
         const options = toQueueOptions(url.searchParams);
+        const reviews = reviewStore.listReviews();
         send(res, 200, {
-          trades: buildReviewQueue(trades, reviewStore.listReviews(), options),
+          trades: buildReviewQueue(trades, reviews, options),
           instruments: [...new Set(trades.map((trade) => trade.instrument))].sort(),
-          tags: [...new Set(reviewStore.listReviews().flatMap((review) => review.tags))].sort(),
+          ...tagPayload(reviewStore, reviews),
         });
       });
 
@@ -72,6 +74,29 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         const parsed = JSON.parse(body || '{}') as { tradeId?: string; tags?: string[]; note?: string; starred?: boolean };
         if (!parsed.tradeId) return send(res, 400, { error: 'tradeId is required' });
         send(res, 200, reviewStore.saveReview({ tradeId: parsed.tradeId, tags: parsed.tags ?? [], note: parsed.note ?? '', starred: parsed.starred ?? false }));
+      });
+
+      // Tag names are shared across every review, so renaming / deleting is a
+      // global operation: it rewrites all reviews carrying the tag. Both routes
+      // answer with the recomputed global tag list + counts so the UI can patch
+      // its state instead of refetching /api/trades.
+      server.middlewares.use('/api/tags/rename', async (req, res) => {
+        if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
+        const parsed = JSON.parse((await readBody(req)) || '{}') as { from?: string; to?: string };
+        const from = parsed.from?.trim() ?? '';
+        const to = parsed.to?.trim() ?? '';
+        if (!from || !to) return send(res, 400, { error: 'from and to are required' });
+        const affected = reviewStore.renameTag(from, to);
+        send(res, 200, { affected, ...tagPayload(reviewStore, reviewStore.listReviews()) });
+      });
+
+      server.middlewares.use('/api/tags/delete', async (req, res) => {
+        if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
+        const parsed = JSON.parse((await readBody(req)) || '{}') as { tag?: string };
+        const tag = parsed.tag?.trim() ?? '';
+        if (!tag) return send(res, 400, { error: 'tag is required' });
+        const affected = reviewStore.deleteTag(tag);
+        send(res, 200, { affected, ...tagPayload(reviewStore, reviewStore.listReviews()) });
       });
 
       server.middlewares.use('/api/free-replay/instruments', async (req, res) => {
@@ -284,6 +309,17 @@ function findSourceWorkbook(): string {
   const xlsx = fs.readdirSync(process.cwd()).find((name) => name.toLowerCase().endsWith('.xlsx'));
   if (!xlsx) throw new Error('No source workbook found in the project folder.');
   return path.resolve(xlsx);
+}
+
+/**
+ * The global tag list plus its per-tag usage counts. Both tag routes return this
+ * after a rewrite so the UI can patch its state instead of refetching /api/trades.
+ */
+function tagPayload(store: ReviewStore, reviews: readonly TradeReview[]) {
+  return {
+    tags: [...new Set(reviews.flatMap((review) => review.tags))].sort(),
+    tagCounts: store.listTagCounts(reviews),
+  };
 }
 
 function send(res: { statusCode: number; setHeader(name: string, value: string): void; end(body: string): void }, status: number, body: unknown): void {

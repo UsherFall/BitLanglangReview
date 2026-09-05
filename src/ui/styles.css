@@ -1301,7 +1301,7 @@ label,
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
-.tag-options button {
+.tag-options > button {
   width: 100%;
   border: 0;
   border-radius: 0;
@@ -1313,8 +1313,100 @@ label,
   cursor: pointer;
 }
 
-.tag-options button:hover {
+.tag-options > button:hover {
   background: #1f2937;
+}
+
+/* One row per saved tag: name + usage count on the left, rename/delete at right. */
+.tag-option-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-bottom: 1px solid #1c2230;
+}
+
+.tag-option-row:last-child {
+  border-bottom: 0;
+}
+
+.tag-option-row button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #d6dee7;
+  min-height: 26px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.tag-option-row button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tag-option-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  text-align: left;
+}
+
+.tag-option-main:hover {
+  background: #1f2937;
+}
+
+.tag-option-count {
+  color: #8b949e;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.tag-option-action {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  color: #8b949e;
+}
+
+.tag-option-action:hover {
+  background: #1f2937;
+  color: #d6dee7;
+}
+
+.tag-option-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 26px;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  background: #0d1117;
+  color: #e6edf3;
+  padding: 0 6px;
+}
+
+.tag-option-confirm > span {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #d6dee7;
+}
+
+.tag-option-danger {
+  flex: 0 0 auto;
+  color: #f87171;
+}
+
+.tag-option-error {
+  color: #f87171;
+  font-size: 12px;
+  padding: 0 8px 4px;
 }
 
 @media (max-width: 920px) {

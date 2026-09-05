@@ -69,8 +69,8 @@ The first version of the review website, intended for one reviewer on one local 
 _Avoid_: team platform, cloud service
 
 **Review Tag**:
-A custom user-created label that groups **Trades** by review meaning, such as setup quality, mistake type, or strategy pattern. Each **Trade** can have zero or more **Review Tags**, and the first version does not provide preset tags.
-_Avoid_: category, single-select type, preset label
+A custom user-created label that groups **Trades** by review meaning, such as setup quality, mistake type, or strategy pattern. Each **Trade** can have zero or more **Review Tags**, and the first version does not provide preset tags. A tag name is a shared, global identifier: every **Trade** that carries the same name references the same tag, so renaming or deleting a tag updates all of those **Trades** at once rather than only the one being reviewed.
+_Avoid_: category, single-select type, preset label, per-trade tag copy
 
 **Review Note**:
 One user-written summary attached to a **Trade** during review.
@@ -215,6 +215,14 @@ Developer: A free replay reveal appends the next candlestick and advances the cu
 Reviewer: I still want to see the market structure before my chosen start time.
 
 Developer: Free replay history shows and expands earlier candlesticks on demand, while later candlesticks remain controlled by reveal and rewind.
+
+Reviewer: The tag I named "箱体突破后找拐点" is awkward; I want to rename it to "假突破" instead.
+
+Developer: The tag name is shared across every trade that carries it, so renaming it updates all of those trades at once.
+
+Reviewer: If five trades use "箱体突破后找拐点" today, what happens after I rename it?
+
+Developer: All five trades now show "假突破", the old name disappears from the tag list and the filter dropdown, and a filter set to the old name moves to the new name so the queue does not empty out.
 
 Reviewer: If I press the left arrow, hide the latest candlestick and go back one step.
 
