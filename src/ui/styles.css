@@ -998,6 +998,17 @@ p {
   font-size: 13px;
 }
 
+.leg-stop-close {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.leg-stop-close .preset-input {
+  flex: 1 1 180px;
+}
+
 .leg-stop-control {
   display: grid;
   grid-template-columns: 1fr auto auto;
