@@ -23,3 +23,10 @@
 
 - `renderCandles` 是 TradeChart 内部函数；改动集中，可整文件回滚。
 - 如果 marker 过多导致文本重叠，后续可增加 `size`/`id` 或按需显示文本，不在本次范围。
+
+## Validation Status（2026-09-06 收尾）
+
+- 实现已提交：`4ff646b`（同 Instrument 全部开平仓 markers）；后续图表渲染迭代（canvas/badge/颜色）与 revert 未改该功能入口。
+- `npx tsc --noEmit` ✅
+- `tests/trade-markers.test.ts`：2 用例通过（含 `allTradeMarkers` active 高亮）。
+- app jsdom 用例受既有 jest-dom 未注册环境问题影响，本机无法跑（与 09-02 同因，另任务处理）。
