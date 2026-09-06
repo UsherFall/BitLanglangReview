@@ -331,7 +331,7 @@ describe('App Free Replay', () => {
     fireEvent.change(screen.getByLabelText('仓1 止损价'), { target: { value: '95' } });
     fireEvent.click(screen.getByRole('button', { name: '设仓1止损' }));
 
-    expect(screen.getByText(/95/)).toBeInTheDocument();
+    expect(screen.getByLabelText('仓1 止损价')).toHaveValue('95');
 
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
 
@@ -857,6 +857,146 @@ describe('App Free Replay', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 700));
     expect(sessionPutBodies().length).toBe(beforeDelete);
   });
+
+  it('restores the session window around the saved cursor, not around the session start', async () => {
+    const cursorTime = Date.parse('2024-05-22T10:00:00+08:00') / 1000;
+    const seeded = [makeSeededSession({ cursorTime, dataAnchorTime: '2024-05-21 10:00' })];
+    const candleRequests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: seeded }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        return new Response(JSON.stringify({ candles: [makeCandle('2024-05-22T10:00:00+08:00', { timeframe: '15m' })] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.click(screen.getByRole('button', { name: /^BTC-USDT-SWAP/ }));
+
+    await waitFor(() => expect(candleRequests.some((url) => url.includes('mode=initial'))).toBe(true));
+    const initialParams = new URL(`http://localhost${candleRequests.find((url) => url.includes('mode=initial'))}`).searchParams;
+    expect(initialParams.get('entryTime')).toBe(new Date(cursorTime * 1000).toISOString());
+  });
+
+  it('keeps prefetching later candlesticks so revealing can run past the initial window', async () => {
+    const candleRequests: string[] = [];
+    let laterCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'later') {
+          laterCalls += 1;
+          return new Response(JSON.stringify({
+            candles: laterCalls === 1
+              ? [makeCandle('2024-05-21T10:05:00+08:00'), makeCandle('2024-05-21T10:10:00+08:00')]
+              : [makeCandle('2024-05-21T10:15:00+08:00'), makeCandle('2024-05-21T10:20:00+08:00')],
+          }));
+        }
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:50:00+08:00'),
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
+
+    const laterAnchors = () => candleRequests
+      .filter((url) => url.includes('mode=later'))
+      .map((url) => Number(new URL(`http://localhost${url}`).searchParams.get('anchor')));
+
+    await waitFor(() => expect(laterCalls).toBeGreaterThanOrEqual(1));
+
+    for (const revealed of ['10:00', '10:05', '10:10']) {
+      fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+      await waitFor(() => expect(sessionPutBodies().at(-1)?.cursorTime).toBe(Date.parse(`2024-05-21T${revealed}:00+08:00`) / 1000));
+    }
+
+    // Prefetching must continue from the new end of the loaded range: while the
+    // loaded state stayed frozen on the initial window every request kept the
+    // same anchor, so the replay ran out of candlesticks for good.
+    await waitFor(() => expect(laterAnchors().at(-1)).toBeGreaterThan(Date.parse('2024-05-21T10:00:00+08:00')));
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.cursorTime).toBe(Date.parse('2024-05-21T10:15:00+08:00') / 1000));
+  });
+
+  it('retries the later candlestick fetch after a prefetch failure', async () => {
+    let laterCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'later') {
+          laterCalls += 1;
+          if (laterCalls === 1) throw new Error('network down');
+          return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T10:05:00+08:00')] }));
+        }
+        return new Response(JSON.stringify({
+          candles: [makeCandle('2024-05-21T09:55:00+08:00'), makeCandle('2024-05-21T10:00:00+08:00')],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
+
+    await waitFor(() => expect(screen.getByText('后续 K 线加载失败')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.cursorTime).toBe(Date.parse('2024-05-21T10:00:00+08:00') / 1000));
+
+    // Nothing further to reveal: the retry must re-request the later candles
+    // instead of leaving the click with no effect at all.
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(laterCalls).toBeGreaterThanOrEqual(2));
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.cursorTime).toBe(Date.parse('2024-05-21T10:05:00+08:00') / 1000));
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {
@@ -873,7 +1013,7 @@ function makeCandle(time: string, overrides = {}) {
   };
 }
 
-function makeSeededSession() {
+function makeSeededSession(overrides: Partial<Record<'startTime' | 'dataAnchorTime' | 'timeframe', string> & { cursorTime: number }> = {}) {
   const cursorTime = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
   return {
     instrument: 'BTC-USDT-SWAP',
@@ -895,6 +1035,7 @@ function makeSeededSession() {
       trades: [],
     },
     updatedAt: '2024-05-21T12:00:00+08:00',
+    ...overrides,
   };
 }
 

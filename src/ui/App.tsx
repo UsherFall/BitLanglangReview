@@ -169,6 +169,9 @@ export function App() {
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
   const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   const [freeReplaySessions, setFreeReplaySessions] = useState<FreeReplaySession[]>([]);
+  // Bumped when a reveal has no further candlestick to show, so the chart
+  // retries the future fetch instead of ignoring the click silently.
+  const [futureRetryToken, setFutureRetryToken] = useState(0);
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const [alertInstrument, setAlertInstrument] = useState('');
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
@@ -362,6 +365,8 @@ export function App() {
     if (nextReplay.cursorTime !== freeReplay.cursorTime) {
       const revealedCandle = currentCursorCandle(freeReplayCandles, nextReplay.cursorTime);
       if (revealedCandle) setPaperTrading((current) => processRevealedCandle(current, revealedCandle, nextReplay.progressTime));
+    } else {
+      setFutureRetryToken((token) => token + 1);
     }
     setFreeReplay({ ...freeReplay, ...nextReplay });
   }
@@ -411,7 +416,10 @@ export function App() {
     setFreeReplay({
       instrument: payload.instrument,
       startTime: payload.startTime,
-      dataAnchorTime: payload.dataAnchorTime,
+      // Anchor the data window on the restored cursor rather than the session
+      // start: a replay that advanced past the initial window would otherwise
+      // load candlesticks that all sit before the cursor.
+      dataAnchorTime: new Date(payload.cursorTime * 1000).toISOString(),
       startCursorTime: payload.startCursorTime,
       startProgressTime: payload.startProgressTime,
       progressTime: payload.progressTime,
@@ -682,7 +690,7 @@ export function App() {
               </div>
             </header>
             <div className="free-replay-workspace">
-              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperMarkers={paperMarkers} onCandlesLoaded={setFreeReplayCandles} />
+              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperMarkers={paperMarkers} futureRetryToken={futureRetryToken} onCandlesLoaded={setFreeReplayCandles} />
               <FreeReplayPaperTradingPanel
                 session={paperTrading}
                 stats={paperStats}
@@ -988,7 +996,7 @@ function stopLossDirectionHint(direction: PaperDirection, currentPrice: number):
   return direction === 'long' ? `低于当前价 ${currentPrice}` : `高于当前价 ${currentPrice}`;
 }
 
-function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; onCandlesLoaded: (candles: Candlestick[]) => void }) {
+function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; futureRetryToken: number; onCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<SVGSVGElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -1216,15 +1224,24 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, onCandlesLoaded }: {
         if (!candles.length) return;
         const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
         loadedCandlesRef.current = merged;
+        // Must reach the loaded state too: it drives the anchor guard above, so
+        // skipping it pins `last` to the initial window and lets a session
+        // prefetch later candlesticks exactly once. Rendered candlesticks stay
+        // on the cursor-change effect so prefetched candles remain hidden until
+        // they are revealed.
+        setLoadedCandles(merged);
         onCandlesLoaded(merged);
       })
       .catch(() => {
+        // Clear the anchor so the next trigger can retry it; keeping it would
+        // block any further attempt for this anchor for the whole session.
+        lastFutureLoadAnchorRef.current = null;
         setStatus('后续 K 线加载失败');
       })
       .finally(() => {
         loadingFutureRef.current = false;
       });
-  }, [loadedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
+  }, [loadedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe, futureRetryToken]);
 
   async function loadEarlierFreeReplayCandles() {
     const chart = chartApiRef.current;

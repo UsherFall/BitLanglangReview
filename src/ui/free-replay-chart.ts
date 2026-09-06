@@ -36,7 +36,10 @@ export function previousFreeReplayProgress(cursorTime: number): number {
 export function shouldPrefetchFutureCandles(candles: Candlestick[], cursorTime: number, threshold: number): boolean {
   const ordered = [...candles].sort((a, b) => a.timestamp - b.timestamp);
   const cursorIndex = ordered.findIndex((candle) => candle.timestamp >= cursorTime * 1000);
-  if (cursorIndex < 0) return false;
+  // The cursor is past every loaded candle (a restored session, or data that
+  // lagged behind a fast reveal): keep pulling later candles so the replay can
+  // catch up instead of dead-ending with no further candlesticks to reveal.
+  if (cursorIndex < 0) return true;
   return ordered.length - cursorIndex - 1 <= threshold;
 }
 

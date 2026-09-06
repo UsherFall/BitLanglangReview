@@ -79,6 +79,15 @@ describe('Free Replay Chart', () => {
     expect(shouldPrefetchFutureCandles(candles, Date.parse('2024-05-21T10:05:30+08:00') / 1000, 1)).toBe(true);
   });
 
+  it('prefetches when the cursor is past every loaded candlestick', () => {
+    const candles = [
+      makeCandle('2024-05-21T10:00:00+08:00'),
+      makeCandle('2024-05-21T10:05:00+08:00'),
+    ];
+
+    expect(shouldPrefetchFutureCandles(candles, Date.parse('2024-05-21T10:10:00+08:00') / 1000, 20)).toBe(true);
+  });
+
   it('backfills history when preserved zoom needs more candles before the cursor', () => {
     const candles = [
       makeCandle('2024-05-21T09:50:00+08:00'),
