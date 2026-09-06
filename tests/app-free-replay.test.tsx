@@ -159,7 +159,7 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
-    fireEvent.click(screen.getByRole('button', { name: '全部市价平仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
 
     await waitFor(() => expect(screen.getAllByText('+100.00 USDT').length).toBeGreaterThan(0));
     expect(screen.getAllByText('10.00%').length).toBeGreaterThan(0);
@@ -276,7 +276,7 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
-    fireEvent.click(screen.getByRole('button', { name: '全部市价平仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
     await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
       expect.objectContaining({ text: expect.stringContaining('100') }),
       expect.objectContaining({ text: expect.stringContaining('110') }),
@@ -449,7 +449,7 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
-    fireEvent.click(screen.getByRole('button', { name: '全部市价平仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
 
     await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith([
       expect.objectContaining({ time: Date.parse('2024-05-21T09:55:00+08:00') / 1000 }),

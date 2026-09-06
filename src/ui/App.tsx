@@ -23,7 +23,6 @@ import {
   availableMargin,
   cancelPendingOrder,
   cancelStopLoss,
-  closeLegMarket,
   closeMarket,
   currentCursorCandle,
   initialPaperTradingSession,
@@ -699,8 +698,7 @@ export function App() {
                 onReset={() => setPaperTrading(initialPaperTradingSession())}
                 onMarketOpen={(settings) => freeReplayCurrentCandle && setPaperTrading((current) => openMarket(current, freeReplayCurrentCandle, settings, freeReplay.progressTime))}
                 onLimitOpen={(limitPrice, settings) => setPaperTrading((current) => placeEntryLimit(current, limitPrice, settings, freeReplay.progressTime))}
-                onCloseAll={() => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle, freeReplay.progressTime))}
-                onCloseLeg={(legId, closeRatioPercent) => freeReplayCurrentCandle && setPaperTrading((current) => closeLegMarket(current, legId, freeReplayCurrentCandle, freeReplay.progressTime, closeRatioPercent))}
+                onCloseRatio={(closeRatioPercent) => freeReplayCurrentCandle && setPaperTrading((current) => closeMarket(current, freeReplayCurrentCandle, freeReplay.progressTime, closeRatioPercent))}
                 onLimitClose={(limitPrice, quantity) => setPaperTrading((current) => placeExitLimit(current, limitPrice, quantity, freeReplay.progressTime))}
                 onCancelOrder={(kind) => setPaperTrading((current) => cancelPendingOrder(current, kind))}
                 onSetStopLoss={(legId, stopPrice) => freeReplayCurrentCandle && setPaperTrading((current) => placeStopLoss(current, legId, stopPrice, freeReplayCurrentCandle.close, freeReplay.progressTime))}
@@ -760,8 +758,7 @@ function FreeReplayPaperTradingPanel({
   onReset,
   onMarketOpen,
   onLimitOpen,
-  onCloseAll,
-  onCloseLeg,
+  onCloseRatio,
   onLimitClose,
   onCancelOrder,
   onSetStopLoss,
@@ -774,8 +771,7 @@ function FreeReplayPaperTradingPanel({
   onReset: () => void;
   onMarketOpen: (settings: PaperTradingSettings) => void;
   onLimitOpen: (limitPrice: number, settings: PaperTradingSettings) => void;
-  onCloseAll: () => void;
-  onCloseLeg: (legId: string, closeRatioPercent: number) => void;
+  onCloseRatio: (closeRatioPercent: number) => void;
   onLimitClose: (limitPrice: number, quantity: number) => void;
   onCancelOrder: (kind: 'entry' | 'exit') => void;
   onSetStopLoss: (legId: string, stopPrice: number) => void;
@@ -784,7 +780,7 @@ function FreeReplayPaperTradingPanel({
   const [direction, setDirection] = useState<PaperDirection>('long');
   const [positionRatioPercent, setPositionRatioPercent] = useState(100);
   const [leverage, setLeverage] = useState(1);
-  const [exitRatioPercent, setExitRatioPercent] = useState(100);
+  const [closeRatioPercent, setCloseRatioPercent] = useState(100);
   const [entryLimit, setEntryLimit] = useState('');
   const [exitLimit, setExitLimit] = useState('');
   const settings = { direction, positionRatioPercent, leverage };
@@ -794,7 +790,7 @@ function FreeReplayPaperTradingPanel({
   const exitLimitPrice = Number(exitLimit);
   const currentPrice = currentCandle?.close;
   const positionQuantity = position?.quantity ?? 0;
-  const exitQuantity = positionQuantity * exitRatioPercent / 100;
+  const exitQuantity = positionQuantity * closeRatioPercent / 100;
   const canOpenMarket = session.active && !session.position && !!currentCandle;
   const canAddMarket = session.active && !!position && available > 0 && !!currentCandle;
   const canSubmitEntryLimit = session.active && !session.position && Number.isFinite(entryLimitPrice) && entryLimitPrice > 0;
@@ -805,7 +801,8 @@ function FreeReplayPaperTradingPanel({
   // Each market/limit close submission consumes the chosen 平仓比例 once, then
   // the control resets to 100% so a later close is a real full close instead
   // of silently repeating an earlier 25/50/75% choice.
-  const submitLimitClose = () => { onLimitClose(exitLimitPrice, exitQuantity); setExitRatioPercent(100); };
+  const submitMarketClose = () => { onCloseRatio(closeRatioPercent); setCloseRatioPercent(100); };
+  const submitLimitClose = () => { onLimitClose(exitLimitPrice, exitQuantity); setCloseRatioPercent(100); };
 
   return (
     <aside className="paper-trading-panel" aria-label="模拟交易面板">
@@ -874,9 +871,9 @@ function FreeReplayPaperTradingPanel({
               </div>
               <div className="paper-section">
                 <span className="paper-section-title">平仓</span>
-                <button type="button" aria-label="全部市价平仓" className="save-button paper-primary" disabled={!currentCandle} onClick={onCloseAll}>全部市价平仓</button>
-                <PresetNumberInput label="限价平仓比例" ariaLabel="限价平仓比例" value={exitRatioPercent} min={1} max={100} suffix="%" presets={[25, 50, 75, 100]} onChange={setExitRatioPercent} />
-                <span className="paper-help-text">限价平仓比例用于固化止盈挂单数量（≤ 持仓）；提交后复位 100%</span>
+                <PresetNumberInput label="平仓比例" ariaLabel="平仓比例" value={closeRatioPercent} min={1} max={100} suffix="%" presets={[25, 50, 75, 100]} onChange={setCloseRatioPercent} />
+                <span className="paper-help-text">平仓比例用于市价平仓或固化限价止盈数量；选 100 即全平，提交后复位 100%</span>
+                <button type="button" aria-label="市价平仓" className="save-button paper-primary" disabled={!currentCandle} onClick={submitMarketClose}>市价平仓</button>
                 <label>
                   限价平仓
                   <input aria-label="限价平仓价格" inputMode="decimal" value={exitLimit} onChange={(event) => setExitLimit(event.target.value)} />
@@ -894,7 +891,6 @@ function FreeReplayPaperTradingPanel({
                     index={index}
                     currentPrice={currentPrice}
                     direction={position.direction}
-                    onClose={onCloseLeg}
                     onSetStopLoss={onSetStopLoss}
                     onCancelStopLoss={onCancelStopLoss}
                   />
@@ -938,17 +934,15 @@ function PendingOrderView({ label, price, cancelLabel, onCancel }: { label: stri
   return <div className="pending-order"><span>{label} {price}</span><button type="button" aria-label={cancelLabel} onClick={onCancel}>取消</button></div>;
 }
 
-function LegStopRow({ leg, index, currentPrice, direction, onClose, onSetStopLoss, onCancelStopLoss }: {
+function LegStopRow({ leg, index, currentPrice, direction, onSetStopLoss, onCancelStopLoss }: {
   leg: PaperLeg;
   index: number;
   currentPrice: number | undefined;
   direction: PaperDirection;
-  onClose: (legId: string, closeRatioPercent: number) => void;
   onSetStopLoss: (legId: string, stopPrice: number) => void;
   onCancelStopLoss: (legId: string) => void;
 }) {
   const [price, setPrice] = useState(leg.stopPrice !== undefined ? String(leg.stopPrice) : '');
-  const [closeRatioPercent, setCloseRatioPercent] = useState(100);
   useEffect(() => {
     setPrice(leg.stopPrice !== undefined ? String(leg.stopPrice) : '');
   }, [leg.stopPrice]);
@@ -958,20 +952,12 @@ function LegStopRow({ leg, index, currentPrice, direction, onClose, onSetStopLos
     && isValidStopLossDirection(direction, priceNumber, currentPrice);
   const hasStop = leg.stopPrice !== undefined;
   const hint = currentPrice !== undefined ? stopLossDirectionHint(direction, currentPrice) : '';
-  const handleClose = () => {
-    onClose(leg.id, closeRatioPercent);
-    setCloseRatioPercent(100);
-  };
   return (
     <div className="leg-stop-row">
       <div className="leg-stop-meta">
         <strong>仓 {index + 1}</strong>
         <span>开 {leg.entryPrice}</span>
         <span>量 {leg.quantity.toFixed(4)}</span>
-      </div>
-      <div className="leg-stop-close">
-        <PresetNumberInput label="平仓比例" ariaLabel={`仓${index + 1} 平仓比例`} value={closeRatioPercent} min={1} max={100} suffix="%" presets={[25, 50, 75, 100]} onChange={setCloseRatioPercent} />
-        <button type="button" aria-label={`平仓仓${index + 1}`} disabled={currentPrice === undefined} onClick={handleClose}>市价平 {closeRatioPercent}%</button>
       </div>
       <div className="leg-stop-control">
         <input aria-label={`仓${index + 1} 止损价`} inputMode="decimal" placeholder={hasStop ? undefined : hint} value={price} onChange={(event) => setPrice(event.target.value)} />

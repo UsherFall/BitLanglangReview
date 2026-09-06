@@ -158,16 +158,6 @@ export function closeMarket(session: PaperTradingSession, candle: Candlestick, e
   return closeQuantityFor(session, candle.close, eventTime * 1000, closeQuantity);
 }
 
-// Market-closes a chosen ratio of ONE specific leg (按仓平仓). Partial closes
-// leave the leg (and its own stop) protecting the remaining quantity.
-export function closeLegMarket(session: PaperTradingSession, legId: string, candle: Candlestick, eventTime: number, closeRatioPercent = 100): PaperTradingSession {
-  if (!session.active || !session.position) return session;
-  const leg = session.position.legs.find((item) => item.id === legId);
-  if (!leg || leg.quantity <= 0) return session;
-  const closeQuantity = leg.quantity * normalizeCloseRatio(closeRatioPercent) / 100;
-  return closeLegQuantity(session, legId, candle.close, eventTime * 1000, closeQuantity);
-}
-
 // Places or replaces the single take-profit exit limit. Its quantity is fixed
 // at placement and must not exceed the current position size.
 export function placeExitLimit(session: PaperTradingSession, limitPrice: number, quantity: number, cursorTime: number): PaperTradingSession {
@@ -428,7 +418,8 @@ function closeQuantityFor(session: PaperTradingSession, exitPrice: number, exitT
   return { ...base, position: recomputePosition({ ...position, legs }) };
 }
 
-// Closes quantity out of one specific leg ("按仓平仓"). Partial closes keep
+// Closes quantity out of one specific leg, used by the per-leg stop trigger
+// (manual market closes are whole-position FIFO only). A partial close keeps
 // the leg (and its own stop) with the remaining quantity; a full close removes
 // the leg. The remaining aggregated position is recomputed.
 function closeLegQuantity(session: PaperTradingSession, legId: string, exitPrice: number, exitTime: number, closeQuantity: number): PaperTradingSession {

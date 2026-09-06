@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Paper session state is App-owned and auto-saved opaque JSON; UI only mutates via domain functions, restore/normalize path must stay intact when removing per-leg close wiring"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "UI-local paper types and prop types must stay consistent when deleting onCloseLeg and adding onCloseRatio"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Vitest expectations and aria-label based Chinese UI test queries; keep stable labels (全部市价平仓, 仓N 止损价) so jsdom cases don't break"}
+{"file": ".trellis/tasks/09-06-paper-open-close-redesign/prd.md", "reason": "Requirements and acceptance criteria (whole-level FIFO close, stop-only leg rows)"}
+{"file": ".trellis/tasks/09-06-paper-open-close-redesign/design.md", "reason": "Design: delete closeLegMarket, single shared 平仓比例, UI/stylesheet changes"}

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verification checklist: tsc, domain test command, aria-label queries, jsdom env caveat (jest-dom setup gap is a known project-wide issue)"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify paper session wiring unchanged except removed per-leg close; restore path and auto-save intact"}
+{"file": ".trellis/tasks/09-06-paper-open-close-redesign/prd.md", "reason": "Acceptance criteria to verify against"}
+{"file": ".trellis/tasks/09-06-paper-open-close-redesign/design.md", "reason": "Design contracts: closeMarket(ratio) exposed, closeLegMarket deleted, surviving-leg stop preserved"}

@@ -4,7 +4,6 @@ import {
   availableMargin,
   cancelPendingOrder,
   cancelStopLoss,
-  closeLegMarket,
   closeMarket,
   currentCursorCandle,
   initialPaperTradingSession,
@@ -203,12 +202,14 @@ describe('Free Replay Paper Trading', () => {
     expect(cancelStopLoss(stopped, legId).position?.legs[0].stopPrice).toBeUndefined();
   });
 
-  it('keeps a leg stop after manually closing a part of that same leg', () => {
+  it('keeps a leg stop after a partial market close of the whole position', () => {
     const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
     const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
     const legId = opened.position!.legs[0].id;
     const stopped = placeStopLoss(opened, legId, 95, 100, 1);
-    const half = closeLegMarket(stopped, legId, makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }), 2, 50);
+    // Whole-position FIFO 50% close consumes half of the only leg; the
+    // remaining quantity keeps the original stop.
+    const half = closeMarket(stopped, makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }), 2, 50);
     expect(half.position?.quantity).toBe(5);
     expect(half.position?.legs[0].stopPrice).toBe(95);
 
@@ -218,25 +219,27 @@ describe('Free Replay Paper Trading', () => {
     expect(stoppedOut.trades[1]).toMatchObject({ exitPrice: 95, quantity: 5, pnl: -25 });
   });
 
-  it('market-closes one whole leg so the remaining leg stop covers the whole position', () => {
+  it('removes the oldest leg first on a whole-position ratio close so the surviving leg stop covers the rest', () => {
     const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
     const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
     const half = closeMarket(opened, makeCandle('2024-05-21T10:05:00+08:00', { close: 100 }), 2, 50);
     const added = openMarket(half, makeCandle('2024-05-21T10:10:00+08:00', { close: 100 }), settings, 3);
     const [leg1, leg2] = added.position!.legs;
-    const stoppedLeg1 = placeStopLoss(added, leg1.id, 95, 100, 3);
+    expect(leg1.quantity).toBe(5);
+    expect(leg2.quantity).toBe(5);
+    const stoppedLeg2 = placeStopLoss(added, leg2.id, 95, 100, 3);
 
-    // User keeps 仓1's stop, closes 仓2 fully: remaining position is 仓1 and
-    // 仓1's stop now protects exactly the whole remaining quantity.
-    const afterClose = closeLegMarket(stoppedLeg1, leg2.id, makeCandle('2024-05-21T10:15:00+08:00', { close: 105 }), 4);
+    // FIFO consumes the oldest leg (leg1) entirely; only leg2 remains and its
+    // own stop now protects exactly the whole remaining quantity.
+    const afterClose = closeMarket(stoppedLeg2, makeCandle('2024-05-21T10:15:00+08:00', { close: 105 }), 4, 50);
     expect(afterClose.position?.legs).toHaveLength(1);
-    expect(afterClose.position?.legs[0].id).toBe(leg1.id);
+    expect(afterClose.position?.legs[0].id).toBe(leg2.id);
     expect(afterClose.position?.quantity).toBe(5);
     expect(afterClose.position?.legs[0].stopPrice).toBe(95);
 
     const stoppedOut = processRevealedCandle(afterClose, makeCandle('2024-05-21T10:20:00+08:00', { low: 93, high: 100 }), 5);
     expect(stoppedOut.position).toBeNull();
-    expect(stoppedOut.trades).toHaveLength(3); // half close + leg2 market close + leg1 stop
+    expect(stoppedOut.trades).toHaveLength(3); // 50% close + 50% close + leg2 stop
     expect(stoppedOut.trades[2]).toMatchObject({ exitPrice: 95, quantity: 5, pnl: -25 });
   });
 
