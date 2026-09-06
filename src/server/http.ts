@@ -194,6 +194,41 @@ export async function defaultBinanceFetchJson(url: string): Promise<unknown> {
   return labeledFetch(url, 'Binance request failed', binanceRateGate);
 }
 
+/**
+ * JSON GET with custom headers (signed Bitget private-API requests), routed
+ * through the shared proxy with the same 12s timeout. Unlike the other default
+ * fetchers, a non-OK status keeps the response body so Bitget auth/IP errors
+ * surface their `msg` instead of a bare HTTP code.
+ */
+export async function defaultBitgetFetchJson(url: string, headers: Record<string, string>): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetchViaProxy(url, { headers, signal: controller.signal });
+    if (response.ok) return response.json();
+    const detail = await readErrorDetail(response);
+    throw new Error(`HTTP ${response.status}${detail ? `: ${detail}` : ''}`);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Bitget request timed out after 12s');
+    }
+    if (error instanceof Error && error.message.startsWith('HTTP ')) throw error;
+    throw new Error(`Bitget request failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readErrorDetail(response: FetchResponse): Promise<string> {
+  try {
+    const body = (await response.json()) as { msg?: unknown } | null;
+    if (body && typeof body === 'object' && body.msg != null) return String(body.msg);
+  } catch {
+    // Non-JSON error body; fall back to the bare status code.
+  }
+  return '';
+}
+
 async function labeledFetch(url: string, label: string, gate?: RateGate): Promise<unknown> {
   try {
     return await fetchJsonWithRetry(url, fetchViaProxy, gate);

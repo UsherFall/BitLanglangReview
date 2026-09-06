@@ -10,6 +10,11 @@ import { AlertStore } from './alert-store';
 import { BinanceCandleSource } from './binance-candles';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
+import { BitgetClient } from './bitget-client';
+import { historyPositionToTrade } from './bitget-import';
+import { clearBitgetKeys, loadBitgetKeys, saveBitgetKeys } from './bitget-keys';
+import { BitgetPositionStore } from './bitget-position-store';
+import { BitgetSyncService } from './bitget-sync';
 import { CandlestickService } from './candlestick-service';
 import { CoinScanService } from './coin-scan-service';
 import { CandlestickStore } from './candlestick-store';
@@ -51,6 +56,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const coinScanService = new CoinScanService(tickerSource, scanCandleSource);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
+      const bitgetPositionStore = new BitgetPositionStore(path.resolve('data/review.sqlite'));
       const instrumentService = new OkxInstrumentService();
 
       const serverChanKey = options.serverChanKey ?? process.env.SERVERCHAN_KEY ?? '';
@@ -251,8 +257,82 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         }
         return send(res, 405, { error: 'Method not allowed' });
       });
+      server.middlewares.use('/api/bitget/config', async (req, res) => {
+        const url = new URL(req.url ?? '', 'http://local');
+        if (req.method === 'GET') {
+          return send(res, 200, { configured: loadBitgetKeys() !== null });
+        }
+        if (req.method === 'POST') {
+          const parsed = JSON.parse((await readBody(req)) || '{}') as Record<string, unknown>;
+          const apiKey = trimOrEmpty(parsed.apiKey);
+          const secret = trimOrEmpty(parsed.secret);
+          const passphrase = trimOrEmpty(parsed.passphrase);
+          if (!apiKey || !secret || !passphrase || apiKey.length > 256 || secret.length > 256 || passphrase.length > 256) {
+            return send(res, 400, { error: 'apiKey, secret, and passphrase are all required (≤256 chars)' });
+          }
+          try {
+            saveBitgetKeys({ apiKey, secret, passphrase });
+            return send(res, 200, { configured: true });
+          } catch (error) {
+            return send(res, 500, { error: error instanceof Error ? error.message : 'Failed to save Bitget API key' });
+          }
+        }
+        if (req.method === 'DELETE') {
+          clearBitgetKeys();
+          return send(res, 200, { configured: false });
+        }
+        return send(res, 405, { error: 'Method not allowed' });
+      });
+
+      server.middlewares.use('/api/bitget/sync', async (req, res) => {
+        if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
+        const keys = loadBitgetKeys();
+        if (!keys) return send(res, 400, { error: '尚未配置 Bitget API key' });
+        const parsed = JSON.parse((await readBody(req)) || '{}') as { startTime?: unknown; wipe?: unknown };
+        const fromMs = typeof parsed.startTime === 'number' && Number.isFinite(parsed.startTime)
+          ? parsed.startTime
+          : Date.now() - 90 * 24 * 60 * 60 * 1000;
+        if (fromMs < 0) return send(res, 400, { error: 'Invalid startTime' });
+        try {
+          const client = new BitgetClient(keys);
+          const service = new BitgetSyncService(client, bitgetPositionStore);
+          const result = await service.sync({ fromMs, wipe: parsed.wipe === true });
+          send(res, 200, result);
+        } catch (error) {
+          send(res, 502, { error: error instanceof Error ? error.message : 'Bitget sync failed' });
+        }
+      });
+
+      server.middlewares.use('/api/bitget/trades', async (req, res) => {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        const url = new URL(req.url ?? '', 'http://local');
+        const options = toQueueOptions(url.searchParams);
+        const reviews = reviewStore.listReviews();
+        const configured = loadBitgetKeys() !== null;
+        try {
+          const trades = configured
+            ? bitgetPositionStore
+                .listAll()
+                .map((cached, sequence) => historyPositionToTrade(cached.row, sequence))
+                .filter((trade): trade is NonNullable<ReturnType<typeof historyPositionToTrade>> => trade !== null)
+            : [];
+          const queue = buildReviewQueue(trades, reviews, options);
+          send(res, 200, {
+            trades: queue,
+            instruments: [...new Set(trades.map((trade) => trade.instrument))].sort(),
+            configured,
+            ...tagPayload(reviewStore, reviews),
+          });
+        } catch (error) {
+          send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load Bitget trades' });
+        }
+      });
     },
   };
+}
+
+function trimOrEmpty(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function parseScanParam(value: string | null, fallback: number): number {
