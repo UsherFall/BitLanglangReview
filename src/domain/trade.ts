@@ -5,15 +5,20 @@ export type Trade = {
   sequence: number;
   instrument: string;
   direction: Direction;
-  leverage: number;
-  margin: number;
+  /** Null when the data source cannot supply leverage (e.g. Bitget history-position rows). */
+  leverage: number | null;
+  /** Null when the data source cannot supply margin. */
+  margin: number | null;
   entryPrice: number;
   exitPrice: number;
-  returnRate: number;
+  /** Null when the data source cannot supply a reliable return rate. */
+  returnRate: number | null;
   profit: number;
-  turnover: number;
+  /** Null when the data source cannot supply notional turnover. */
+  turnover: number | null;
   size: number;
-  maxPositionValue: number;
+  /** Null when the data source cannot supply peak position value. */
+  maxPositionValue: number | null;
   fee: number;
   entryTime: string;
   exitTime: string;

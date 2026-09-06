@@ -650,7 +650,7 @@ export function App() {
                 <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
                 <strong>{trade.instrument}</strong>
                 <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
-                <span className="trade-meta">{formatLeverage(trade.leverage)} · 保证金 {trade.margin.toFixed(2)} USDT · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
+                <span className="trade-meta">{formatLeverage(trade.leverage)} · 保证金 {formatUsdtAmount(trade.margin)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
                 <span className={trade.profit >= 0 ? 'profit' : 'loss'}>{formatPercent(trade.returnRate)} / {trade.profit.toFixed(2)}</span>
                 <span className="tags">{trade.review?.tags.join(' · ') || '未标记'}</span>
               </button>
@@ -731,7 +731,7 @@ export function App() {
                 <Metric label="方向" value={selectedTrade.direction} />
                 <Metric label="开仓" value={selectedTrade.entryPrice.toString()} />
                 <Metric label="平仓" value={selectedTrade.exitPrice.toString()} />
-                <Metric label="收益率" value={formatPercent(selectedTrade.returnRate)} tone={selectedTrade.returnRate >= 0 ? 'good' : 'bad'} />
+                <Metric label="收益率" value={formatPercent(selectedTrade.returnRate)} tone={nullableProfitTone(selectedTrade.returnRate)} />
                 <Metric label="收益" value={`${selectedTrade.profit.toFixed(2)} USDT`} tone={selectedTrade.profit >= 0 ? 'good' : 'bad'} />
                 <Metric label="持仓" value={`${selectedTrade.holdingMinutes} 分钟`} />
               </div>
@@ -2030,14 +2030,18 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
   return <div className="metric"><span>{label}</span><strong className={tone ?? ''}>{value}</strong></div>;
 }
 
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(2)}%`;
+function formatPercent(value: number | null): string {
+  return value === null ? '—' : `${(value * 100).toFixed(2)}%`;
 }
 
 function formatSignedUsdt(value: number): string {
   const normalized = Object.is(value, -0) ? 0 : value;
   const sign = normalized > 0 ? '+' : '';
   return `${sign}${normalized.toFixed(2)} USDT`;
+}
+
+function formatUsdtAmount(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(2)} USDT`;
 }
 
 function formatPaperDirection(direction: PaperDirection): string {
@@ -2050,6 +2054,12 @@ function profitTone(value: number): 'good' | 'bad' | undefined {
   return undefined;
 }
 
-function formatLeverage(value: number): string {
+/** Tone for nullable rate/amount fields: null carries no tone. */
+function nullableProfitTone(value: number | null): 'good' | 'bad' | undefined {
+  return value === null ? undefined : profitTone(value);
+}
+
+function formatLeverage(value: number | null): string {
+  if (value === null) return '—';
   return `${Number.isInteger(value) ? value.toString() : value.toFixed(2)}x`;
 }

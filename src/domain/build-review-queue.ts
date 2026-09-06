@@ -31,5 +31,14 @@ function matchesOptions(trade: ReviewedTrade, options: ReviewQueueOptions): bool
 
 function compareByField(a: ReviewedTrade, b: ReviewedTrade, field: SortField): number {
   if (field === 'entryTime') return a.entryTime.localeCompare(b.entryTime);
-  return a[field] - b[field];
+  // Nullable numeric fields (e.g. returnRate from data sources that cannot
+  // supply it) always sort to the end, in either direction.
+  return compareNullableNumbers(a[field], b[field]);
+}
+
+function compareNullableNumbers(a: number | null, b: number | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
 }

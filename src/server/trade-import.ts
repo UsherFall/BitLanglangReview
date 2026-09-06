@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { formatShanghai } from '../domain/shanghai-time';
 import type { Direction, Trade } from '../domain/trade';
 
 const sourceSheetName = '时间排列+去除金额错误单子';
@@ -110,25 +111,10 @@ function toShanghaiIso(value: unknown): string | null {
   return null;
 }
 
-function formatShanghai(date: Date): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '00';
-  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}.000+08:00`;
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 function minutesBetween(start: string, end: string): number {
   return Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 60000));
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0');
 }
