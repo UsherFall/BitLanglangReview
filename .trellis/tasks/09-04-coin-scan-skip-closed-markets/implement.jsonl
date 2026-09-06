@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "纯 domain 层约定，新增 market-session.ts 前必读"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "币安数据源与缓存约定，新增 exchangeInfo 元数据读取前必读"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选币扫描服务约定，改动 scanShrink 过滤时机前必读"}
+{"file": ".trellis/tasks/09-04-coin-scan-skip-closed-markets/research/binance-tradfi-instrument-metadata.md", "reason": "币安 TradFi 标识与交易时段实测结论（字段、无日历接口、topN 污染比例）"}

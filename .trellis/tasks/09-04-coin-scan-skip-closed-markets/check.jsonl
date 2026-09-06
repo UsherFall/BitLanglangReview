@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-04-coin-scan-skip-closed-markets/research/binance-tradfi-instrument-metadata.md", "reason": "核对实现是否用 exchangeInfo 的 underlyingType 而不是硬编码标的名"}
+{"file": ".trellis/spec/domain/index.md", "reason": "核对 domain 层纯函数约定与测试要求"}
+{"file": ".trellis/spec/server/index.md", "reason": "核对 server 层质量检查项（缓存、错误处理、降级）"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "选币面板提示改动的前端质量检查项"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本次改动跨 domain/server/ui 三层"}

@@ -248,6 +248,11 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, onSet
           <p>扫描 {result.scanned.length} 个 · 收敛 {result.qualifiedCount} 个 · 全周期</p>
         </div>
       </header>
+      {result.skippedInstruments && result.skippedInstruments.length > 0 && (
+        <p className="panel-status hint" title={result.skippedInstruments.join(', ')}>
+          已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
+        </p>
+      )}
       <div className="coin-scan-table-wrap">
         <table className="coin-scan-table">
           <thead>
@@ -353,6 +358,14 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, onSet
 // as-is.
 function shortInstrument(instrument: string): string {
   return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
+}
+
+/** First 8 skipped instruments, then "等 N 个" when truncated (full list in `title`). */
+const SKIPPED_NAME_LIMIT = 8;
+function formatSkippedNames(skipped: readonly string[]): string {
+  const names = skipped.slice(0, SKIPPED_NAME_LIMIT).map(shortInstrument).join('、');
+  const extra = skipped.length - SKIPPED_NAME_LIMIT;
+  return extra > 0 ? `${names} 等 ${extra} 个` : names;
 }
 
 // 收敛结构 column: each qualified timeframe shown with its structure type

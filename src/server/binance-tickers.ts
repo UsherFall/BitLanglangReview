@@ -1,4 +1,6 @@
 import { defaultBinanceFetchJson, type FetchJson } from './http';
+import { BinanceInstrumentMetadataSource } from './binance-instrument-metadata';
+import { marketSession, type MarketClass } from '../domain/market-session';
 import type { Ticker, TickerSource } from './market-data';
 
 /**
@@ -47,7 +49,11 @@ export class BinanceTickerSource implements TickerSource {
   private cache: { at: number; tickers: Ticker[] } | null = null;
   private inflight: Promise<Ticker[]> | null = null;
 
-  constructor(private readonly fetchJson: FetchJson = defaultBinanceFetchJson) {}
+  constructor(
+    private readonly fetchJson: FetchJson = defaultBinanceFetchJson,
+    /** Optional instrument-class metadata; absent = tickers carry no market class (ungated). */
+    private readonly metadataSource: BinanceInstrumentMetadataSource | null = null,
+  ) {}
 
   async listTickers(): Promise<Ticker[]> {
     const now = Date.now();
@@ -67,16 +73,27 @@ export class BinanceTickerSource implements TickerSource {
   }
 
   private async fetchAndMap(): Promise<Ticker[]> {
-    const response = (await this.fetchJson('https://fapi.binance.com/fapi/v1/ticker/24hr')) as BinanceTicker24hr[];
+    const [rawResponse, metadata] = await Promise.all([
+      this.fetchJson('https://fapi.binance.com/fapi/v1/ticker/24hr'),
+      this.metadataSource ? this.metadataSource.load() : Promise.resolve(new Map<string, MarketClass>()),
+    ]);
+    const response = rawResponse as BinanceTicker24hr[];
     if (!Array.isArray(response)) return [];
     return response
       .filter((item) => isUsdtPerpetual(item.symbol))
-      .map((item) => ({
-        instrument: item.symbol as string,
-        quoteVolume24h: Number(item.quoteVolume),
-        lastPrice: Number(item.lastPrice),
-        change24h: Number(item.priceChangePercent),
-      }))
+      .map((item) => {
+        const ticker: Ticker = {
+          instrument: item.symbol as string,
+          quoteVolume24h: Number(item.quoteVolume),
+          lastPrice: Number(item.lastPrice),
+          change24h: Number(item.priceChangePercent),
+        };
+        // Only classes with an actual session spec (equities) need gating;
+        // crypto/commodity/pre-IPO stay ungated by leaving the field absent.
+        const marketClass = metadata.get(item.symbol as string);
+        if (marketClass && marketSession(marketClass) !== null) ticker.marketClass = marketClass;
+        return ticker;
+      })
       .filter((ticker) => Number.isFinite(ticker.quoteVolume24h) && Number.isFinite(ticker.lastPrice) && Number.isFinite(ticker.change24h))
       .sort((a, b) => b.quoteVolume24h - a.quoteVolume24h);
   }

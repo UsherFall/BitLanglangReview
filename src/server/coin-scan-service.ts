@@ -8,8 +8,9 @@ import {
   type StructureResult,
 } from '../domain/coin-scan';
 import type { ReviewTimeframe } from '../domain/trade';
+import { isMarketOpen } from '../domain/market-session';
 import { timeframeMs } from './candlestick-service';
-import type { CandleSource, TickerSource } from './market-data';
+import type { CandleSource, Ticker, TickerSource } from './market-data';
 import { binanceRateGate, type RateGate } from './http';
 
 /** Concurrency cap for the per-(coin, timeframe) candle fetches. */
@@ -89,11 +90,19 @@ export class CoinScanService {
     // with the klines burst (the whole-market 24hr ticker costs 40 weight).
     await scanPacer.pace();
     const tickers = await this.tickerSource.listTickers();
-    const top = tickers
-      .filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h)
-      .slice(0, params.topN);
-
     const anchor = params.anchor ?? Date.now();
+    // Order: 24h-volume threshold → closed-market exclusion → topN slice. A
+    // closed TradFi contract must NOT occupy a topN slot (it would otherwise
+    // crowd out a live crypto/commodity and burn its topN×5 klines budget).
+    const pooled = tickers.filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h);
+    const open: Ticker[] = [];
+    const skippedInstruments: string[] = [];
+    for (const ticker of pooled) {
+      // Absent marketClass (OKX, metadata down, ungated class) => CRYPTO => always open.
+      if (isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor)) open.push(ticker);
+      else skippedInstruments.push(ticker.instrument);
+    }
+    const top = open.slice(0, params.topN);
     const structureParams = defaultStructureParams();
     // minScore gate: a timeframe counts as converged only when its structure is
     // qualified AND (minScore absent OR score >= minScore).
@@ -174,6 +183,7 @@ export class CoinScanService {
     // still succeed while the pipeline had to pause for the weight window.
     const warnings = this.rateLimitWarnings.takeWarnings();
     if (warnings.length > 0) response.warnings = warnings;
+    if (skippedInstruments.length > 0) response.skippedInstruments = skippedInstruments;
     return response;
   }
 }

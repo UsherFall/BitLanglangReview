@@ -8,6 +8,7 @@ import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { AlertMonitor } from './alert-monitor';
 import { AlertStore } from './alert-store';
 import { BinanceCandleSource } from './binance-candles';
+import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
 import { CandlestickService } from './candlestick-service';
 import { CoinScanService } from './coin-scan-service';
@@ -43,7 +44,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const candleService = new CandlestickService(candleStore);
       // The coin scan + alert monitor use the switchable market-data source.
       const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
-      const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new BinanceTickerSource();
+      const tickerSource = marketDataSource === 'okx'
+        ? new OkxTickerSource()
+        : new BinanceTickerSource(undefined, binanceInstrumentMetadata());
       const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
       const coinScanService = new CoinScanService(tickerSource, scanCandleSource);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));

@@ -133,11 +133,11 @@ The reviewer-chosen local date and minute where a **Free Replay** begins. The st
 _Avoid_: second-level timestamp, exchange server time, exact tick
 
 **Coin Scan** (选币):
-A review mode for finding **Instruments** from the OKX swap market using pluggable scan methods. V1 ships only the **Shrink Method**; the module is built so future find-coin methods can be added. A **Coin Scan** is a parameterized panel: choose a method and its parameters, scan, then read a ranked result list.
+A review mode for finding **Instruments** from the configured market-data source (Binance USDT-M perpetuals by default; OKX swap switchable) using pluggable scan methods. V1 ships only the **Shrink Method**; the module is built so future find-coin methods can be added. A **Coin Scan** is a parameterized panel: choose a method and its parameters, scan, then read a ranked result list. The scan pool excludes **TradFi Instruments** whose underlying **Market Session** is closed at the scan anchor (**Session Gating**), so a closed-market contract never occupies a top slot.
 _Avoid_: market screener, strategy backtest
 
 **Shrink Method** (缩量方法):
-The first **Coin Scan** method. It scans the top instruments by 24h quote volume (USDT-settled swaps only) and ranks them by how much their recent volume has shrunk relative to each instrument's own recent average.
+The first **Coin Scan** method. It scans the top instruments by 24h quote volume (USDT-M perpetuals only) and ranks them by how much their recent volatility has shrunk relative to each instrument's own recent stretch. The scan pool applies **Session Gating**: instruments whose underlying **Market Session** is closed are dropped before the top-N slice.
 _Avoid_: volume drop filter, low volume watch
 
 **Volume Ratio** (量比):
@@ -147,6 +147,18 @@ _Avoid_: raw volume, absolute volume delta
 **Shrink Intensity** (缩量强度分):
 The mean of the trailing `consecutive` **Volume Ratio** values for an **Instrument**. A coin qualifies for the **Shrink Method** when that many consecutive ratios are all below the chosen `ratioThreshold`.
 _Avoid_: lowest volume, volume percentage change
+
+**TradFi Instrument** (传统市场合约):
+A Binance USDT-M perpetual whose underlying asset is a traditional-market instrument, classified by the exchange's `underlyingType` (`EQUITY` for US equities and ETFs, `HK_EQUITY` / `KR_EQUITY` / `CN_EQUITY` for the other three equity markets, `COMMODITY` for metals/oil, `PREMARKET` for pre-IPO). Binance prints 24/7 candlesticks for these even when the underlying exchange is closed — closed markets just go quiet, which would otherwise trip a volatility-shrink scan. `EQUITY` and the three regional equity classes are **Session Gated**; `COMMODITY` and `PREMARKET` are not.
+_Avoid_: stock, index future
+
+**Market Session** (交易时段):
+The recurring hours during which an exchange is open, defined in that exchange's local timezone (US equities 09:30–16:00 ET, HK/A-share with a lunch break, KR 09:00–15:30 KST), with all-day holidays and early closes applied. DST is resolved by the IANA timezone data, not by hand-written offsets. Whether a **TradFi Instrument** participates in a **Coin Scan** is decided by its **Market Session** at the scan **anchor**.
+_Avoid_: UTC trading window, exchange uptime
+
+**Session Gating** (休市跳过):
+Excluding instruments whose underlying **Market Session** is closed at the scan anchor. Gating runs after the 24h quote-volume threshold and before the top-N slice, so a closed **TradFi Instrument** never consumes a top slot and never fires candle requests. Skipped instruments are reported back as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. A metadata outage degrades to no gating (the scan still runs unfiltered) rather than failing.
+_Avoid_: market filter, closed-market ban
 
 ## Example Dialogue
 
@@ -247,3 +259,7 @@ Developer: That is the coin scan's shrink method: it ranks top instruments by 24
 Reviewer: One of the scanned coins looks worth replaying.
 
 Developer: Clicking a coin scan result row starts a free replay on that instrument from its newest completed candlestick, in the timeframe that was scanned.
+
+Reviewer: It is Saturday — why is TSLAUSDT missing from the coin scan while BTCUSDT and XAUUSDT still show up?
+
+Developer: Binance marks TSLAUSDT as a US equity perpetual. The NYSE **Market Session** is closed at the scan anchor, so **Session Gating** drops it from the scan pool and the UI reports it under 「已跳过休市标的」. BTCUSDT is crypto and XAUUSDT is a commodity — neither class is session-gated — so they keep scanning normally.

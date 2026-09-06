@@ -1,4 +1,5 @@
 import type { Candlestick } from '../domain/candlestick';
+import type { MarketClass } from '../domain/market-session';
 import type { ReviewTimeframe } from '../domain/trade';
 
 /**
@@ -15,6 +16,11 @@ export type Ticker = {
   quoteVolume24h: number;
   lastPrice: number;
   change24h: number;
+  /**
+   * Market class of the contract. Absent = ungated: always-open classes
+   * (crypto/commodity/pre-IPO), the OKX source, or Binance metadata unavailable.
+   */
+  marketClass?: MarketClass;
 };
 
 export interface TickerSource {

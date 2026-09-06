@@ -4,7 +4,7 @@
 
 `src/server/market-data.ts` defines the normalized contracts shared by the coin scan and the alert monitor, so those consumers stay data-source-agnostic:
 
-- `Ticker { instrument, quoteVolume24h, lastPrice, change24h }` — normalized ticker; `quoteVolume24h` is in USDT (each source computes it from its native payload), `change24h` is a percent.
+- `Ticker { instrument, quoteVolume24h, lastPrice, change24h, marketClass? }` — normalized ticker; `quoteVolume24h` is in USDT (each source computes it from its native payload), `change24h` is a percent. Optional `marketClass` (a `MarketClass` from `src/domain/market-session.ts`) marks contracts whose market can be closed; absent = ungated (crypto/commodity/pre-IPO, OKX, or metadata unavailable).
 - `TickerSource.listTickers(): Promise<Ticker[]>` — full-market snapshot.
 - `CandleRequest { instrument, timeframe, anchor, direction: 'earlier' | 'later', limit }` and `CandleSource.getCandlesticks(request): Promise<Candlestick[]>` — same contract as `CandlestickService`.
 
@@ -12,7 +12,7 @@
 
 ```ts
 const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
-const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new BinanceTickerSource();
+const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new BinanceTickerSource(undefined, binanceInstrumentMetadata());
 const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
 ```
 
@@ -72,6 +72,10 @@ OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins)
 - Stablecoin exclusion list (`STABLECOIN_QUOTE_PAIRS`): `USDCUSDT`, `FDUSDUSDT`, `DAIUSDT`, `TUSDUSDT`, `USDDUSDT`, `USDPUSDT`, `USD1USDT`, `USD0USDT`. Extend this set as new stablecoin/synthetic pairs appear.
 - Entries with non-finite `quoteVolume24h`, `lastPrice`, or `change24h` are skipped.
 - Precious-metal perpetuals `XAUUSDT`/`XAGUSDT` and tokenized `PAXGUSDT`/`XAUTUSDT` remain in the pool.
+
+### Instrument-class metadata (Session Gating)
+
+`src/server/binance-instrument-metadata.ts` provides `BinanceInstrumentMetadataSource` (module-shared via `binanceInstrumentMetadata()`): it fetches `fapi/v1/exchangeInfo` once, maps `underlyingType` → `MarketClass` (`EQUITY`→`US_EQUITY`, `HK_EQUITY`/`KR_EQUITY`/`CN_EQUITY`, `COMMODITY`, `PREMARKET`→`PRE_IPO`, `COIN`/`INDEX`→`CRYPTO`, unknown → omitted), and returns a `symbol → MarketClass` map. TTL 6h + in-flight dedupe; any failure/non-array payload degrades to an EMPTY map (no gating), never an error. `BinanceTickerSource` attaches `marketClass` only for classes with a session spec (equities); the coin scan gates on it at the anchor instant using `isMarketOpen` from `src/domain/market-session.ts`. Coverage in `tests/binance-instrument-metadata.test.ts`.
 
 Coverage is in `tests/binance-tickers.test.ts`.
 

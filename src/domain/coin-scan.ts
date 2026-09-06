@@ -109,6 +109,12 @@ export type ScanResponse = {
    * window to cool down. Present only when at least one backoff occurred.
    */
   warnings?: string[];
+  /**
+   * Instruments excluded because their underlying market was closed at the scan
+   * anchor (filtered after the 24h-volume gate and before the topN slice, so
+   * they never occupy a topN slot). Present only when at least one was skipped.
+   */
+  skippedInstruments?: string[];
 };
 
 /** Minimum band length (in K bars) for a volatility convergence. */

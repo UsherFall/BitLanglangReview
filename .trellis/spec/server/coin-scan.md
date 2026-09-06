@@ -61,6 +61,7 @@ type ScanResponse = {
   qualifiedCount: number;        // = scanned.length
   params: ShrinkScanParams;      // echoes effective params, including resolved anchor
   scannedAt: string;             // ISO
+  skippedInstruments?: string[]; // closed-market contracts excluded before topN (present only when non-empty)
 };
 ```
 
@@ -101,8 +102,12 @@ With the UI default minScore 0.7 this surfaces only strong contractions (≈2×+
 ```
 scanShrink(params):
   tickers = tickerSource.listTickers()
-  top = filter(quoteVolume24h >= minQuoteVolume24h).slice(0, topN)
   anchor = params.anchor ?? Date.now()
+  pooled = filter(quoteVolume24h >= minQuoteVolume24h)
+  for ticker in pooled:                                  // session gating (09/06)
+    if isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor): open.push(ticker)
+    else skippedInstruments.push(ticker.instrument)
+  top = open.slice(0, topN)                              // closed markets never occupy a topN slot
   minScore = params.minScore ?? 0
   tasks = top × scanTimeframes
   results = mapLimit(tasks, concurrency 5, ({ticker, timeframe}) => {
@@ -121,6 +126,7 @@ scanShrink(params):
 ```
 
 - **Uniform candle window**: `SCAN_WINDOW = 100` bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The detector needs a band + a same-length preceding stretch, so the window holds both.
+- **Session gating** (09/06): instruments whose underlying **Market Session** is closed at `anchor` are dropped AFTER the 24h-volume gate and BEFORE the `topN` slice, so a closed TradFi contract never consumes a topN slot nor fires klines requests. Class comes from the ticker's optional `marketClass` (Binance `exchangeInfo` metadata, TTL-cached; absent = ungated). Metadata outage degrades to no gating (scan runs unfiltered). Skipped symbols are echoed as `skippedInstruments` (present only when non-empty) and shown in the UI as 「已跳过 N 个休市标的」. Pure session math lives in `src/domain/market-session.ts` (only `EQUITY`/`HK_EQUITY`/`KR_EQUITY`/`CN_EQUITY` are gated; crypto/commodity/pre-IPO never close).
 - The forming bar is dropped **by time** (`timestamp + timeframeMs(timeframe) <= anchor`). Do not `slice(0, -1)` unconditionally — the candle cache may contain no forming bar.
 - **Concurrency**: 5 in-flight candle fetches (mapLimit-style). A module-scope **pacer** (`createRequestPacer`, `SCAN_MIN_INTERVAL_MS=50`) spaces request *starts* ≥50ms apart across all workers and concurrent scans — one click = 300 forced-fresh klines requests (topN 60 × 5 timeframes), and without pacing that burst trips Binance's IP auto-ban (HTTP 418). `SCAN_CONCURRENCY=5`, min-interval 50ms (~20 req/s, well under the 2400 weight/min budget), jitter 15ms.
 - **Sorting** is done by the service: `qualifiedCount` descending (cross-timeframe consistency is a stronger signal), then `bestScore` descending.
@@ -193,3 +199,7 @@ No `coinVol` "typical volatility" and no absolute thresholds: every measure is a
 ### Flatness gate doubles as the crash-pause rejection
 
 The band must be a quiet horizontal band (edge drift ≤ 2× its own noise). Beyond rejecting trends, this also rejects the wide post-dump bands (CBRS 大跌后喘息) whose edges drift too much — so the pure band-vs-preceding rule does not flood the scan with crash-aftermaths.
+
+### Session gating: skip closed traditional-market contracts (09/06)
+
+Binance USDT-M lists 191 TradFi perpetuals (US/HK/KR/CN equities + commodities + pre-IPO). They print 24/7 candlesticks that simply go quiet when the underlying exchange is closed, so a volatility-shrink scan would otherwise flag a closed market as "extremely converged" — the result list filling with dormant NVDA/TSLA-style contracts. Gate order is 成交额门槛 → 休市剔除 → topN (a closed contract must not steal a slot or burn klines budget). The domain is pure (`market-session.ts`): IANA-timezone windows + built-in NYSE holiday/early-close tables (maintained yearly, coverage asserted in tests), no calendar npm dependency. Commodities/pre-IPO are intentionally ungated (XAU trades 24/7 with real volume). Alert monitor is NOT gated — a price alert during a closed session is still meaningful.

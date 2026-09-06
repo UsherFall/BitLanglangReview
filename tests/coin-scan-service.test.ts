@@ -316,3 +316,77 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
     expect(result.warnings).toEqual(['币安限频(HTTP 429)，已自动退避 10 秒']);
   });
 });
+
+describe('CoinScanService (session gating: skip closed traditional markets)', () => {
+  const equityTicker = (instrument: string, quoteVolume24h: number): Ticker => ({
+    instrument,
+    quoteVolume24h,
+    lastPrice: 100,
+    change24h: 1,
+    marketClass: 'US_EQUITY',
+  });
+
+  /** Every requested (coin, timeframe) is a strong convergence. */
+  function strongService(tickerList: Ticker[]) {
+    const listTickers = vi.fn(async () => tickerList);
+    const getCandlesticks = vi.fn(async ({ timeframe, anchor }: CandleRequest) =>
+      candlesAt(anchor, timeframe, strongBars),
+    );
+    return { listTickers, getCandlesticks, service: new CoinScanService({ listTickers }, { getCandlesticks }) };
+  }
+
+  it('drops closed US equities, keeps them out of topN, and never fetches their candles', async () => {
+    // Closed on a Saturday; the equities rank at the top of the pool by volume,
+    // so without gating they would take the single topN slot.
+    const saturdayMs = Date.UTC(2026, 2, 14, 13, 30);
+    const tsla = equityTicker('TSLAUSDT', 1_000_000_000);
+    const nvda = equityTicker('NVDAUSDT', 900_000_000);
+    const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
+    const xau: Ticker = { instrument: 'XAUUSDT', quoteVolume24h: 100_000_000, lastPrice: 4000, change24h: 1, marketClass: 'COMMODITY' };
+    const { getCandlesticks, service } = strongService([tsla, nvda, btc, xau]);
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 1, minQuoteVolume24h: 0, anchor: saturdayMs });
+
+    // Only the open crypto occupies the topN slot; closed equities are skipped.
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
+    expect(result.skippedInstruments).toEqual(['TSLAUSDT', 'NVDAUSDT']);
+    const requestedInstruments = new Set(getCandlesticks.mock.calls.map(([req]) => req.instrument));
+    expect([...requestedInstruments].sort()).toEqual(['BTCUSDT']);
+  });
+
+  it('keeps US equities in the pool when their market is open', async () => {
+    // Monday 2026-03-09 09:30 EDT.
+    const mondayMs = Date.UTC(2026, 2, 9, 13, 30);
+    const tsla = equityTicker('TSLAUSDT', 1_000_000_000);
+    const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
+    const { service } = strongService([tsla, btc]);
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor: mondayMs });
+
+    expect(result.scanned.map((row) => row.instrument).sort()).toEqual(['BTCUSDT', 'TSLAUSDT']);
+    expect(result.skippedInstruments).toBeUndefined();
+  });
+
+  it('applies the same historical-weekend gating when the anchor is in the past', async () => {
+    const saturdayMs = Date.UTC(2026, 2, 14, 13, 30);
+    const tsla = equityTicker('TSLAUSDT', 1_000_000_000);
+    const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
+    const { service } = strongService([tsla, btc]);
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor: saturdayMs });
+
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
+    expect(result.skippedInstruments).toEqual(['TSLAUSDT']);
+  });
+
+  it('leaves ungated tickers (absent marketClass) untouched and reports no skips', async () => {
+    const saturdayMs = Date.UTC(2026, 2, 14, 13, 30);
+    const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
+    const { service } = strongService([btc]);
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 1, minQuoteVolume24h: 0, anchor: saturdayMs });
+
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
+    expect(result.skippedInstruments).toBeUndefined();
+  });
+});
