@@ -196,7 +196,7 @@ body.sidebar-resizing {
 
 .mode-switch {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 6px;
   padding: 12px;
   border-bottom: 1px solid #2d333b;
@@ -1689,6 +1689,84 @@ label,
 }
 
 .alert-empty {
+  margin: 0;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+/* Bitget 复盘模块：侧栏顶部配置/同步条 */
+.bitget-control {
+  padding: 12px;
+  border-bottom: 1px solid #2d333b;
+  display: grid;
+  gap: 10px;
+}
+
+.bitget-form {
+  display: grid;
+  gap: 8px;
+}
+
+.bitget-form input,
+.bitget-control select {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #d6dee7;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.bitget-form .save-button {
+  min-width: 0;
+}
+
+.bitget-sync-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bitget-sync-row select {
+  flex: 1;
+}
+
+.bitget-sync-row .save-button {
+  flex: 1;
+  min-width: 0;
+}
+
+.bitget-clear {
+  border: 0;
+  background: transparent;
+  color: #8b949e;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 4px;
+}
+
+.bitget-clear:hover {
+  color: #f85149;
+}
+
+.bitget-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #8b949e;
+}
+
+.bitget-error {
+  margin: 0;
+  font-size: 12px;
+  color: #f85149;
+  white-space: pre-wrap;
+}
+
+.bitget-status {
   margin: 0;
   font-size: 12px;
   color: #8b949e;

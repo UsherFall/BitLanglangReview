@@ -15,6 +15,7 @@ import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, fr
 import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { CoinScanPanel, CoinScanResults } from './CoinScanPanel';
+import { BitgetControlBar } from './BitgetControlBar';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { OtherCoinChart } from './OtherCoinChart';
@@ -52,6 +53,8 @@ type TradeResponse = {
   tags: string[];
   /** How many trades carry each tag. Drives the "N 笔" hint in the tag dropdown. */
   tagCounts: Record<string, number>;
+  /** Present on the Bitget source; false until keys are configured. */
+  configured?: boolean;
 };
 
 /** Response of `POST /api/tags/rename` and `POST /api/tags/delete`. */
@@ -81,7 +84,24 @@ const sortLabels: Record<SortField, string> = {
 };
 
 type DrawingDragTarget = 'body' | 'start' | 'end';
-type ReviewMode = 'trade' | 'freeReplay' | 'scan';
+type ReviewMode = 'trade' | 'bitget' | 'freeReplay' | 'scan';
+
+/** Both review modes share the same queue/detail workspace, only the data source differs. */
+function isTradeReviewMode(mode: ReviewMode): boolean {
+  return mode === 'trade' || mode === 'bitget';
+}
+
+function reviewModeNavLabel(mode: ReviewMode): string {
+  return mode === 'trade' ? '交' : mode === 'bitget' ? 'B' : '回';
+}
+
+function reviewModeTitle(mode: ReviewMode): string {
+  return mode === 'trade' ? '交割单复盘' : mode === 'bitget' ? 'Bitget复盘' : mode === 'scan' ? '选币' : '回溯复盘';
+}
+
+function tradeReviewEndpoint(mode: ReviewMode): string {
+  return mode === 'bitget' ? '/api/bitget/trades' : '/api/trades';
+}
 
 const SIDEBAR_CONFIG_KEY = 'sidebar-config';
 const LEADER_COINS_KEY = 'leader-coins';
@@ -173,6 +193,8 @@ export function App() {
   const [futureRetryToken, setFutureRetryToken] = useState(0);
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
   const [alertInstrument, setAlertInstrument] = useState('');
+  // Bumped by the Bitget sync bar so the trade queue refetches after a sync.
+  const [tradeRefreshToken, setTradeRefreshToken] = useState(0);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   // Keys of sessions deleted since the last matching save. Guards against an
@@ -220,17 +242,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!isTradeReviewMode(reviewMode)) return;
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(filters)) {
       if (value) params.set(key, value);
     }
-    fetch(`/api/trades?${params}`)
+    fetch(`${tradeReviewEndpoint(reviewMode)}?${params}`)
       .then((response) => response.json())
       .then((next: TradeResponse) => {
         setData(next);
         setSelectedId((current) => (next.trades.some((trade) => trade.id === current) ? current : next.trades[0]?.id ?? ''));
       });
-  }, [filters]);
+  }, [filters, reviewMode, tradeRefreshToken]);
 
   useEffect(() => {
     fetch('/api/free-replay/sessions')
@@ -290,6 +313,10 @@ export function App() {
     window.addEventListener('pagehide', flush);
     return () => window.removeEventListener('pagehide', flush);
   }, []);
+
+  function requestTradeRefresh() {
+    setTradeRefreshToken((token) => token + 1);
+  }
 
   function handleReviewSaved(review: TradeReview) {
     setData((current) => ({
@@ -545,7 +572,7 @@ export function App() {
             <button type="button" className="sidebar-expand" aria-label="展开侧边栏" title="展开侧边栏" onClick={() => setSidebarCollapsed(false)}>
               <ChevronRight size={18} />
             </button>
-            <span className="sidebar-mode-label" title={reviewMode === 'trade' ? '交割单复盘' : '回溯复盘'}>{reviewMode === 'trade' ? '交' : '回'}</span>
+            <span className="sidebar-mode-label" title={reviewModeTitle(reviewMode)}>{reviewModeNavLabel(reviewMode)}</span>
           </div>
         ) : (
           <>
@@ -556,11 +583,13 @@ export function App() {
         </div>
         <div className="mode-switch">
           <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>交割单复盘</button>
+          <button className={reviewMode === 'bitget' ? 'selected' : ''} onClick={() => setReviewMode('bitget')}>Bitget复盘</button>
           <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>回溯复盘</button>
           <button className={reviewMode === 'scan' ? 'selected' : ''} onClick={() => setReviewMode('scan')}>选币</button>
         </div>
-        {reviewMode === 'trade' ? (
+        {isTradeReviewMode(reviewMode) ? (
           <>
+        {reviewMode === 'bitget' && <BitgetControlBar onDataChanged={requestTradeRefresh} />}
         <div className={`toolbar ${sidebarConfig.filterCollapsed ? 'filter-collapsed' : ''}`}>
           <button type="button" className="toolbar-header" aria-expanded={!sidebarConfig.filterCollapsed} onClick={() => setFilterCollapsed(!sidebarConfig.filterCollapsed)}>
             <span>筛选</span>
@@ -744,7 +773,7 @@ export function App() {
               />
             </div>
           </>
-        ) : <div className="empty-state">没有匹配的交易</div>}
+        ) : <div className="empty-state">{reviewMode === 'bitget' ? (data.configured ? '暂无 Bitget 历史仓位，请在左侧选择时间范围并同步' : '尚未配置 Bitget API key，请在左侧完成配置后同步') : '没有匹配的交易'}</div>}
       </section>
     </main>
   );
