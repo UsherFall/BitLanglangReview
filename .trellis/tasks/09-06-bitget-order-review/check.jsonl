@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "校验新路由契约、鉴权配置不回显密钥、前缀/状态码错误处理与既有风格一致"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "校验 bitget_positions 表/store 的幂等 upsert、WAL 与既有 store 一致、键文件不入库"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "校验 App.tsx 抽取后 trade 模式行为零变化、UI 测试覆盖与回归门槛"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "校验 Trade 可空化波及面是否全部 null 感知、无类型窄化漏洞"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "校验共享工作台状态所有权迁移后两个数据源模式互不串扰"}
+{"file": ".trellis/spec/domain/index.md", "reason": "校验 bitget-position 映射纯函数正确性（方向/时间/手续费/汇率口径）"}

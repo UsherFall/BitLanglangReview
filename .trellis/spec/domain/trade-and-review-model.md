@@ -10,7 +10,9 @@ Avoid terms called out in `CONTEXT.md`, especially order, transaction, row, coin
 
 `src/domain/trade.ts` defines `Trade`, `Direction`, `ReviewTimeframe`, and `reviewTimeframes`. The supported Review Timeframes are exactly `1m`, `5m`, `15m`, `1H`, `4H`, `1D`, `1W`, and `1M`. Keep `reviewTimeframes` in UI display order, with `1m` before `5m`.
 
-A Trade ID is a stable SHA-256 identifier created by `src/server/trade-import.ts` from source sequence plus core trade fields. Do not switch review persistence to row numbers or workbook indexes.
+A Trade ID is a stable SHA-256 identifier. Workbook-sourced IDs are created by `src/server/trade-import.ts` from source sequence plus core trade fields; Bitget-sourced IDs (`bg-` prefix) come from `src/server/bitget-import.ts` over the history-position content key (`historyPositionRowKey`). Do not switch review persistence to row numbers or workbook indexes.
+
+`Trade.leverage`, `Trade.margin`, `Trade.maxPositionValue`, `Trade.returnRate`, and `Trade.turnover` are `number | null`: the xlsx importer always fills numbers, but the Bitget source cannot supply those (it reports a closed cycle's average prices/sizes/pnl/fees only). Consumers must render `null` as "—" and never fabricate approximations (e.g. price return is NOT the workbook-style leverage-inclusive ROE). Queue sorting treats `null` as always-last via `compareNullableNumbers` in `build-review-queue.ts`.
 
 ## Review Contract
 

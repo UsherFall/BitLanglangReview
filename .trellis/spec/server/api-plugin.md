@@ -7,6 +7,9 @@
 Current routes:
 
 - `GET /api/trades` builds the Review Queue and returns `trades`, source workbook `instruments`, and saved `tags`.
+- `GET /api/bitget/trades` is the same Review Queue contract for the Bitget source: it maps cached `bitget_positions` rows to `Trade`s and additionally returns `configured: boolean`.
+- `GET /api/bitget/config` returns `{ configured: boolean }` (never key material). `POST /api/bitget/config` accepts `{ apiKey, secret, passphrase }` (all required, ≤256 chars) and writes `data/bitget-keys.json`. `DELETE /api/bitget/config` clears the file.
+- `POST /api/bitget/sync` accepts `{ startTime?: ms, wipe?: boolean }` (default: now − 90 days), pulls Bitget `history-position` windows, and returns `{ fetchedRows, uniqueRows, fromMs, toMs }`. Errors surface as HTTP 502 with the exchange `msg` (e.g. invalid key / passphrase / IP whitelist).
 - `POST /api/reviews` saves tags and one note for a Trade.
 - `GET /api/free-replay/instruments` returns OKX SWAP instruments.
 - `GET /api/free-replay/sessions` lists saved Free Replay sessions (`updated_at` desc); `PUT` upserts one keyed by `instrument` + `startTime`; `DELETE` removes one keyed by `instrument` + `startTime`.

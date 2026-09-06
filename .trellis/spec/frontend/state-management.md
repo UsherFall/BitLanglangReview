@@ -8,7 +8,9 @@ This project uses React local state only. There is no global store. Persistent s
 
 - Review queue filters, fetched trades, known instruments, known tags, and selected trade ID.
 - Active Review Timeframe.
-- Review mode: `trade` or `freeReplay`.
+- Review mode: `trade`, `bitget`, `freeReplay`, or `scan`.
+
+`trade` (交割单复盘, xlsx source) and `bitget` (Bitget复盘) share ONE queue/detail code path: both render the same filters/progress/list/detail/chart/editor and differ only by the data-source endpoint. `App.tsx` picks the endpoint with `tradeReviewEndpoint(mode)` (`/api/trades` vs `/api/bitget/trades`) and re-fetches when the mode or a `tradeRefreshToken` bump changes; `BitgetControlBar` bumps that token after a successful sync. Review tags/notes/star are shared across both sources because reviews key on `trade.id` and Bitget ids carry a `bg-` prefix.
 - Free Replay session: selected instrument/start time/cursor and currently loaded candles.
 
 `src/ui/ReviewEditor.tsx` owns draft tags, draft note, and save status until `/api/reviews` persists them. `src/ui/FreeReplayPanel.tsx` owns instrument search, selected instrument, start time, status text, and the `flatpickr` instance.
@@ -18,6 +20,8 @@ This project uses React local state only. There is no global store. Persistent s
 Server data is fetched through these routes from `src/server/app-plugin.ts`:
 
 - `/api/trades` returns reviewed trades, source workbook instruments, and saved review tags.
+- `/api/bitget/trades` returns the same queue contract for cached Bitget positions plus `configured: boolean`.
+- `/api/bitget/config` (`GET`/`POST`/`DELETE`) manages the locally stored read-only key; `POST /api/bitget/sync` fetches closed position history. Both live behind `BitgetControlBar` in the Bitget module.
 - `/api/reviews` saves a `TradeReview`.
 - `/api/candles` returns cached/fetched candlesticks for initial, earlier, or later modes.
 - `/api/drawings` lists, saves, and deletes instrument-level chart drawings.

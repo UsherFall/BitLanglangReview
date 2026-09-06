@@ -160,6 +160,17 @@ _Avoid_: UTC trading window, exchange uptime
 Excluding instruments whose underlying **Market Session** is closed at the scan anchor. Gating runs after the 24h quote-volume threshold and before the top-N slice, so a closed **TradFi Instrument** never consumes a top slot and never fires candle requests. Skipped instruments are reported back as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. A metadata outage degrades to no gating (the scan still runs unfiltered) rather than failing.
 _Avoid_: market filter, closed-market ban
 
+**Bitget 复盘 (Bitget Review)**:
+The fourth review module (nav label `Bitget复盘`), parallel to **交割单复盘 / 回溯复盘 / 选币**. Its queue/detail/chart workspace is the SAME shared code path as **交割单复盘**, the only difference is the data source endpoint (`/api/bitget/trades` vs `/api/trades`). Data comes from the user's own Bitget USDT-M closed position history, cached locally in SQLite.
+_Avoid_: calling it 订单复盘 or mixing it with the xlsx source.
+
+**已平仓历史仓位 (History Position)**:
+A fully closed Bitget USDT-FUTURES position cycle (open → close), one row of the private `v2/mix/position/history-position` endpoint. It maps into one **Trade** via `src/server/bitget-import.ts` (id prefix `bg-`). Bitget cannot supply leverage/margin/peak value/a leverage-inclusive return rate, so those **Trade** fields stay `null` and the UI renders "—"; `profit` uses `netProfit` (already includes funding and both fees).
+_Avoid_: treating a history-position row as a raw fill/order.
+
+**Bitget 密钥 (Bitget Keys)**:
+`apiKey`/`secret`/`passphrase` stored ONLY in local `data/bitget-keys.json` (0600, git-ignored). Keys are read-only (no trade/transfer/withdraw permission) and never returned by any `/api/bitget/*` response; only `configured: boolean` is exposed.
+
 ## Example Dialogue
 
 Reviewer: Show me the BTC-USDT-SWAP trade from 2022-05-24 on the candlestick chart.

@@ -38,6 +38,27 @@ create table if not exists price_alerts (
 
 Expose `listAlerts` / `saveAlert` / `deleteAlert` / `markTriggered` / `reactivate`. Status flow is one-way forward on trigger (`active` → `triggered`, setting `triggered_at`); `reactivate` resets status to `active` and clears `triggered_at`. Use `tests/alert-store.test.ts` (temporary SQLite file, cleaned up after) when changing alert persistence. The table has no foreign keys and is owned entirely by this store.
 
+## Bitget Position Store And Keys
+
+`src/server/bitget-position-store.ts` caches raw Bitget history-position rows in `bitget_positions` on the same `data/review.sqlite` (own handle, WAL, raw SQL). It is a cache of the user's own account data, not an authoritative market archive.
+
+```sql
+create table if not exists bitget_positions (
+  id text primary key,          -- 'bg-' + sha256(content key)
+  raw_json text not null,       -- full Bitget row kept verbatim
+  symbol text not null,
+  ctime integer not null,       -- open ms
+  utime integer not null,       -- close ms
+  fetched_at text not null
+);
+```
+
+- Upsert is by `id`, so repeated syncs never duplicate rows (`upsertRows` bulk transaction).
+- `maxUtime()` is the newest close time (incremental-sync seed). `deleteByTime(fromMs, toMs)` exists for explicit full re-sync (`wipe: true`).
+- Rows are converted to domain `Trade` objects only at read time by `src/server/bitget-import.ts`; the store never parses `Trade`.
+
+`src/server/bitget-keys.ts` reads/writes `data/bitget-keys.json` (`mode 0o600`, git-ignored via `data/`). It must never be returned by an API response — routes answer only `configured: boolean`. Corrupt/missing file == not configured.
+
 ## Candlestick Store
 
 `src/server/candlestick-store.ts` is the local Candlestick Cache. It is not the authoritative market archive; OKX remains the Market Data Source. Cache keys must include Instrument, Review Timeframe, and timestamp.

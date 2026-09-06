@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "新增 4 个 /api/bitget/* 路由必须遵守其中关于 connect 中间件前缀剥离、错误响应、send/readBody 先例与命名约定"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "新建 bitget_positions 表与 store 类需遵守本地 SQLite store 模式（无 ORM、WAL、upsert 幂等）及源码工作簿导入之外的持久化规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "把 trade 模式复盘状态抽成 useTradeReviewSource 属状态管理变更，须按此规范评估 data/filters/selected 的所有权迁移"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "新增 src/ui/TradeReviewWorkspace.tsx、BitgetPanel.tsx、trade-review-source.ts 的放置与命名规则"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Trade 字段可空化后 UI 侧 API payload/格式化的类型收紧与 null 处理"}
+{"file": ".trellis/spec/domain/index.md", "reason": "src/domain/bitget-position.ts 纯函数与 Trade 模型变更须符合 domain 层规范"}
