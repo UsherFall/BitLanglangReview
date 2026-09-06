@@ -249,7 +249,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, onSet
         </div>
       </header>
       {result.skippedInstruments && result.skippedInstruments.length > 0 && (
-        <p className="panel-status hint" title={result.skippedInstruments.join(', ')}>
+        <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>
           已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
         </p>
       )}
