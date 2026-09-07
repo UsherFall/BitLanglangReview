@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "TickerSource/CandleSource/rate-gate/行情源约定，Cluster2 共享限速与 Cluster3 服务依赖注入的规范"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "扫描服务节奏/并发/休市跳过/警告透出模式，Cluster2/3 直接复用"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "复盘周期/符号命名，normalizeToBinance 的映射依据"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "SQLite store 约定与不加列的取舍依据"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "中间件路由/错误码约定，新增 /api/market-heat 的规范"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "浮层面板组件与样式规范，MarketHeatPanel 设计依据"}

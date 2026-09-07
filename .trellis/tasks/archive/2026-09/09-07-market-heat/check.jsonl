@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "检查扫描限速/休市/警告不回归的基准"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "检查数据源/缓存/限频行为符合约定"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "检查新增 API 符合路由与错误码约定"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "检查符号归一与复盘周期口径"}
