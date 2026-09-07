@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "仪器映射/bitget-position 领域约定,逆映射与往返测试规范所在"}
+{"file": ".trellis/spec/server/index.md", "reason": "服务端数据源与路由约定(Binance/OKX CandleSource 先例)所在"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "UI review-mode/chart 约定与命名规则所在"}

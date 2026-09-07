@@ -1,7 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, MapPin, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import type { Candlestick } from '../domain/candlestick';
+import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
@@ -87,21 +87,37 @@ const sortLabels: Record<SortField, string> = {
 type DrawingDragTarget = 'body' | 'start' | 'end';
 type ReviewMode = 'trade' | 'bitget' | 'freeReplay' | 'scan';
 
+/**
+ * Per-review-mode data-source binding: which queue endpoint and which exchange's
+ * candlesticks a mode reviews against. The two review modes share the queue
+ * workspace; registering a new mode/source here is the only wiring needed
+ * (trades + candles), the chart components stay source-agnostic.
+ */
+type ReviewModeBinding = { endpoint: string; candleSource: CandleSourceId };
+const reviewModeBindings: Partial<Record<ReviewMode, ReviewModeBinding>> = {
+  trade: { endpoint: '/api/trades', candleSource: 'okx' },
+  bitget: { endpoint: '/api/bitget/trades', candleSource: 'bitget' },
+};
+
 /** Both review modes share the same queue/detail workspace, only the data source differs. */
 function isTradeReviewMode(mode: ReviewMode): boolean {
-  return mode === 'trade' || mode === 'bitget';
+  return Boolean(reviewModeBindings[mode]);
 }
 
 function reviewModeNavLabel(mode: ReviewMode): string {
-  return mode === 'trade' ? '交' : mode === 'bitget' ? 'B' : '回';
+  return mode === 'trade' ? '交' : mode === 'bitget' ? '个' : '回';
 }
 
 function reviewModeTitle(mode: ReviewMode): string {
-  return mode === 'trade' ? '交割单复盘' : mode === 'bitget' ? 'Bitget复盘' : mode === 'scan' ? '选币' : '回溯复盘';
+  return mode === 'trade' ? '交割单复盘' : mode === 'bitget' ? '个人交割单复盘' : mode === 'scan' ? '选币' : '回溯复盘';
 }
 
 function tradeReviewEndpoint(mode: ReviewMode): string {
-  return mode === 'bitget' ? '/api/bitget/trades' : '/api/trades';
+  return reviewModeBindings[mode]?.endpoint ?? '/api/trades';
+}
+
+function reviewCandleSource(mode: ReviewMode): CandleSourceId {
+  return reviewModeBindings[mode]?.candleSource ?? 'okx';
 }
 
 const SIDEBAR_CONFIG_KEY = 'sidebar-config';
@@ -592,7 +608,7 @@ export function App() {
         </div>
         <div className="mode-switch">
           <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>交割单复盘</button>
-          <button className={reviewMode === 'bitget' ? 'selected' : ''} onClick={() => setReviewMode('bitget')}>Bitget复盘</button>
+          <button className={reviewMode === 'bitget' ? 'selected' : ''} onClick={() => setReviewMode('bitget')}>个人交割单复盘</button>
           <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>回溯复盘</button>
           <button className={reviewMode === 'scan' ? 'selected' : ''} onClick={() => setReviewMode('scan')}>选币</button>
         </div>
@@ -762,7 +778,7 @@ export function App() {
                 <button type="button" className={heatOpen ? 'selected' : ''} onClick={() => setHeatOpen((current) => !current)}>热度</button>
               </div>
             </header>
-            <TradeChart trade={selectedTrade} timeframe={timeframe} />
+            <TradeChart trade={selectedTrade} timeframe={timeframe} candleSource={reviewCandleSource(reviewMode)} tradesEndpoint={tradeReviewEndpoint(reviewMode)} />
             {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
             {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
             {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} onClose={() => setHeatOpen(false)} />}
@@ -1447,7 +1463,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   );
 }
 
-function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: ReviewTimeframe }) {
+function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade: ReviewedTrade; timeframe: ReviewTimeframe; candleSource: CandleSourceId; tradesEndpoint: string }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<SVGSVGElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -1495,7 +1511,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
   useEffect(() => {
     if (!showAllMarkers) return;
     let cancelled = false;
-    fetch(`/api/trades?${new URLSearchParams({ instrument: trade.instrument })}`)
+    fetch(`${tradesEndpoint}?${new URLSearchParams({ instrument: trade.instrument })}`)
       .then((response) => response.json())
       .then(({ trades: next }: { trades: ReviewedTrade[] }) => {
         if (!cancelled) setAllTrades(next);
@@ -1506,7 +1522,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     return () => {
       cancelled = true;
     };
-  }, [showAllMarkers, trade.instrument]);
+  }, [showAllMarkers, trade.instrument, tradesEndpoint]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1576,7 +1592,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
     pendingRenderRef.current = false;
     latestAnchorRef.current = null;
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
-    const params = new URLSearchParams({ instrument: trade.instrument, timeframe, entryTime: trade.entryTime, mode: 'initial' });
+    const params = new URLSearchParams({ instrument: trade.instrument, timeframe, entryTime: trade.entryTime, mode: 'initial', source: candleSource });
     fetch(`/api/candles?${params}`)
       .then((response) => response.json())
       .then(({ candles }: { candles: Candlestick[] }) => {
@@ -1752,6 +1768,7 @@ function TradeChart({ trade, timeframe }: { trade: ReviewedTrade; timeframe: Rev
       entryTime: trade.entryTime,
       mode: direction,
       anchor: String(anchor),
+      source: candleSource,
     });
     try {
       const { candles } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };

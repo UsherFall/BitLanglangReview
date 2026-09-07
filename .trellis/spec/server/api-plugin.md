@@ -13,7 +13,7 @@ Current routes:
 - `POST /api/reviews` saves tags and one note for a Trade.
 - `GET /api/free-replay/instruments` returns OKX SWAP instruments.
 - `GET /api/free-replay/sessions` lists saved Free Replay sessions (`updated_at` desc); `PUT` upserts one keyed by `instrument` + `startTime`; `DELETE` removes one keyed by `instrument` + `startTime`.
-- `GET /api/candles` returns initial, earlier, or later candlesticks.
+- `GET /api/candles` returns initial, earlier, or later candlesticks. An optional `source=okx|bitget` query selects the exchange (default `okx`); `bitget` is served by `BitgetCandleSource` after the instrument is mapped with `okxInstrumentToBitgetSymbol` (unmappable instruments return `{ candles: [] }`).
 - `GET /api/scan` runs a coin scan (选币). V1 supports only `method=shrink`; full contract in `coin-scan.md`.
 - `GET /api/market-heat?anchor=<epochMs>&instrument=<reviewSymbol>` computes the anchor-time market temperature for the review pool (5-tier 温度 + stats + 涨跌榜 + skips). Full contract in `market-heat.md`.
 - `GET /api/drawings`, `POST /api/drawings`, and `DELETE /api/drawings` manage instrument-level Chart Drawings.

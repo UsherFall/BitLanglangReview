@@ -16,7 +16,7 @@ const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new Bi
 const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
 ```
 
-The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and TradeReview always use the OKX `CandlestickService`** and the OKX instrument list regardless of the setting.
+The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=bitget` and are served by `BitgetCandleSource`.
 
 ### Market heat always runs on Binance (09/07)
 
@@ -54,6 +54,21 @@ Coverage is in `tests/candlestick-cache.test.ts`.
 - Caching: reuses the shared `CandlestickStore`. Binance instrument names (`XAUUSDT`, `BTCUSDT`) differ from OKX (`XAU-USDT-SWAP`, `BTC-USDT-SWAP`), so the `(instrument, timeframe, timestamp)` primary keys never collide across sources.
 
 Coverage is in `tests/binance-candles.test.ts`.
+
+## Bitget Candles (Personal Review)
+
+`src/server/bitget-candles.ts` provides `BitgetCandleSource implements CandleSource`, backed by the public unsigned `GET https://api.bitget.com/api/v2/mix/market/candles` (`productType=USDT-FUTURES`). It serves the「个人交割单复盘」review mode: the frontend sends `source=bitget` on `/api/candles`, the route converts the OKX-style instrument (`BTC-USDT-SWAP`) back to the Bitget symbol (`BTCUSDT`) with `okxInstrumentToBitgetSymbol` (`src/domain/bitget-position.ts`), and the source fetches under that native symbol.
+
+- `CandleRequest.instrument` is the **native symbol of the chosen source**. Bitget rows are cached under `BTCUSDT`, OKX rows under `BTC-USDT-SWAP`, so the shared `(instrument, timeframe, timestamp)` PK never collides — same isolation rule as Binance.
+- Bitget calendar bars (day/week/month) open on the **UTC+8 boundary**, so the boundary seed carries a -8h offset. Intraday step sizes divide 8h, so the same phase keeps minute/hour bars on the hour grid. (Granularity tokens equal `ReviewTimeframe` verbatim: `1m`…`1M`.)
+- Empirical window semantics (09/07): the endpoint returns the **newest `limit` bars at or before `endTime`**. Therefore:
+  - `earlier`: `endTime = anchor - 1` returns exactly the completed bars just before the anchor.
+  - `later`: the window MUST also set `endTime = anchor + step * limit` (plus `startTime = anchor + 1`); without the cap the endpoint returns the newest bars in `[anchor, now]` — a block far past the anchor that breaks contiguity.
+  - The still-forming/containing bar is dropped by the completed-bar filter (`timestamp + step <= anchor`) before saving, matching the Binance source.
+- History depth is limited (BTCUSDT daily reaches back to ~2023, not 2022); an empty `data` array is a normal "no data" result — the personal review chart shows the empty state and never falls back to OKX.
+- Fetching uses `defaultBitgetMarketFetchJson` (`src/server/http.ts`), the unsigned public-data variant of the signed Bitget fetch.
+
+Coverage is in `tests/bitget-candles.test.ts`; the mode→source binding lives in `src/ui/App.tsx` (`reviewModeBindings`).
 
 ## API Windowing
 

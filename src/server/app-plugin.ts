@@ -2,12 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
+import { okxInstrumentToBitgetSymbol } from '../domain/bitget-position';
 import type { TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
+import type { CandleSource } from './market-data';
 import { BinanceCandleSource } from './binance-candles';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
+import { BitgetCandleSource } from './bitget-candles';
 import { BitgetClient } from './bitget-client';
 import { historyPositionToTrade } from './bitget-import';
 import { clearBitgetKeys, loadBitgetKeys, saveBitgetKeys } from './bitget-keys';
@@ -40,8 +43,12 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const trades = loadTradesFromWorkbook(workbookPath);
       const reviewStore = new ReviewStore(path.resolve('data/review.sqlite'));
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
-      // FreeReplay / TradeReview always use the OKX candle service.
+      // Review-chart candlesticks: FreeReplay and the workbook TradeReview keep
+      // the OKX source by default; the Bitget review mode requests source=bitget
+      // and is served by the Bitget source instead. The source parameter decides
+      // which CandleSource a request hits.
       const candleService = new CandlestickService(candleStore);
+      const bitgetCandleSource = new BitgetCandleSource(candleStore);
       // The coin scan uses the switchable market-data source.
       const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
       // Market heat (市场热度) always runs on Binance: its pool is defined as
@@ -122,8 +129,18 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (!instrument || !timeframe || !reviewTimeframes.includes(timeframe) || !entryTime) {
           return send(res, 400, { error: 'instrument, timeframe, and entryTime are required' });
         }
+        // Select the exchange whose candles to serve. Defaults to OKX so the
+        // existing callers (FreeReplay, workbook review, other-coin chart) are
+        // unchanged; the Bitget review mode passes source=bitget.
+        const source = url.searchParams.get('source') === 'bitget' ? bitgetCandleSource : candleService;
+        let queryInstrument = instrument;
+        if (source === bitgetCandleSource) {
+          const bitgetSymbol = okxInstrumentToBitgetSymbol(instrument);
+          if (!bitgetSymbol) return send(res, 200, { candles: [] });
+          queryInstrument = bitgetSymbol;
+        }
         try {
-          const candles = await getCandlesForMode({ candleService, instrument, timeframe, entryTime, mode, anchor });
+          const candles = await getCandlesForMode({ candleSource: source, instrument: queryInstrument, timeframe, entryTime, mode, anchor });
           send(res, 200, { candles });
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load candlesticks' });
@@ -322,7 +339,7 @@ function parseOptionalNumber(value: string | null): number | undefined {
 }
 
 async function getCandlesForMode(input: {
-  candleService: CandlestickService;
+  candleSource: CandleSource;
   instrument: string;
   timeframe: ReviewTimeframe;
   entryTime: string;
@@ -331,16 +348,16 @@ async function getCandlesForMode(input: {
 }) {
   if (input.mode === 'earlier') {
     if (!Number.isFinite(input.anchor)) throw new Error('anchor is required');
-    return input.candleService.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'earlier', limit: 150 });
+    return input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'earlier', limit: 150 });
   }
   if (input.mode === 'later') {
     if (!Number.isFinite(input.anchor)) throw new Error('anchor is required');
-    return input.candleService.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'later', limit: 150 });
+    return input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'later', limit: 150 });
   }
 
   const entry = Date.parse(input.entryTime);
-  const earlier = await input.candleService.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry, direction: 'earlier', limit: 150 });
-  const later = await input.candleService.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry - 1, direction: 'later', limit: 150 });
+  const earlier = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry, direction: 'earlier', limit: 150 });
+  const later = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry - 1, direction: 'later', limit: 150 });
   return mergeCandles([...earlier, ...later]);
 }
 

@@ -33,7 +33,7 @@ vi.mock('lightweight-charts', () => ({
   createSeriesMarkers: () => ({ setMarkers: vi.fn() }),
 }));
 
-function makeFetch(options: { configured: boolean; syncResult?: unknown }) {
+function makeFetch(options: { configured: boolean; syncResult?: unknown; bitgetTrades?: unknown[] }) {
   return vi.fn(async (url: string, init?: { method?: string; body?: string }) => {
     if (url === '/api/bitget/config' && !init?.method) {
       return new Response(JSON.stringify({ configured: options.configured }));
@@ -48,7 +48,7 @@ function makeFetch(options: { configured: boolean; syncResult?: unknown }) {
       return new Response(JSON.stringify(options.syncResult ?? { fetchedRows: 0, uniqueRows: 0 }));
     }
     if (url.startsWith('/api/bitget/trades')) {
-      return new Response(JSON.stringify({ trades: [], instruments: [], configured: options.configured, tags: [], tagCounts: {} }));
+      return new Response(JSON.stringify({ trades: options.bitgetTrades ?? [], instruments: [], configured: options.configured, tags: [], tagCounts: {} }));
     }
     if (url.startsWith('/api/trades')) {
       return new Response(JSON.stringify({ trades: [], instruments: [], tags: [], tagCounts: {} }));
@@ -62,6 +62,31 @@ function makeFetch(options: { configured: boolean; syncResult?: unknown }) {
   });
 }
 
+function makeBitgetTrade() {
+  return {
+    id: 'bg-1',
+    sequence: 1,
+    instrument: 'BTC-USDT-SWAP',
+    direction: '多',
+    leverage: null,
+    margin: null,
+    entryPrice: 60000,
+    exitPrice: 62000,
+    returnRate: null,
+    profit: 200,
+    turnover: null,
+    size: 0.1,
+    maxPositionValue: null,
+    fee: 1.2,
+    entryTime: '2024-05-21T10:00:00+08:00',
+    exitTime: '2024-05-21T11:00:00+08:00',
+    holdingMinutes: 60,
+    amplitude: null,
+    sourceNote: 'bitget:history-position',
+    review: null,
+  };
+}
+
 describe('Bitget review module', () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
@@ -72,7 +97,7 @@ describe('Bitget review module', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Bitget复盘' }));
+    fireEvent.click(screen.getByRole('button', { name: '个人交割单复盘' }));
     await waitFor(() => expect(screen.getByPlaceholderText('API Key')).toBeInTheDocument());
     expect(screen.getByPlaceholderText('Secret')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Passphrase')).toBeInTheDocument();
@@ -85,7 +110,7 @@ describe('Bitget review module', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Bitget复盘' }));
+    fireEvent.click(screen.getByRole('button', { name: '个人交割单复盘' }));
     await waitFor(() => expect(screen.getByPlaceholderText('API Key')).toBeInTheDocument());
 
     fireEvent.change(screen.getByPlaceholderText('API Key'), { target: { value: 'key' } });
@@ -107,12 +132,28 @@ describe('Bitget review module', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Bitget复盘' }));
+    fireEvent.click(screen.getByRole('button', { name: '个人交割单复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '同步仓位' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: '清除密钥' }));
     await waitFor(() => expect(screen.getByPlaceholderText('API Key')).toBeInTheDocument());
     expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/bitget/config' && init?.method === 'DELETE')).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
+  it('loads Bitget candlesticks for a personal-review trade (source=bitget)', async () => {
+    const fetchMock = makeFetch({ configured: true, bitgetTrades: [makeBitgetTrade()] });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '个人交割单复盘' }));
+    // The personal-review chart fetches its candlesticks from the Bitget source.
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => {
+        const target = String(url);
+        return target.startsWith('/api/candles') && target.includes('source=bitget');
+      })).toBe(true);
+    });
     vi.unstubAllGlobals();
   });
 });

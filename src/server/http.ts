@@ -255,6 +255,15 @@ export async function defaultBitgetFetchJson(url: string, headers: Record<string
   }
 }
 
+/**
+ * Public (unsigned) Bitget market-data GET, e.g. the mix candlesticks used by
+ * review charts. Same proxy/12s-timeout/rate-limit-retry contract as
+ * `defaultFetchJson`; failures surface as a readable 502 through the route.
+ */
+export async function defaultBitgetMarketFetchJson(url: string): Promise<unknown> {
+  return labeledFetch(url, 'Bitget request failed');
+}
+
 async function readErrorDetail(response: FetchResponse): Promise<string> {
   try {
     const body = (await response.json()) as { msg?: unknown } | null;
