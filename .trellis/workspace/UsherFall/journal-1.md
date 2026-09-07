@@ -799,3 +799,31 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 市场热度复盘 + 全局共享限速 + 删价格警报
+<!-- trellis-session: v=2 fp=5e2b138f7b20fea8 -->
+
+**Date**: 2026-09-07
+**Task**: 市场热度复盘 + 全局共享限速 + 删价格警报
+**Branch**: `master`
+
+### Summary
+
+复盘明细新增「市场温度」面板：以入场时刻为锚点、Binance USDT-M Top-80+复盘币的 24h 已收盘 K 线合成 5 档温度与涨跌榜；删除价格警报功能；Binance 请求改为 defaultBinanceFetchJson 内全局 binanceRatePacer(110ms≈9 req/s) 共享限速。265 测试绿+真机 200 验证。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98a1534` | 删除价格警报功能 |
+| `b5c5347` | 全局共享 Binance 请求节奏器（110ms ≈ 9 req/s） |
+| `c6a1231` | 市场温度面板：复盘明细查看锚点时刻的场子冷热 |
+| `944e80c` | 市场热度自修：池口径/共享缓存行 flag/零覆盖档位 |
+| `40f354d` | docs: 同步 spec/CONTEXT 到价格警报移除与市场热度模块 |
+| `6cc7700` | 市场热度面板：移除入场/离场切换，锚点固定为入场时刻 |
+| `d1a02b4` | 热度面板切币自动收起：热度只在点击时计算 |
+
+### Status
+
+[OK] **Completed**

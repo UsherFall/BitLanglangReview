@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
-- **Last Active**: 2026-08-30
+- **Total Sessions**: 16
+- **Last Active**: 2026-09-07
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~801 | Active |
+| `journal-1.md` | ~829 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-09-07 | 市场热度复盘 + 全局共享限速 + 删价格警报 | `98a1534`, `b5c5347`, `c6a1231`, `944e80c`, `40f354d`, `6cc7700`, `d1a02b4` | `master` |
 | 12 | 2026-08-30 | 币安扫描限流与重试优化 + data.zip 清理 | `b60e962` | `master` |
 | 11 | 2026-08-09 | Session 11: 收敛结构-回溯窗口检测(破斜率终止+容忍度) | `11e1678` | `master` |
 | 10 | 2026-08-06 | 选币数据源替换为币安(黄金 XAUUSDT 必检) | `58bd68f`, `f79966e`, `e77c5ad` | `master` |
