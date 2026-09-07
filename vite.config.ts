@@ -1,24 +1,21 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig } from 'vite';
 import { tradingReviewApiPlugin } from './src/server/app-plugin';
 
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  return {
-    plugins: [tradingReviewApiPlugin({ serverChanKey: env.SERVERCHAN_KEY }), react()],
-    server: {
-      port: 5173,
-      watch: {
-        ignored: [
-          '**/data/**',
-          '**/*.sqlite',
-          '**/*.sqlite-wal',
-          '**/*.sqlite-shm',
-          '**/*.log',
-          '**/.trellis/**',
-          '**/.scratch/**',
-        ],
-      },
+export default defineConfig({
+  plugins: [tradingReviewApiPlugin(), react()],
+  server: {
+    port: 5173,
+    watch: {
+      ignored: [
+        '**/data/**',
+        '**/*.sqlite',
+        '**/*.sqlite-wal',
+        '**/*.sqlite-shm',
+        '**/*.log',
+        '**/.trellis/**',
+        '**/.scratch/**',
+      ],
     },
-  };
+  },
 });

@@ -192,7 +192,6 @@ export function App() {
   // retries the future fetch instead of ignoring the click silently.
   const [futureRetryToken, setFutureRetryToken] = useState(0);
   const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
-  const [alertInstrument, setAlertInstrument] = useState('');
   // Bumped by the Bitget sync bar so the trade queue refetches after a sync.
   const [tradeRefreshToken, setTradeRefreshToken] = useState(0);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
@@ -688,7 +687,7 @@ export function App() {
         </div>
           </>
         ) : reviewMode === 'scan' ? (
-          <CoinScanPanel onScanned={setScanResult} alertInstrument={alertInstrument} onAlertInstrumentChange={setAlertInstrument} />
+          <CoinScanPanel onScanned={setScanResult} />
         ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
         )}
@@ -738,7 +737,7 @@ export function App() {
         ) : (
           <div className="empty-state">选择交易对和开始时间，开始回溯复盘</div>
         ) : reviewMode === 'scan' ? (
-          <CoinScanResults result={scanResult} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} onSetAlertInstrument={setAlertInstrument} />
+          <CoinScanResults result={scanResult} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} />
         ) : selectedTrade ? (
           <>
             <header className="detail-header">

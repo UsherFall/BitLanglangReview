@@ -4,8 +4,8 @@ import type { ReviewTimeframe } from '../domain/trade';
 
 /**
  * A normalized market-data ticker. Sources (OKX, Binance, ...) map their native
- * payloads into this shape so services like the coin scan and the alert monitor
- * stay data-source-agnostic.
+ * payloads into this shape so services like the coin scan stay
+ * data-source-agnostic.
  *
  * - `quoteVolume24h` is the 24h quote volume in USDT (OKX computes it as
  *   `volCcy24h * last`; Binance already reports USDT-denominated `quoteVolume`).

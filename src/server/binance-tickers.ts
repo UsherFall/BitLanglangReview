@@ -38,10 +38,9 @@ type BinanceTicker24hr = {
  * so no conversion is needed here.
  *
  * The full-market call costs 40 request weight on Binance, so the result is
- * cached briefly. Both the coin scan and the alert monitor share one source
- * instance, and 24h volume/price change move slowly enough that a 30s TTL never
- * skews a scan — it just stops repeated scans (or a scan colliding with an alert
- * tick) from burning 40 weight each time.
+ * cached briefly. Consumers share one source instance, and 24h volume/price
+ * change move slowly enough that a 30s TTL never skews a scan — it just stops
+ * repeated scans from burning 40 weight each time.
  */
 const TICKER_TTL_MS = 30_000;
 
@@ -58,8 +57,7 @@ export class BinanceTickerSource implements TickerSource {
   async listTickers(): Promise<Ticker[]> {
     const now = Date.now();
     if (this.cache && now - this.cache.at < TICKER_TTL_MS) return this.cache.tickers;
-    // Reuse an in-flight fetch so a scan and an alert tick landing together
-    // only ever produce one request.
+    // Reuse an in-flight fetch so concurrent callers only ever produce one request.
     if (this.inflight) return this.inflight;
     this.inflight = this.fetchAndMap()
       .then((tickers) => {

@@ -19,8 +19,8 @@ type OkxTickersResponse = {
 
 /**
  * Fetches every OKX USDT-settled SWAP ticker once and ranks them by 24h
- * quote volume in USDT descending. Shared by the coin scan and the alert
- * monitor so both read the same live price snapshot.
+ * quote volume in USDT descending. Consumers share one source so they read
+ * the same live price snapshot.
  *
  * `volCcy24h` is the 24h volume in base coin units (e.g. XLM coins), so the
  * 24h quote-volume in USDT is `volCcy24h * last`.
@@ -54,7 +54,7 @@ function change24hPercent(last: string | undefined, open24h: string | undefined)
  * native fetch logic (USDT-SWAP filter, `volCcy24h * last` quote-volume) stays
  * in one place. FreeReplay/trade-review paths keep using the OKX candles
  * regardless of the coin-scan data source; this class is the OKX option for the
- * switchable scan/alert data source.
+ * switchable coin-scan data source.
  */
 export class OkxTickerSource implements TickerSource {
   constructor(private readonly fetchJson: FetchJson = defaultFetchJson) {}

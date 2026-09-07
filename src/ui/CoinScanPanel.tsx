@@ -1,5 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
-import type { AlertDirection, PriceAlert } from '../domain/price-alert';
+import { Fragment, useState } from 'react';
 import {
   scanTimeframes,
   type ConvergenceStructure,
@@ -9,16 +8,9 @@ import {
 
 export type CoinScanPanelProps = {
   onScanned: (result: ScanResponse) => void;
-  alertInstrument: string;
-  onAlertInstrumentChange: (instrument: string) => void;
 };
 
-type AlertConfig = {
-  notifierConfigured: boolean;
-  monitorIntervalMs: number;
-};
-
-export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentChange }: CoinScanPanelProps) {
+export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
   const [topN, setTopN] = useState('60');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
   // 结构强度阈值主旋钮:调高 = 宁少勿滥. Default 0.7 = prefer fewer, stronger structures.
@@ -28,17 +20,6 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
-
-  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
-  const [alertConfig, setAlertConfig] = useState<AlertConfig | null>(null);
-  const [alertDirection, setAlertDirection] = useState<AlertDirection>('above');
-  const [alertPrice, setAlertPrice] = useState('');
-  const [alertFormError, setAlertFormError] = useState<string | null>(null);
-  const [alertSaving, setAlertSaving] = useState(false);
-
-  useEffect(() => {
-    void loadAlerts();
-  }, []);
 
   async function scan() {
     const inputs = [topN, minQuoteVolume24h, minScore];
@@ -72,52 +53,6 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
     } finally {
       setScanning(false);
     }
-  }
-
-  async function loadAlerts() {
-    try {
-      const response = await fetch('/api/alerts');
-      const payload = (await response.json()) as { alerts: PriceAlert[]; config: AlertConfig };
-      if (!response.ok) return;
-      setAlerts(payload.alerts);
-      setAlertConfig(payload.config);
-    } catch {
-      // The alert list simply stays empty when the request fails.
-    }
-  }
-
-  async function saveAlert() {
-    const targetPrice = Number(alertPrice);
-    if (!alertInstrument.trim() || !Number.isFinite(targetPrice) || targetPrice <= 0) {
-      setAlertFormError('币和正的目标价必填');
-      return;
-    }
-    setAlertSaving(true);
-    setAlertFormError(null);
-    try {
-      const response = await fetch('/api/alerts', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instrument: alertInstrument, direction: alertDirection, targetPrice }),
-      });
-      if (!response.ok) throw new Error('保存警报失败');
-      setAlertPrice('');
-      await loadAlerts();
-    } catch (alertError) {
-      setAlertFormError(alertError instanceof Error ? alertError.message : '保存警报失败');
-    } finally {
-      setAlertSaving(false);
-    }
-  }
-
-  async function deleteAlert(id: number) {
-    await fetch(`/api/alerts?id=${id}`, { method: 'DELETE' });
-    await loadAlerts();
-  }
-
-  async function reactivateAlert(id: number) {
-    await fetch(`/api/alerts/reactivate?id=${id}`, { method: 'POST' });
-    await loadAlerts();
   }
 
   return (
@@ -164,50 +99,6 @@ export function CoinScanPanel({ onScanned, alertInstrument, onAlertInstrumentCha
         <p key={warning} className="panel-status warn">{warning}</p>
       ))}
       {error && <p className="panel-status bad">{error}</p>}
-      <div className="coin-scan-alerts">
-        <h3>价格警报</h3>
-        <p className={`alert-config ${alertConfig?.notifierConfigured ? 'ok' : 'bad'}`}>
-          {alertConfig?.notifierConfigured ? '微信通知:已配置 ✓' : '微信通知:未配置(需 .env 配 SERVERCHAN_KEY)'}
-        </p>
-        <div className="coin-scan-alert-form">
-          <label>
-            币
-            <input value={alertInstrument} onChange={(event) => onAlertInstrumentChange(event.target.value)} placeholder="XAUUSDT" />
-          </label>
-          <label>
-            方向
-            <select value={alertDirection} onChange={(event) => setAlertDirection(event.target.value as AlertDirection)}>
-              <option value="above">上破</option>
-              <option value="below">下破</option>
-            </select>
-          </label>
-          <label>
-            目标价
-            <input type="number" min="0" step="any" value={alertPrice} onChange={(event) => setAlertPrice(event.target.value)} />
-          </label>
-          <button className="save-button" disabled={alertSaving} onClick={() => void saveAlert()}>
-            {alertSaving ? '保存中…' : '设警报'}
-          </button>
-          {alertFormError && <p className="panel-status bad">{alertFormError}</p>}
-        </div>
-        <ul className="coin-scan-alert-list">
-          {alerts.map((alert) => (
-            <li key={alert.id} className={alert.status}>
-              <span className="alert-main">
-                {shortInstrument(alert.instrument)} {alert.direction === 'above' ? '上破' : '下破'} {formatPrice(alert.targetPrice)}
-              </span>
-              <span className="alert-status">{alert.status === 'triggered' ? '已触发' : '监控中'}</span>
-              <div className="alert-actions">
-                {alert.status === 'triggered' && (
-                  <button type="button" className="coin-scan-copy" onClick={() => void reactivateAlert(alert.id)}>重新启用</button>
-                )}
-                <button type="button" className="coin-scan-copy" onClick={() => void deleteAlert(alert.id)}>删除</button>
-              </div>
-            </li>
-          ))}
-        </ul>
-        {alerts.length === 0 && <p className="alert-empty">还没有警报。从扫描结果点「设警报」或手动添加。</p>}
-      </div>
     </div>
   );
 }
@@ -216,10 +107,9 @@ export type CoinScanResultsProps = {
   result: ScanResponse | null;
   leaderCoins: string[];
   onToggleLeaderCoin: (instrument: string) => void;
-  onSetAlertInstrument: (instrument: string) => void;
 };
 
-export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, onSetAlertInstrument }: CoinScanResultsProps) {
+export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
   const [expandedInstrument, setExpandedInstrument] = useState<string | null>(null);
 
@@ -292,14 +182,6 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, onSet
                       onClick={() => onToggleLeaderCoin(row.instrument)}
                     >
                       {leaderCoins.includes(row.instrument) ? '已记' : '记龙头'}
-                    </button>
-                    <button
-                      type="button"
-                      className="coin-scan-copy"
-                      title={`为 ${shortInstrument(row.instrument)} 设价格警报`}
-                      onClick={() => onSetAlertInstrument(row.instrument)}
-                    >
-                      设警报
                     </button>
                     <button
                       type="button"

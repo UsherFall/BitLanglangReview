@@ -5,8 +5,6 @@ import { buildReviewQueue } from '../domain/build-review-queue';
 import type { TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
-import { AlertMonitor } from './alert-monitor';
-import { AlertStore } from './alert-store';
 import { BinanceCandleSource } from './binance-candles';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
@@ -21,7 +19,6 @@ import { CandlestickStore } from './candlestick-store';
 import { DrawingStore } from './drawing-store';
 import { freeReplayInstrumentPayload } from './free-replay-instruments';
 import { FreeReplaySessionStore, type SaveFreeReplaySessionInput } from './free-replay-session-store';
-import { NoopNotifier, ServerChanNotifier } from './notify';
 import { OkxInstrumentService } from './okx-instrument-service';
 import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
@@ -29,11 +26,8 @@ import { loadTradesFromWorkbook } from './trade-import';
 
 const workbookPath = findSourceWorkbook();
 
-const alertMonitorIntervalMs = 60_000;
-
 export type TradingReviewApiPluginOptions = {
-  serverChanKey?: string;
-  /** Coin-scan / alert ticker + candle data source. Defaults to Binance. */
+  /** Coin-scan ticker + candle data source. Defaults to Binance. */
   marketDataSource?: 'binance' | 'okx';
 };
 
@@ -47,7 +41,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
       // FreeReplay / TradeReview always use the OKX candle service.
       const candleService = new CandlestickService(candleStore);
-      // The coin scan + alert monitor use the switchable market-data source.
+      // The coin scan uses the switchable market-data source.
       const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
       const tickerSource = marketDataSource === 'okx'
         ? new OkxTickerSource()
@@ -58,12 +52,6 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(path.resolve('data/review.sqlite'));
       const instrumentService = new OkxInstrumentService();
-
-      const serverChanKey = options.serverChanKey ?? process.env.SERVERCHAN_KEY ?? '';
-      const alertStore = new AlertStore(path.resolve('data/review.sqlite'));
-      const notifier = serverChanKey ? new ServerChanNotifier(serverChanKey) : new NoopNotifier();
-      const alertMonitor = new AlertMonitor({ store: alertStore, notifier, intervalMs: alertMonitorIntervalMs, tickerSource });
-      alertMonitor.start();
 
       server.middlewares.use('/api/trades', async (req, res) => {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
@@ -218,45 +206,6 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         }
       });
 
-      server.middlewares.use('/api/alerts', async (req, res) => {
-        const url = new URL(req.url ?? '', 'http://local');
-        if (req.method === 'GET') {
-          return send(res, 200, {
-            alerts: alertStore.listAlerts(),
-            config: { notifierConfigured: serverChanKey.length > 0, monitorIntervalMs: alertMonitorIntervalMs },
-          });
-        }
-        if (req.method === 'POST') {
-          // This middleware is mounted at /api/alerts, so connect strips that
-          // prefix from req.url and the pathname below is '/reactivate'.
-          if (url.pathname === '/reactivate') {
-            const id = Number(url.searchParams.get('id'));
-            if (!Number.isInteger(id) || id < 1) return send(res, 400, { error: 'id is required' });
-            alertStore.reactivate(id);
-            return send(res, 200, { ok: true });
-          }
-          const body = JSON.parse((await readBody(req)) || '{}') as {
-            instrument?: string;
-            direction?: string;
-            targetPrice?: number;
-          };
-          if (!body.instrument || (body.direction !== 'above' && body.direction !== 'below')) {
-            return send(res, 400, { error: 'instrument and a valid direction are required' });
-          }
-          if (typeof body.targetPrice !== 'number' || !Number.isFinite(body.targetPrice) || body.targetPrice <= 0) {
-            return send(res, 400, { error: 'targetPrice must be a positive number' });
-          }
-          const alert = alertStore.saveAlert({ instrument: body.instrument, direction: body.direction, targetPrice: body.targetPrice });
-          return send(res, 200, alert);
-        }
-        if (req.method === 'DELETE') {
-          const id = Number(url.searchParams.get('id'));
-          if (!Number.isInteger(id) || id < 1) return send(res, 400, { error: 'id is required' });
-          alertStore.deleteAlert(id);
-          return send(res, 200, { ok: true });
-        }
-        return send(res, 405, { error: 'Method not allowed' });
-      });
       server.middlewares.use('/api/bitget/config', async (req, res) => {
         const url = new URL(req.url ?? '', 'http://local');
         if (req.method === 'GET') {

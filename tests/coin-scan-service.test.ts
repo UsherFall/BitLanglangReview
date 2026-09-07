@@ -307,7 +307,7 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
       { getCandlesticks: source.getCandlesticks },
       { takeWarnings: () => warnings.splice(0) },
     );
-    // A warning left over from an earlier scan / alert tick is dropped...
+    // A warning left over from an earlier scan is dropped...
     warnings.push('stale');
     const resultPromise = service.scanShrink(params);
     // ...while one raised mid-scan is surfaced on the response.

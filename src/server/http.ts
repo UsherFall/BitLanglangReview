@@ -26,7 +26,6 @@ export type FetchImpl = (url: string, init?: FetchInit) => Promise<FetchResponse
  * If an explicit proxy is needed, set `HTTPS_PROXY` / `https_proxy` /
  * `HTTP_PROXY` / `http_proxy`; set one of them to an empty string to force a
  * direct connection.
- * Server酱 notify keeps using global fetch — `ftqq.com` is reachable from CN.
  */
 export function resolveProxyUrl(
   env: Record<string, string | undefined> = process.env,
@@ -65,10 +64,10 @@ const RETRY_BY_STATUS: Record<number, StatusRetry> = {
 
 /**
  * IP-level rate-limit gate. Binance's 429/418 are signals about the whole IP,
- * not about a single request — a scan's 5 concurrent workers plus the alert
- * monitor must ALL stop when one of them trips a limit, or the ban self-extends
- * (429 → 418 → up to 3 days). The gate is shared module state so every Binance
- * caller checks it before each request.
+ * not about a single request — a scan's concurrent workers and any other live
+ * Binance caller must ALL stop when one of them trips a limit, or the ban
+ * self-extends (429 → 418 → up to 3 days). The gate is shared module state so
+ * every Binance caller checks it before each request.
  */
 export type RateLimitKind = '429' | '418';
 export type RateGate = {
@@ -101,7 +100,7 @@ export function createRateGate(): RateGate {
   };
 }
 
-/** Shared Binance IP-level gate, so concurrent scans and the alert monitor stop together. */
+/** Shared Binance IP-level gate, so all Binance requesters stop together. */
 export const binanceRateGate = createRateGate();
 
 /**

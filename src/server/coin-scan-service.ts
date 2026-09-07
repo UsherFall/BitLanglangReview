@@ -83,8 +83,8 @@ export class CoinScanService {
    * qualifiedCount desc then bestScore desc (score larger = stronger).
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
-    // Discard stale rate-limit warnings (e.g. left by an earlier scan or the
-    // alert monitor) so only warnings raised DURING this scan are reported.
+    // Discard stale rate-limit warnings (e.g. left by an earlier scan) so only
+    // warnings raised DURING this scan are reported.
     this.rateLimitWarnings.takeWarnings();
     // Throttle the ticker call too: it shares the scan's request-rate budget
     // with the klines burst (the whole-market 24hr ticker costs 40 weight).
