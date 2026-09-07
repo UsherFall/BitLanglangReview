@@ -104,6 +104,40 @@ export function createRateGate(): RateGate {
 export const binanceRateGate = createRateGate();
 
 /**
+ * Throttles request *starts* to at least `minIntervalMs` apart. Callers await
+ * `pace()` right before issuing a request; a global `nextAllowedAt` enforces the
+ * gap across ALL concurrent workers (and callers), so a burst of N requests lands
+ * spread over N × minIntervalMs instead of all at once. `jitterMs` adds a random
+ * extra delay to keep workers from aligning into sub-interval wavefronts.
+ */
+export function createRequestPacer(minIntervalMs: number, jitterMs: number): { pace: () => Promise<void> } {
+  let nextAllowedAt = 0;
+  return {
+    async pace(): Promise<void> {
+      const now = Date.now();
+      const wait = Math.max(0, nextAllowedAt - now) + Math.random() * jitterMs;
+      nextAllowedAt = Math.max(nextAllowedAt, now) + minIntervalMs;
+      if (wait > 0) await sleep(wait);
+    },
+  };
+}
+
+/**
+ * Shared Binance request-rate budget. Binance's IP auto-ban (418) is a REQUEST
+ * RATE trigger, not just a weight-window one; a coin scan alone at ~20 req/s
+ * (50ms spacing) still tripped it occasionally. The gate above stops everything
+ * AFTER a limit trips; this pacer keeps the whole pipeline under ~9 req/s so the
+ * limit is rarely reached in the first place. It lives on
+ * `defaultBinanceFetchJson` — the single choke point every Binance outbound
+ * request passes through (klines, tickers, exchangeInfo) — so every Binance
+ * consumer (coin scan, market heat, future modules) shares one rate budget,
+ * cache hits never pace, and OKX/Bitget requests are unaffected.
+ */
+const BINANCE_MIN_INTERVAL_MS = 110;
+const BINANCE_PACE_JITTER_MS = 15;
+export const binanceRatePacer = createRequestPacer(BINANCE_MIN_INTERVAL_MS, BINANCE_PACE_JITTER_MS);
+
+/**
  * JSON GET with exponential-backoff retry for Binance rate-limit responses.
  * HTTP 429 / 418 are retried (429 honoring `Retry-After`, both with jitter);
  * any other non-OK status throws immediately, keeping the previous single-attempt
@@ -190,6 +224,9 @@ export async function defaultFetchJson(url: string): Promise<unknown> {
  * so a failed fapi call surfaces as a readable 502 instead of crashing.
  */
 export async function defaultBinanceFetchJson(url: string): Promise<unknown> {
+  // Share one request-start budget across all Binance callers (see the pacer
+  // note above). Every outbound fapi request is throttled here.
+  await binanceRatePacer.pace();
   return labeledFetch(url, 'Binance request failed', binanceRateGate);
 }
 

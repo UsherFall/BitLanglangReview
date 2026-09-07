@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRequestPacer } from '../src/server/coin-scan-service';
+import { createRequestPacer } from '../src/server/http';
 
 // Jitter 0 keeps the tests deterministic: pace() then waits exactly minIntervalMs.
 
