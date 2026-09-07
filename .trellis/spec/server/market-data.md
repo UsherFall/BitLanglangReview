@@ -63,7 +63,8 @@ Coverage is in `tests/binance-candles.test.ts`.
 - Bitget calendar bars (day/week/month) open on the **UTC+8 boundary**, so the boundary seed carries a -8h offset. Intraday step sizes divide 8h, so the same phase keeps minute/hour bars on the hour grid. (Granularity tokens equal `ReviewTimeframe` verbatim: `1m`…`1M`.)
 - Empirical window semantics (09/07): the endpoint returns the **newest `limit` bars at or before `endTime`**. Therefore:
   - `earlier`: `endTime = anchor - 1` returns exactly the completed bars just before the anchor.
-  - `later`: the window MUST also set `endTime = anchor + step * limit` (plus `startTime = anchor + 1`); without the cap the endpoint returns the newest bars in `[anchor, now]` — a block far past the anchor that breaks contiguity.
+  - `later`: the window MUST also set `endTime` (plus `startTime = anchor + 1`); without the cap the endpoint returns the newest bars in `[anchor, now]` — a block far past the anchor that breaks contiguity.
+  - A single request's `startTime~endTime` span is capped by Bitget at **90 days** (HTTP 400 code `00001` beyond that), so `endTime = anchor + min(step * limit, 90d)` — coarse timeframes (1D/1W/1M at the 150-bar review limit) page in 90-day chunks instead of erroring.
   - The still-forming/containing bar is dropped by the completed-bar filter (`timestamp + step <= anchor`) before saving, matching the Binance source.
 - History depth is limited (BTCUSDT daily reaches back to ~2023, not 2022); an empty `data` array is a normal "no data" result — the personal review chart shows the empty state and never falls back to OKX.
 - Fetching uses `defaultBitgetMarketFetchJson` (`src/server/http.ts`), the unsigned public-data variant of the signed Bitget fetch.

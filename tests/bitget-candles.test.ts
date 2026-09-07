@@ -71,6 +71,20 @@ describe('BitgetCandleSource', () => {
     expect(url).toContain(`endTime=${ANCHOR + STEP * 2}`);
   });
 
+  it('clamps a coarse-timeframe later window to Bitget 90-day span', async () => {
+    const store = new CandlestickStore(':memory:');
+    const fetchJson = vi.fn(async (_url: string) => payload());
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    // 1D at limit 150 would span 150 days; Bitget rejects spans > 90 days.
+    await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '1D', anchor: ANCHOR, direction: 'later', limit: 150 });
+
+    const url = fetchJson.mock.calls[0][0] as string;
+    const maxRange = 90 * 24 * 60 * 60_000;
+    expect(url).toContain(`startTime=${ANCHOR + 1}`);
+    expect(url).toContain(`endTime=${ANCHOR + maxRange}`);
+  });
+
   it('drops a containing daily bar (ts > anchor) even when the API returns it', async () => {
     const store = new CandlestickStore(':memory:');
     const fetchJson = vi.fn(async (_url: string) => payload(

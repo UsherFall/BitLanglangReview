@@ -20,6 +20,8 @@ type BitgetCandlesResponse = {
 const BITGET_BASE_URL = 'https://api.bitget.com';
 const BITGET_CANDLES_PATH = '/api/v2/mix/market/candles';
 const BITGET_PRODUCT_TYPE = 'USDT-FUTURES';
+/** Bitget caps a single candles request's startTime~endTime span at 90 days. */
+const BITGET_MAX_RANGE_MS = 90 * 24 * 60 * 60_000;
 
 /**
  * Candlestick source backed by Bitget's public `v2/mix/market/candles`
@@ -61,10 +63,11 @@ export class BitgetCandleSource implements CandleSource {
     } else {
       // For "later" the window must ALSO cap endTime, otherwise the endpoint
       // would return the newest bars in [startTime, now] — a block far past the
-      // anchor. Capping at anchor + step*limit keeps the block adjacent to the
-      // anchor; the still-open/containing bar is dropped by the filter below.
+      // anchor. The span is clamped to Bitget's 90-day request limit so coarse
+      // timeframes (1D/1W/1M at limit 150) page in chunks instead of getting an
+      // HTTP 400; the containing bar is dropped by the filter below.
       url.searchParams.set('startTime', String(request.anchor + 1));
-      url.searchParams.set('endTime', String(request.anchor + step * request.limit));
+      url.searchParams.set('endTime', String(request.anchor + Math.min(step * request.limit, BITGET_MAX_RANGE_MS)));
     }
 
     const payload = (await this.fetchJson(url.toString())) as BitgetCandlesResponse;
