@@ -4,8 +4,8 @@ import type { HeatRow, MarketHeatResult, MarketTier } from '../domain/market-hea
 export type MarketHeatPanelProps = {
   /** Review symbol as shown in the workbook/Bitget (e.g. BTC-USDT-SWAP). */
   instrument: string;
+  /** Trade entry time (ISO); the heat anchor is the entry moment. */
   entryTime: string;
-  exitTime: string;
   onClose: () => void;
 };
 
@@ -41,14 +41,13 @@ function formatVolume(value: number): string {
   return value.toFixed(0);
 }
 
-export function MarketHeatPanel({ instrument, entryTime, exitTime, onClose }: MarketHeatPanelProps) {
-  const [useExit, setUseExit] = useState(false);
+export function MarketHeatPanel({ instrument, entryTime, onClose }: MarketHeatPanelProps) {
   const [result, setResult] = useState<MarketHeatResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const anchorTime = useExit ? exitTime : entryTime;
-  const anchorMs = Date.parse(anchorTime);
+  // The heat reading is anchored at the trade's entry moment.
+  const anchorMs = Date.parse(entryTime);
 
   useEffect(() => {
     if (!Number.isFinite(anchorMs)) {
@@ -87,11 +86,7 @@ export function MarketHeatPanel({ instrument, entryTime, exitTime, onClose }: Ma
     <section className="market-heat-panel">
       <header className="market-heat-header">
         <span className="market-heat-title">市场热度</span>
-        <span className="market-heat-anchor-time">锚点 {shortTime(anchorTime)}</span>
-        <div className="market-heat-anchor-toggle">
-          <button type="button" aria-pressed={!useExit} className={!useExit ? 'selected' : ''} onClick={() => setUseExit(false)}>入场</button>
-          <button type="button" aria-pressed={useExit} className={useExit ? 'selected' : ''} onClick={() => setUseExit(true)}>离场</button>
-        </div>
+        <span className="market-heat-anchor-time">锚点 {shortTime(entryTime)}</span>
         <button type="button" className="market-heat-close" onClick={onClose} aria-label="关闭市场热度">✕</button>
       </header>
 

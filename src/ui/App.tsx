@@ -757,7 +757,7 @@ export function App() {
             <TradeChart trade={selectedTrade} timeframe={timeframe} />
             {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
             {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
-            {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} exitTime={selectedTrade.exitTime} onClose={() => setHeatOpen(false)} />}
+            {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} onClose={() => setHeatOpen(false)} />}
             <div className="review-panel">
               <div className="metrics">
                 <Metric label="方向" value={selectedTrade.direction} />

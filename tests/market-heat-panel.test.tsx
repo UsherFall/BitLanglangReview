@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MarketHeatResult } from '../src/domain/market-heat';
 import { MarketHeatPanel } from '../src/ui/MarketHeatPanel';
 
 const ENTRY = '2024-06-12T04:00:00.000Z';
-const EXIT = '2024-06-13T08:00:00.000Z';
 
 const sample: MarketHeatResult = {
   tier: 'hot',
@@ -31,7 +30,7 @@ describe('MarketHeatPanel', () => {
     const fetchMock = vi.fn(async (_url: string) => okResponse(sample));
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<MarketHeatPanel instrument="BTC-USDT-SWAP" entryTime={ENTRY} exitTime={EXIT} onClose={vi.fn()} />);
+    render(<MarketHeatPanel instrument="BTC-USDT-SWAP" entryTime={ENTRY} onClose={vi.fn()} />);
 
     expect(fetchMock).toHaveBeenCalledWith(`/api/market-heat?anchor=${Date.parse(ENTRY)}&instrument=BTC-USDT-SWAP`);
     await waitFor(() => expect(screen.getByText('热市')).toBeInTheDocument());
@@ -42,25 +41,15 @@ describe('MarketHeatPanel', () => {
     // Skip summary joins closed + no-data members.
     expect(screen.getByText(/已跳过 3 个休市标的；2 个当时无行情/)).toBeInTheDocument();
     expect(screen.getByText(/锚点 2024-06-12 04:00/)).toBeInTheDocument();
-  });
-
-  it('switching to the exit anchor refetches with the exit time', async () => {
-    const fetchMock = vi.fn(async (_url: string) => okResponse(sample));
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(<MarketHeatPanel instrument="BTC-USDT-SWAP" entryTime={ENTRY} exitTime={EXIT} onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText('热市')).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: '离场' }));
-    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(2));
-    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/market-heat?anchor=${Date.parse(EXIT)}&instrument=BTC-USDT-SWAP`);
+    // There is no entry/exit anchor toggle.
+    expect(screen.queryByRole('button', { name: '离场' })).not.toBeInTheDocument();
   });
 
   it('shows the server error message without a tier when the request fails', async () => {
     const fetchMock = vi.fn(async (_url: string) => new Response(JSON.stringify({ error: "币安 IP 被封(HTTP 418)，请稍后重试" }), { status: 502 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<MarketHeatPanel instrument="BTC-USDT-SWAP" entryTime={ENTRY} exitTime={EXIT} onClose={vi.fn()} />);
+    render(<MarketHeatPanel instrument="BTC-USDT-SWAP" entryTime={ENTRY} onClose={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByText('币安 IP 被封(HTTP 418)，请稍后重试')).toBeInTheDocument());
     expect(screen.queryByText('热市')).not.toBeInTheDocument();

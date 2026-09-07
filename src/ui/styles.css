@@ -1721,27 +1721,6 @@ label,
   white-space: nowrap;
 }
 
-.market-heat-anchor-toggle {
-  display: flex;
-  gap: 4px;
-}
-
-.market-heat-anchor-toggle button {
-  border: 1px solid #303844;
-  background: #161b22;
-  color: #8b949e;
-  border-radius: 6px;
-  padding: 3px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.market-heat-anchor-toggle button.selected {
-  color: #ffffff;
-  border-color: #3b82f6;
-  background: #1f2937;
-}
-
 .market-heat-close {
   display: grid;
   place-items: center;
