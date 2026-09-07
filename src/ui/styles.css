@@ -1679,3 +1679,213 @@ label,
   font-size: 12px;
   color: #8b949e;
 }
+
+/* 市场热度浮层（复盘明细头部「热度」按钮打开） */
+.market-heat-panel {
+  position: absolute;
+  top: 76px;
+  right: 18px;
+  z-index: 30;
+  width: min(420px, calc(100% - 36px));
+  max-height: min(560px, calc(100% - 90px));
+  display: flex;
+  flex-direction: column;
+  background: #0b1017;
+  border: 1px solid #2d333b;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.market-heat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2d333b;
+  font-size: 13px;
+}
+
+.market-heat-title {
+  font-weight: 600;
+  color: #d6dee7;
+}
+
+.market-heat-anchor-time {
+  color: #8b949e;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-heat-anchor-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.market-heat-anchor-toggle button {
+  border: 1px solid #303844;
+  background: #161b22;
+  color: #8b949e;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.market-heat-anchor-toggle button.selected {
+  color: #ffffff;
+  border-color: #3b82f6;
+  background: #1f2937;
+}
+
+.market-heat-close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #8b949e;
+  cursor: pointer;
+  font-size: 12px;
+  flex: none;
+}
+
+.market-heat-close:hover {
+  color: #ffffff;
+  border-color: #4b5563;
+}
+
+.market-heat-body {
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.market-heat-status {
+  color: #8b949e;
+  font-size: 12px;
+  padding: 24px 8px;
+  text-align: center;
+}
+
+.market-heat-status.bad {
+  color: #f59f9f;
+}
+
+.market-heat-tier {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #2d333b;
+  background: #161b22;
+}
+
+.market-heat-tier.hot {
+  border-color: #4ade80;
+}
+
+.market-heat-tier.warm {
+  border-color: #86e7b8;
+}
+
+.market-heat-tier.cool {
+  border-color: #fb923c;
+}
+
+.market-heat-tier.cold {
+  border-color: #fb7185;
+}
+
+.market-heat-tier-label {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.market-heat-tier.hot .market-heat-tier-label,
+.market-heat-tier.warm .market-heat-tier-label {
+  color: #4ade80;
+}
+
+.market-heat-tier.cool .market-heat-tier-label,
+.market-heat-tier.cold .market-heat-tier-label {
+  color: #fb7185;
+}
+
+.market-heat-tier-hint {
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.market-heat-numbers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.market-heat-number b {
+  color: #d6dee7;
+}
+
+.market-heat-board h4 {
+  margin: 2px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+}
+
+.market-heat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.market-heat-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid #21262d;
+  color: #d6dee7;
+  white-space: nowrap;
+}
+
+.market-heat-table td:nth-child(2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.market-heat-table td.heat-volume {
+  text-align: right;
+  color: #8b949e;
+}
+
+.market-heat-table tr.review-coin td {
+  color: #e3b341;
+  font-weight: 600;
+}
+
+.market-heat-board-empty {
+  margin: 0;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.market-heat-skip {
+  margin: 0;
+  font-size: 12px;
+  color: #d29922;
+}
+
+.market-heat-warning {
+  margin: 0;
+  font-size: 12px;
+  color: #f59f9f;
+}

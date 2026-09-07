@@ -18,6 +18,7 @@ import { CoinScanPanel, CoinScanResults } from './CoinScanPanel';
 import { BitgetControlBar } from './BitgetControlBar';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
 import { LeaderCoinPanel } from './LeaderCoinPanel';
+import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
 import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 import {
@@ -181,6 +182,7 @@ export function App() {
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [otherCoinOpen, setOtherCoinOpen] = useState(false);
   const [leaderCoinOpen, setLeaderCoinOpen] = useState(false);
+  const [heatOpen, setHeatOpen] = useState(false);
   const [leaderCoins, setLeaderCoins] = useState<string[]>(() => loadLeaderCoins());
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
@@ -749,11 +751,13 @@ export function App() {
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => setTimeframe(item)}>{item}</button>)}
                 <button type="button" className={otherCoinOpen ? 'selected' : ''} onClick={() => setOtherCoinOpen((current) => !current)}>其他币</button>
                 <button type="button" className={leaderCoinOpen ? 'selected' : ''} onClick={() => setLeaderCoinOpen((current) => !current)}>龙头</button>
+                <button type="button" className={heatOpen ? 'selected' : ''} onClick={() => setHeatOpen((current) => !current)}>热度</button>
               </div>
             </header>
             <TradeChart trade={selectedTrade} timeframe={timeframe} />
             {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
             {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
+            {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} exitTime={selectedTrade.exitTime} onClose={() => setHeatOpen(false)} />}
             <div className="review-panel">
               <div className="metrics">
                 <Metric label="方向" value={selectedTrade.direction} />

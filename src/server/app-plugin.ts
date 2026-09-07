@@ -19,6 +19,7 @@ import { CandlestickStore } from './candlestick-store';
 import { DrawingStore } from './drawing-store';
 import { freeReplayInstrumentPayload } from './free-replay-instruments';
 import { FreeReplaySessionStore, type SaveFreeReplaySessionInput } from './free-replay-session-store';
+import { MarketHeatService } from './market-heat-service';
 import { OkxInstrumentService } from './okx-instrument-service';
 import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
@@ -43,11 +44,16 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const candleService = new CandlestickService(candleStore);
       // The coin scan uses the switchable market-data source.
       const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
-      const tickerSource = marketDataSource === 'okx'
-        ? new OkxTickerSource()
-        : new BinanceTickerSource(undefined, binanceInstrumentMetadata());
-      const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
+      // Market heat (市场热度) always runs on Binance: its pool is defined as
+      // Binance USDT-M top-N and only Binance metadata can session-gate TradFi
+      // contracts. Binance instances are shared with the scan when it is in
+      // Binance mode so the 30s ticker TTL / 6h metadata cache stay shared.
+      const binanceTickerSource = new BinanceTickerSource(undefined, binanceInstrumentMetadata());
+      const binanceCandleSource = new BinanceCandleSource(candleStore);
+      const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : binanceTickerSource;
+      const scanCandleSource = marketDataSource === 'okx' ? candleService : binanceCandleSource;
       const coinScanService = new CoinScanService(tickerSource, scanCandleSource);
+      const marketHeatService = new MarketHeatService(binanceTickerSource, binanceCandleSource);
       const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(path.resolve('data/review.sqlite'));
@@ -203,6 +209,26 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           send(res, 200, result);
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
+        }
+      });
+
+      // Market temperature at a historical anchor (a trade's entry/exit time).
+      server.middlewares.use('/api/market-heat', async (req, res) => {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        const url = new URL(req.url ?? '', 'http://local');
+        const anchor = Number(url.searchParams.get('anchor'));
+        const instrument = url.searchParams.get('instrument') ?? '';
+        if (!Number.isFinite(anchor) || anchor <= 0) {
+          return send(res, 400, { error: 'anchor is required' });
+        }
+        if (!instrument) {
+          return send(res, 400, { error: 'instrument is required' });
+        }
+        try {
+          const result = await marketHeatService.computeHeat({ anchor, reviewInstrument: instrument });
+          send(res, 200, result);
+        } catch (error) {
+          send(res, 502, { error: error instanceof Error ? error.message : 'Market heat failed' });
         }
       });
 
