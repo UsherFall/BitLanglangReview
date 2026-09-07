@@ -110,19 +110,28 @@ export class MarketHeatService {
 
     const changes = covered.map((row) => row.changePct).sort((a, b) => a - b);
     const medianChangePct = changes.length > 0 ? median(changes) : 0;
-    const tier = classifyTier(coveredCount > 0 ? upCount / coveredCount : 0, medianChangePct);
+    // Zero covered coins is "no reading", not a cold market.
+    const tier = coveredCount > 0 ? classifyTier(upCount / coveredCount, medianChangePct) : 'neutral';
 
-    const gainers = covered.filter((row) => row.changePct > 0).sort((a, b) => b.changePct - a.changePct).slice(0, HEAT_MOVERS_LIMIT);
-    const losers = covered.filter((row) => row.changePct < 0).sort((a, b) => a.changePct - b.changePct).slice(0, HEAT_MOVERS_LIMIT);
+    // Boards copy each cached row so the review-coin flag is derived from the
+    // CURRENT request — never mutated onto rows shared across anchors/trades.
+    const flagReview = (row: HeatRow): HeatRow => ({ ...row, isReviewCoin: row.instrument === reviewBinance });
+    const gainers = covered.filter((row) => row.changePct > 0).sort((a, b) => b.changePct - a.changePct).slice(0, HEAT_MOVERS_LIMIT).map(flagReview);
+    const losers = covered.filter((row) => row.changePct < 0).sort((a, b) => a.changePct - b.changePct).slice(0, HEAT_MOVERS_LIMIT).map(flagReview);
 
-    const reviewRow = reviewBinance ? rowsByInstrument.get(reviewBinance) ?? null : null;
-    if (reviewRow) reviewRow.isReviewCoin = true;
+    let reviewRow: HeatRow | null = null;
+    if (reviewBinance) {
+      const cached = rowsByInstrument.get(reviewBinance);
+      if (cached) reviewRow = { ...cached, isReviewCoin: true };
+    }
 
     const skipped: MarketHeatSkips = { closedCount: closed.length, noDataCount, unmappedReviewInstrument };
     return {
       tier,
       stats: {
-        poolSize: pool.length,
+        // Pool size = every instrument this reading tried to cover (top-N pool
+        // plus a forced review coin), before no-data members are skipped.
+        poolSize: requests.size,
         coveredCount,
         medianChangePct,
         upCount,

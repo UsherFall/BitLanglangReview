@@ -89,8 +89,8 @@ export function MarketHeatPanel({ instrument, entryTime, exitTime, onClose }: Ma
         <span className="market-heat-title">市场热度</span>
         <span className="market-heat-anchor-time">锚点 {shortTime(anchorTime)}</span>
         <div className="market-heat-anchor-toggle">
-          <button type="button" className={!useExit ? 'selected' : ''} onClick={() => setUseExit(false)}>入场</button>
-          <button type="button" className={useExit ? 'selected' : ''} onClick={() => setUseExit(true)}>离场</button>
+          <button type="button" aria-pressed={!useExit} className={!useExit ? 'selected' : ''} onClick={() => setUseExit(false)}>入场</button>
+          <button type="button" aria-pressed={useExit} className={useExit ? 'selected' : ''} onClick={() => setUseExit(true)}>离场</button>
         </div>
         <button type="button" className="market-heat-close" onClick={onClose} aria-label="关闭市场热度">✕</button>
       </header>
