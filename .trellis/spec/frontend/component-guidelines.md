@@ -60,10 +60,10 @@ Free Replay must keep `progressTime` separate from `cursorTime`. Switching Revie
 
 `MarketHeatPanel.tsx` is the floating review-detail panel opened by the 热度 button in the trade/bitget detail header. Contract:
 
-- Props `{ instrument, entryTime, exitTime, onClose }`; the panel anchors on the entry time by default and can toggle to the exit time (an `aria-pressed` 入场/离场 segmented control), re-requesting `GET /api/market-heat?anchor=<epochMs>&instrument=<symbol>` on every anchor/instrument change with a cancellation guard against stale responses.
+- Props `{ instrument, entryTime, onClose }`; the heat anchor is the trade's entry time (no entry/exit toggle), and the request is `GET /api/market-heat?anchor=<epochMs>&instrument=<symbol>`, guarded against stale responses. Switching to a different trade CLOSES the panel (App effect on `selectedId`) — a whole-pool candle fetch happens per new anchor, so a reading is computed only when the reviewer clicks 热度 for the current trade; the server's per-anchor memo still makes reopening the same trade a zero-request hit.
 - Renders the 5-tier verdict (热市/偏热/中性/偏冷/冷市), the number row (中位涨跌 / 涨/跌家数 / 异动家数 / 覆盖数), the 涨幅榜/跌幅榜 boards, and the 休市/无行情/无法归一 skip summary plus rate-limit warnings. The reviewed coin's row is highlighted and suffixed `· 复盘币`.
 - Styles live under the `.market-heat-*` naming in `src/ui/styles.css`, reusing the `.other-coin-panel` overlay family.
-- The panel appears only in the trade/bitget detail branch (it never shows in scan or free replay), and stays mounted across queue navigation so switching trades re-anchors automatically.
+- The panel appears only in the trade/bitget detail branch (it never shows in scan or free replay), and the App closes it whenever the selected trade changes (see the entry-anchor bullet above).
 
 ## Styling And Accessibility
 

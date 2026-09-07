@@ -231,6 +231,14 @@ export function App() {
     window.localStorage.setItem(LEADER_COINS_KEY, JSON.stringify(leaderCoins));
   }, [leaderCoins]);
 
+  // 市场热度 per-trade computation costs a whole-pool candle fetch (~80 req)
+  // for each NEW anchor, so it must not auto-follow queue navigation while open:
+  // close it when the selected trade changes so a reading is only computed when
+  // the reviewer clicks 热度 for the current trade.
+  useEffect(() => {
+    setHeatOpen(false);
+  }, [selectedId]);
+
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
     const query = window.matchMedia(NARROW_LAYOUT_QUERY);
