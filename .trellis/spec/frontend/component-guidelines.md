@@ -50,15 +50,20 @@ Free Replay must keep `progressTime` separate from `cursorTime`. Switching Revie
 
 ## Coin Scan Panel
 
-`CoinScanPanel.tsx` owns the 选币 scan UI (parameter area + results table) plus the price-alert area. Contract:
+`CoinScanPanel.tsx` owns the 选币 scan UI (parameter area + results table). Contract:
 
 - The parameter area always sends every scan param (`topN`, `plateauMin`, `maxCompression`, `maxLatestTrend`, `trendWindow`, `minQuoteVolume24h`) as a number input, pre-filled with the current defaults (e.g. `plateauMin` prefills `2`, `maxCompression` prefills `0.8`, `maxLatestTrend` prefills `0.9`, `trendWindow` prefills `3`, step `0.05` for the ratio thresholds), and validates all inputs are non-empty finite numbers before scanning. There is no `时间周期` selector (one click scans all 5 timeframes — v6) and no `压缩窗口` input (the plateau scans `PLATEAU_BOX_WINDOWS` internally). Volume-related params (`ratioThreshold`, `consecutive`, `window`) are gone — the scan is pure price (v5). An optional `datetime-local` 扫描时间点 input sends `anchor` (epoch ms) when set, or omits it to scan "now"; a past anchor scans historical convergence on every timeframe (bars whose close time `<= anchor`).
 - The results table renders one row per `ScanRow`. Columns are 币 | 最新价 | 24h 涨跌 | 成交额 | 收敛周期 | 状态 | 操作, where 收敛周期 = `convergenceTimeframes.join(', ')` (e.g. `1H`, `1H,4H`). There are no volume columns and no flat 压缩比/收窄趋势 columns — those live in the expandable per-timeframe detail. A 「详情」 button toggles an expandable row (`.coin-scan-detail-row`) containing a sub-table over `row.timeframes` with columns 周期 | 压缩比 | 收窄趋势 | score | 窗口 | plateau宽 | 状态; non-qualified timeframes are dimmed (`:not(.qualified)`), and every cell uses `formatCompression` / `formatLatestTrend` / `formatScore`, which show `—` for the `LARGE_RATIO` flat-window sentinel (>= 1e9) and otherwise `toFixed(2)`, so the user can calibrate `maxCompression` / `maxLatestTrend` by eye. The service already sorts rows (`qualifiedCount` desc then `bestScore` asc); the UI renders them as-is. Qualified rows get the `.qualified` class.
-- Each scan result row has a 「设警报」 button that pre-fills the manual alert form with that instrument and raises focus into the alert area (callback to the panel's form state, not a separate popup).
-- The alert area = manual add form (instrument + direction dropdown 上破/下破 + target price) + alert list, each row showing 币 / 方向 / 目标价 / 状态 (已触发) with 重新启用 and 删除 actions.
-- Notification config status is read from `GET /api/alerts` → `config.notifierConfigured` (已配置 ✓ / 未配置 ✗) and `config.monitorIntervalMs`.
-- CRUD goes through `/api/alerts`; after each mutation re-fetch the list. Direction labels map `above` → 上破, `below` → 下破.
 - Styles reuse the `.coin-scan-*` naming and color palette in `src/ui/styles.css`.
+
+## Market Heat Panel
+
+`MarketHeatPanel.tsx` is the floating review-detail panel opened by the 热度 button in the trade/bitget detail header. Contract:
+
+- Props `{ instrument, entryTime, exitTime, onClose }`; the panel anchors on the entry time by default and can toggle to the exit time (an `aria-pressed` 入场/离场 segmented control), re-requesting `GET /api/market-heat?anchor=<epochMs>&instrument=<symbol>` on every anchor/instrument change with a cancellation guard against stale responses.
+- Renders the 5-tier verdict (热市/偏热/中性/偏冷/冷市), the number row (中位涨跌 / 涨/跌家数 / 异动家数 / 覆盖数), the 涨幅榜/跌幅榜 boards, and the 休市/无行情/无法归一 skip summary plus rate-limit warnings. The reviewed coin's row is highlighted and suffixed `· 复盘币`.
+- Styles live under the `.market-heat-*` naming in `src/ui/styles.css`, reusing the `.other-coin-panel` overlay family.
+- The panel appears only in the trade/bitget detail branch (it never shows in scan or free replay), and stays mounted across queue navigation so switching trades re-anchors automatically.
 
 ## Styling And Accessibility
 

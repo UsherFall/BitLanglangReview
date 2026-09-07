@@ -160,6 +160,14 @@ _Avoid_: UTC trading window, exchange uptime
 Excluding instruments whose underlying **Market Session** is closed at the scan anchor. Gating runs after the 24h quote-volume threshold and before the top-N slice, so a closed **TradFi Instrument** never consumes a top slot and never fires candle requests. Skipped instruments are reported back as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. A metadata outage degrades to no gating (the scan still runs unfiltered) rather than failing.
 _Avoid_: market filter, closed-market ban
 
+**市场温度 (Market Temperature)**:
+A five-tier heat reading of the market at a review anchor, shown in a panel (「热度」) on the trade/bitget detail header. It answers whether the 场子 was hot or cold when a **Trade** was entered/exited: the temperature is synthesized from the breadth (share of pool members up) and the pool's median 24h change, into 热市/偏热/中性/偏冷/冷市. The thresholds are calibration constants, not user-adjustable per reading.
+_Avoid_: 大盘指数, 市场情绪打分
+
+**Market Heat Pool** (热度标的池):
+The universe a **Market Temperature** reading covers: the Binance USDT-M perpetuals with the largest current 24h quote volume (top ~80) after **Session Gating** drops closed **TradFi Instruments**, plus the reviewed **Trade's** instrument forced in by base-asset normalization (OKX `BTC-USDT-SWAP` and Bitget/Binance `BTCUSDT` map to the same Binance symbol). A pool member without a 24h history at the anchor (listed later) is skipped and reported, not counted flat.
+_Avoid_: OKX swap pool, source-workbook instruments only
+
 **Bitget 复盘 (Bitget Review)**:
 The fourth review module (nav label `Bitget复盘`), parallel to **交割单复盘 / 回溯复盘 / 选币**. Its queue/detail/chart workspace is the SAME shared code path as **交割单复盘**, the only difference is the data source endpoint (`/api/bitget/trades` vs `/api/trades`). Data comes from the user's own Bitget USDT-M closed position history, cached locally in SQLite.
 _Avoid_: calling it 订单复盘 or mixing it with the xlsx source.
@@ -274,3 +282,7 @@ Developer: Clicking a coin scan result row starts a free replay on that instrume
 Reviewer: It is Saturday — why is TSLAUSDT missing from the coin scan while BTCUSDT and XAUUSDT still show up?
 
 Developer: Binance marks TSLAUSDT as a US equity perpetual. The NYSE **Market Session** is closed at the scan anchor, so **Session Gating** drops it from the scan pool and the UI reports it under 「已跳过休市标的」. BTCUSDT is crypto and XAUUSDT is a commodity — neither class is session-gated — so they keep scanning normally.
+
+Reviewer: This ETH long was opened at noon — was the whole market hot that day or was ETH moving on its own?
+
+Developer: Open the 市场热度 panel on that trade. It reads the **Market Heat Pool** at the trade's entry anchor and shows whether most pool members were up and how hard (the 24h median move), which tells you if it was a broad hot market or an isolated move. You can switch the anchor to the exit time to see how the 场子 felt at the close.

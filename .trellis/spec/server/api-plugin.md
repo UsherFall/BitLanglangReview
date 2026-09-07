@@ -15,14 +15,12 @@ Current routes:
 - `GET /api/free-replay/sessions` lists saved Free Replay sessions (`updated_at` desc); `PUT` upserts one keyed by `instrument` + `startTime`; `DELETE` removes one keyed by `instrument` + `startTime`.
 - `GET /api/candles` returns initial, earlier, or later candlesticks.
 - `GET /api/scan` runs a coin scan (选币). V1 supports only `method=shrink`; full contract in `coin-scan.md`.
+- `GET /api/market-heat?anchor=<epochMs>&instrument=<reviewSymbol>` computes the anchor-time market temperature for the review pool (5-tier 温度 + stats + 涨跌榜 + skips). Full contract in `market-heat.md`.
 - `GET /api/drawings`, `POST /api/drawings`, and `DELETE /api/drawings` manage instrument-level Chart Drawings.
-- `GET /api/alerts` returns `{ alerts, config: { notifierConfigured, monitorIntervalMs } }`; `POST /api/alerts` creates a price alert; `DELETE /api/alerts?id=…` deletes one; `POST /api/alerts/reactivate?id=…` reactivates a triggered alert. Full contract in `price-alert.md` (domain) and the Alert Store section of `persistence-and-imports.md`.
 
 ## Gotcha: Connect middleware strips the mount prefix
 
-`/api/alerts` is mounted via connect middleware (Vite's `configureServer`), which strips the mount prefix from `req.url`. Inside the handler the pathname is therefore `/reactivate`, **not** `/api/alerts/reactivate`. Checking `url.pathname === '/api/alerts/reactivate'` is always false and the request falls through to the create-alert branch, returning `400` instead of `200`. Match sub-route pathnames against the stripped form (`url.pathname === '/reactivate'`).
-
-This bug shipped in the initial watchlist-notify implementation and was only caught by a live dev-server request after unit tests all passed — route behavior has no automated HTTP-level test (see Tests). When adding a sub-route under a mounted prefix, verify the stripped pathname.
+When a route is mounted via connect middleware (Vite's `configureServer`), connect strips the mount prefix from `req.url`. Any sub-path parsed from `req.url` is relative to the mount point. Match sub-route pathnames against the stripped form, or use the query string, rather than testing the full `/api/<route>/…` path.
 
 ## Request Parsing
 
@@ -37,16 +35,6 @@ Use the local `send` helper so JSON responses consistently set `content-type: ap
 ## Initialization
 
 On server configuration, create `data/`, load trades once from the Source Workbook, and instantiate stores/services against `data/review.sqlite`. Do not modify the Source Workbook; review data belongs in SQLite.
-
-### ServerChan notifier config
-
-`SERVERCHAN_KEY` (`.env`, read via vite `loadEnv`) configures the price-alert notifier. `ServerChanNotifier` (`src/server/notify.ts`) accepts three formats via `resolveSendUrl`:
-
-- **Full send URL** (`http` prefix) → used verbatim (ServerChan³ `sctp` 推送通道 / self-hosted), e.g. `https://12345.push.ft07.com/send/sctp...send`.
-- **Bare `sctp{uid}t...` SendKey** → uid extracted via `/^sctp(\d+)t/`, URL built as `https://{uid}.push.ft07.com/send/{key}.send`.
-- **Bare `SCT...` SendKey** (Server酱 Turbo, pushes to WeChat) → `https://sctapi.ftqq.com/{key}.send`.
-
-Note: ServerChan³ (`sctp`) and Turbo (`SCT`) are separate systems with incompatible SendKeys; `sctp` pushes to the SC3 app, `SCT` to WeChat 测试号/服务号. Absent/empty → `NoopNotifier` (monitor still runs, no push).
 
 ## Tests
 

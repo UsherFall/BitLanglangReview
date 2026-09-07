@@ -1,8 +1,8 @@
 # Market Data
 
-## Data-Source Seam (Coin Scan + Alert Monitor)
+## Data-Source Seam (Coin Scan + Market Heat)
 
-`src/server/market-data.ts` defines the normalized contracts shared by the coin scan and the alert monitor, so those consumers stay data-source-agnostic:
+`src/server/market-data.ts` defines the normalized contracts shared by the coin scan and the market-heat service, so those consumers stay data-source-agnostic:
 
 - `Ticker { instrument, quoteVolume24h, lastPrice, change24h, marketClass? }` — normalized ticker; `quoteVolume24h` is in USDT (each source computes it from its native payload), `change24h` is a percent. Optional `marketClass` (a `MarketClass` from `src/domain/market-session.ts`) marks contracts whose market can be closed; absent = ungated (crypto/commodity/pre-IPO, OKX, or metadata unavailable).
 - `TickerSource.listTickers(): Promise<Ticker[]>` — full-market snapshot.
@@ -16,7 +16,11 @@ const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new Bi
 const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
 ```
 
-The coin scan and the alert monitor consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and TradeReview always use the OKX `CandlestickService`** and the OKX instrument list regardless of the setting.
+The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and TradeReview always use the OKX `CandlestickService`** and the OKX instrument list regardless of the setting.
+
+### Market heat always runs on Binance (09/07)
+
+`MarketHeatService` (see `market-heat.md`) is wired in `app-plugin.ts` with dedicated `BinanceTickerSource` + `BinanceCandleSource` instances REGARDLESS of `marketDataSource`. Its pool is defined as Binance USDT-M top-N and only Binance `exchangeInfo` metadata can session-gate TradFi contracts, so the OKX switch does not apply. In Binance mode the same instances are shared with the coin scan so the 30s ticker TTL and 6h metadata cache stay shared.
 
 ## OKX Instrument List
 
@@ -59,13 +63,13 @@ Do not preload all history. The product contract is On-Demand Candlestick Loadin
 
 ## OKX Tickers (FreeReplay / OKX Fallback)
 
-`src/server/okx-tickers.ts` owns the single full-market ticker fetch: `fetchOkxTickers(fetchJson)` calls `GET /api/v5/market/tickers?instType=SWAP` once, filters to instruments whose `instId` ends with `-USDT-SWAP`, sorts by 24h quote-volume in USDT descending, and returns `OkxTicker[]` (shape-identical to `Ticker`). It is wrapped by `OkxTickerSource implements TickerSource`, the OKX option for the switchable scan/alert data source. Keep `fetchOkxTickers` a pure module function; do not re-embed the fetch in service or monitor classes.
+`src/server/okx-tickers.ts` owns the single full-market ticker fetch: `fetchOkxTickers(fetchJson)` calls `GET /api/v5/market/tickers?instType=SWAP` once, filters to instruments whose `instId` ends with `-USDT-SWAP`, sorts by 24h quote-volume in USDT descending, and returns `OkxTicker[]` (shape-identical to `Ticker`). It is wrapped by `OkxTickerSource implements TickerSource`, the OKX option for the switchable coin-scan data source. Keep `fetchOkxTickers` a pure module function; do not re-embed the fetch in service classes.
 
 OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins), not USDT. The 24h quote-volume in USDT is therefore `volCcy24h * last`; the scan uses that product for both ranking and the liquidity floor. `lastPrice` comes from ticker `last`; `change24h` is `(last - open24h) / open24h * 100`.
 
 ## Binance Tickers (Shared, Default)
 
-`src/server/binance-tickers.ts` provides `BinanceTickerSource implements TickerSource`, the default source for the coin scan and `AlertMonitor.tick` (which looks up one live price per active alert). `listTickers()` calls `fapi/v1/ticker/24hr` once (no pagination), maps every USDT-M perpetual symbol (ends with `USDT`), excludes stablecoin pairs, and sorts by `quoteVolume` descending:
+`src/server/binance-tickers.ts` provides `BinanceTickerSource implements TickerSource`, the default source for the coin scan and the market-heat pool. `listTickers()` calls `fapi/v1/ticker/24hr` once (no pagination), maps every USDT-M perpetual symbol (ends with `USDT`), excludes stablecoin pairs, and sorts by `quoteVolume` descending:
 
 - `quoteVolume24h = Number(quoteVolume)` — Binance already reports USDT-denominated quote volume, so no `volCcy * last` conversion (unlike OKX).
 - `change24h = Number(priceChangePercent)` — already a percent.
@@ -82,3 +86,7 @@ Coverage is in `tests/binance-tickers.test.ts`.
 ## Error Handling
 
 `defaultFetchJson` aborts OKX requests after 12 seconds and throws when the response is not OK; `defaultBinanceFetchJson` (`src/server/http.ts`) applies the same timeout/error contract to Binance `fapi` endpoints. Both wrap `fetchJsonWithRetry`, which retries Binance's rate-limit responses so a scan survives instead of dying on the first hit: 429 (transient weight-limit) gets exponential backoff honoring `Retry-After`; 418 (IP auto-ban) waits the FULL `Retry-After` (else 2min) then retries exactly ONCE — per Binance, retrying during a ban prolongs it (2min → up to 3 days), so a still-banned IP throws rather than hammer. Non-retryable statuses and network/timeout errors throw immediately. Route handlers convert service failures to HTTP 502 so the UI can show loading failure status without crashing.
+
+### Shared request-rate budget (09/07)
+
+Binance's IP auto-ban (418) is a request-RATE trigger, not only a weight-window one. `binanceRatePacer` (`BINANCE_MIN_INTERVAL_MS=110`, jitter 15ms → ~9 req/s) lives inside `defaultBinanceFetchJson` — the single choke point every Binance outbound passes through (klines/tickers/exchangeInfo) — so the coin scan, the market-heat service, and any future Binance caller share ONE request-start budget; cache hits never reach the fetch and OKX/Bitget requests are unpaced. The 429/418 gate (`binanceRateGate`) behavior is unchanged.

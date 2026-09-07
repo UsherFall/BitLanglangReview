@@ -111,7 +111,8 @@ scanShrink(params):
   minScore = params.minScore ?? 0
   tasks = top × scanTimeframes
   results = mapLimit(tasks, concurrency 5, ({ticker, timeframe}) => {
-    pacer.pace()   // ≥50ms between request starts → ≤20 req/s, avoids Binance 418 IP ban
+    // Request starts are paced GLOBALLY in `defaultBinanceFetchJson` (~9 req/s),
+    // shared with every other Binance caller; the scan no longer paces itself.
     candles = candleSource.getCandlesticks({ instrument, timeframe, anchor, direction: 'earlier', limit: SCAN_WINDOW, refresh: anchor === undefined })
     completed = candles.filter(c => c.timestamp + timeframeMs(timeframe) <= anchor)   // drop forming bar by time
     return probeStructure(completed, defaultStructureParams())
@@ -128,7 +129,7 @@ scanShrink(params):
 - **Uniform candle window**: `SCAN_WINDOW = 100` bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The detector needs a band + a same-length preceding stretch, so the window holds both.
 - **Session gating** (09/06): instruments whose underlying **Market Session** is closed at `anchor` are dropped AFTER the 24h-volume gate and BEFORE the `topN` slice, so a closed TradFi contract never consumes a topN slot nor fires klines requests. Class comes from the ticker's optional `marketClass` (Binance `exchangeInfo` metadata, TTL-cached; absent = ungated). Metadata outage degrades to no gating (scan runs unfiltered). Skipped symbols are echoed as `skippedInstruments` (present only when non-empty) and shown in the UI as 「已跳过 N 个休市标的」. Pure session math lives in `src/domain/market-session.ts` (only `EQUITY`/`HK_EQUITY`/`KR_EQUITY`/`CN_EQUITY` are gated; crypto/commodity/pre-IPO never close).
 - The forming bar is dropped **by time** (`timestamp + timeframeMs(timeframe) <= anchor`). Do not `slice(0, -1)` unconditionally — the candle cache may contain no forming bar.
-- **Concurrency**: 5 in-flight candle fetches (mapLimit-style). A module-scope **pacer** (`createRequestPacer`, `SCAN_MIN_INTERVAL_MS=50`) spaces request *starts* ≥50ms apart across all workers and concurrent scans — one click = 300 forced-fresh klines requests (topN 60 × 5 timeframes), and without pacing that burst trips Binance's IP auto-ban (HTTP 418). `SCAN_CONCURRENCY=5`, min-interval 50ms (~20 req/s, well under the 2400 weight/min budget), jitter 15ms.
+- **Concurrency**: 5 in-flight candle fetches (mapLimit-style). Binance request *starts* are paced by the SHARED `binanceRatePacer` (`src/server/http.ts`, `BINANCE_MIN_INTERVAL_MS=110`, jitter 15ms → ~9 req/s) inside `defaultBinanceFetchJson`, so the whole pipeline — one click = 300 forced-fresh klines requests (topN 60 × 5 timeframes) plus any concurrent market-heat fetch — shares a single rate budget well under Binance's IP auto-ban (418) threshold. 50ms/20 req/s (the old per-scan pacer) still tripped 418 occasionally; 110ms is the agreed conservative ceiling (09/07, user decision; scan latency ~15s → ~33s). OKX-path scans are not paced by this budget.
 - **Sorting** is done by the service: `qualifiedCount` descending (cross-timeframe consistency is a stronger signal), then `bestScore` descending.
 
 ### Candle cache freshness
@@ -202,4 +203,4 @@ The band must be a quiet horizontal band (edge drift ≤ 2× its own noise). Bey
 
 ### Session gating: skip closed traditional-market contracts (09/06)
 
-Binance USDT-M lists 191 TradFi perpetuals (US/HK/KR/CN equities + commodities + pre-IPO). They print 24/7 candlesticks that simply go quiet when the underlying exchange is closed, so a volatility-shrink scan would otherwise flag a closed market as "extremely converged" — the result list filling with dormant NVDA/TSLA-style contracts. Gate order is 成交额门槛 → 休市剔除 → topN (a closed contract must not steal a slot or burn klines budget). The domain is pure (`market-session.ts`): IANA-timezone windows + built-in NYSE holiday/early-close tables (maintained yearly, coverage asserted in tests), no calendar npm dependency. Commodities/pre-IPO are intentionally ungated (XAU trades 24/7 with real volume). Alert monitor is NOT gated — a price alert during a closed session is still meaningful.
+Binance USDT-M lists 191 TradFi perpetuals (US/HK/KR/CN equities + commodities + pre-IPO). They print 24/7 candlesticks that simply go quiet when the underlying exchange is closed, so a volatility-shrink scan would otherwise flag a closed market as "extremely converged" — the result list filling with dormant NVDA/TSLA-style contracts. Gate order is 成交额门槛 → 休市剔除 → topN (a closed contract must not steal a slot or burn klines budget). The domain is pure (`market-session.ts`): IANA-timezone windows + built-in NYSE holiday/early-close tables (maintained yearly, coverage asserted in tests), no calendar npm dependency. Commodities/pre-IPO are intentionally ungated (XAU trades 24/7 with real volume). The market-heat module applies the same gate at the review anchor (see `market-heat.md`).

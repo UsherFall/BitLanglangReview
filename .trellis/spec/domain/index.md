@@ -8,7 +8,6 @@ Guidance for pure business types and helpers under `src/domain`.
 | --- | --- |
 | [Trade And Review Model](./trade-and-review-model.md) | Changing trades, reviews, drawings, candlesticks, or review timeframes |
 | [Review Queue](./review-queue.md) | Changing queue filtering, sorting, or reviewed status rules |
-| [Price Alert](./price-alert.md) | Changing price-alert types or the `isAlertTriggered` predicate |
 
 ## Scope
 
