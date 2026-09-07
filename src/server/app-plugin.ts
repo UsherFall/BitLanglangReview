@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
-import { okxInstrumentToBitgetSymbol } from '../domain/bitget-position';
+import { okxInstrumentToBinanceSymbol } from '../domain/instrument-symbol';
 import type { TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
@@ -10,7 +10,6 @@ import type { CandleSource } from './market-data';
 import { BinanceCandleSource } from './binance-candles';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
-import { BitgetCandleSource } from './bitget-candles';
 import { BitgetClient } from './bitget-client';
 import { historyPositionToTrade } from './bitget-import';
 import { clearBitgetKeys, loadBitgetKeys, saveBitgetKeys } from './bitget-keys';
@@ -44,11 +43,12 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const reviewStore = new ReviewStore(path.resolve('data/review.sqlite'));
       const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
       // Review-chart candlesticks: FreeReplay and the workbook TradeReview keep
-      // the OKX source by default; the Bitget review mode requests source=bitget
-      // and is served by the Bitget source instead. The source parameter decides
-      // which CandleSource a request hits.
+      // the OKX source by default; the personal review mode (Bitget-sourced
+      // trades) requests source=binance — Bitget's own public candles only keep
+      // a rolling window (5m ≈ 30 days up to 4H ≈ a few months), so old trades
+      // would have empty intraday charts. The source parameter decides which
+      // CandleSource a request hits.
       const candleService = new CandlestickService(candleStore);
-      const bitgetCandleSource = new BitgetCandleSource(candleStore);
       // The coin scan uses the switchable market-data source.
       const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
       // Market heat (市场热度) always runs on Binance: its pool is defined as
@@ -131,13 +131,13 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         }
         // Select the exchange whose candles to serve. Defaults to OKX so the
         // existing callers (FreeReplay, workbook review, other-coin chart) are
-        // unchanged; the Bitget review mode passes source=bitget.
-        const source = url.searchParams.get('source') === 'bitget' ? bitgetCandleSource : candleService;
+        // unchanged; the personal review mode passes source=binance.
+        const source = url.searchParams.get('source') === 'binance' ? binanceCandleSource : candleService;
         let queryInstrument = instrument;
-        if (source === bitgetCandleSource) {
-          const bitgetSymbol = okxInstrumentToBitgetSymbol(instrument);
-          if (!bitgetSymbol) return send(res, 200, { candles: [] });
-          queryInstrument = bitgetSymbol;
+        if (source === binanceCandleSource) {
+          const binanceSymbol = okxInstrumentToBinanceSymbol(instrument);
+          if (!binanceSymbol) return send(res, 200, { candles: [] });
+          queryInstrument = binanceSymbol;
         }
         try {
           const candles = await getCandlesForMode({ candleSource: source, instrument: queryInstrument, timeframe, entryTime, mode, anchor });

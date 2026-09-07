@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对源选择/空数据语义与三所对比是否实现一致"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "核对 /api/candles source 路由行为"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "核对 reviewModeBindings/图表传参与命名规范"}

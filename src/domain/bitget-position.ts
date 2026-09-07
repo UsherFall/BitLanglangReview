@@ -34,20 +34,6 @@ export function bitgetSymbolToOkxInstrument(symbol: string): string | null {
 }
 
 /**
- * Inverse of `bitgetSymbolToOkxInstrument`: maps an OKX-style USDT-M
- * instrument (`BTC-USDT-SWAP`) back to the Bitget USDT-FUTURES symbol
- * (`BTCUSDT`) used by Bitget public market-data endpoints. Returns null for
- * anything that is not a `*-USDT-SWAP` instrument, so callers can fall through
- * to an empty result.
- */
-export function okxInstrumentToBitgetSymbol(instId: string): string | null {
-  if (!/^[A-Z0-9]{2,}-USDT-SWAP$/.test(instId)) return null;
-  const base = instId.slice(0, -'-USDT-SWAP'.length);
-  if (!base) return null;
-  return `${base}USDT`;
-}
-
-/**
  * Deterministic collision-resistant key for one closed position cycle. The id
  * stored on the mapped `Trade` is `bg-` + sha256 of this key, hashed in the
  * server importer (`src/server/bitget-import.ts`) exactly like workbook trades.

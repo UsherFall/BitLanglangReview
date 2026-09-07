@@ -96,7 +96,7 @@ type ReviewMode = 'trade' | 'bitget' | 'freeReplay' | 'scan';
 type ReviewModeBinding = { endpoint: string; candleSource: CandleSourceId };
 const reviewModeBindings: Partial<Record<ReviewMode, ReviewModeBinding>> = {
   trade: { endpoint: '/api/trades', candleSource: 'okx' },
-  bitget: { endpoint: '/api/bitget/trades', candleSource: 'bitget' },
+  bitget: { endpoint: '/api/bitget/trades', candleSource: 'binance' },
 };
 
 /** Both review modes share the same queue/detail workspace, only the data source differs. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { bitgetSymbolToOkxInstrument, historyPositionRowKey, okxInstrumentToBitgetSymbol, type BitgetHistoryPosition } from '../src/domain/bitget-position';
+import { bitgetSymbolToOkxInstrument, historyPositionRowKey, type BitgetHistoryPosition } from '../src/domain/bitget-position';
+import { okxInstrumentToBinanceSymbol } from '../src/domain/instrument-symbol';
 import { historyPositionToTrade, makeBitgetTradeId } from '../src/server/bitget-import';
 
 const sampleRow: BitgetHistoryPosition = {
@@ -34,26 +35,26 @@ describe('bitgetSymbolToOkxInstrument', () => {
   });
 });
 
-describe('okxInstrumentToBitgetSymbol', () => {
-  it('maps an OKX-style chart instrument back to the Bitget symbol', () => {
-    expect(okxInstrumentToBitgetSymbol('BTC-USDT-SWAP')).toBe('BTCUSDT');
-    expect(okxInstrumentToBitgetSymbol('XRP-USDT-SWAP')).toBe('XRPUSDT');
-    expect(okxInstrumentToBitgetSymbol('1000PEPE-USDT-SWAP')).toBe('1000PEPEUSDT');
+describe('okxInstrumentToBinanceSymbol', () => {
+  it('maps an OKX-style chart instrument to the Binance USDT-M symbol', () => {
+    expect(okxInstrumentToBinanceSymbol('BTC-USDT-SWAP')).toBe('BTCUSDT');
+    expect(okxInstrumentToBinanceSymbol('XRP-USDT-SWAP')).toBe('XRPUSDT');
+    expect(okxInstrumentToBinanceSymbol('1000PEPE-USDT-SWAP')).toBe('1000PEPEUSDT');
   });
 
   it('is the inverse of bitgetSymbolToOkxInstrument', () => {
     for (const symbol of ['BTCUSDT', 'XRPUSDT', '1000PEPEUSDT']) {
       const instrument = bitgetSymbolToOkxInstrument(symbol);
       expect(instrument).not.toBeNull();
-      expect(okxInstrumentToBitgetSymbol(instrument as string)).toBe(symbol);
+      expect(okxInstrumentToBinanceSymbol(instrument as string)).toBe(symbol);
     }
   });
 
   it('returns null for anything that is not a USDT-M SWAP instrument', () => {
-    expect(okxInstrumentToBitgetSymbol('BTC-USDC-SWAP')).toBeNull();
-    expect(okxInstrumentToBitgetSymbol('BTC-USDT-SPOT')).toBeNull();
-    expect(okxInstrumentToBitgetSymbol('BTCUSDT')).toBeNull();
-    expect(okxInstrumentToBitgetSymbol('')).toBeNull();
+    expect(okxInstrumentToBinanceSymbol('BTC-USDC-SWAP')).toBeNull();
+    expect(okxInstrumentToBinanceSymbol('BTC-USDT-SPOT')).toBeNull();
+    expect(okxInstrumentToBinanceSymbol('BTCUSDT')).toBeNull();
+    expect(okxInstrumentToBinanceSymbol('')).toBeNull();
   });
 });
 

@@ -5,7 +5,7 @@ import type { ReviewTimeframe } from './trade';
  * the source per review mode) and the server (which selects the `CandleSource`),
  * so both sides stay on the same vocabulary when a new source is registered.
  */
-export type CandleSourceId = 'okx' | 'bitget';
+export type CandleSourceId = 'okx' | 'binance';
 
 export type Candlestick = {
   instrument: string;
