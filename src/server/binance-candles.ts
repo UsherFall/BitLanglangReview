@@ -22,6 +22,15 @@ type BinanceKline = [string, string, string, string, string, string, string, str
  * every metric is computed only over completed candles. Caching reuses the
  * shared `CandlestickStore`; instrument names (`XAUUSDT` vs OKX `XAU-USDT-SWAP`)
  * differ, so Binance and OKX candles never collide in the store.
+ *
+ * Namespace warning: the cache key IS the native `base+USDT` symbol, so Binance
+ * rows collide with any OTHER source whose symbol vocabulary is also
+ * `base+USDT` (e.g. the retired Bitget candle source wrote the same keys and
+ * its leftovers mixed with Binance rows, producing duplicate daily bars).
+ * OKX is safe only because its names carry the `-USDT-SWAP` suffix. If a future
+ * source shares the `base+USDT` namespace, it MUST namespace its cache keys
+ * (e.g. a source prefix) — the `(instrument, timeframe, timestamp)` primary key
+ * cannot tell two such sources apart.
  */
 export class BinanceCandleSource implements CandleSource {
   constructor(

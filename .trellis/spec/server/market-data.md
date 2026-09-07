@@ -68,6 +68,7 @@ Why not Bitget's own candles? Bitget `/api/v2/mix/market/candles` keeps only a *
 ### Source selection notes
 
 - `CandleRequest.instrument` is always the **native symbol of the chosen source**; the route converts from the review's OKX-style instrument (`src/domain/instrument-symbol.ts`).
+- **Cache-key namespace rule (09/07)**: the `candles` PK is `(instrument, timeframe, timestamp)` with no source column. Isolation works only when sources use DIFFERENT symbol vocabularies — OKX's `X-USDT-SWAP` vs `base+USDT` — NOT when two sources share a vocabulary. The retired Bitget source and Binance both keyed on `base+USDT` (`ZECUSDT`), so Bitget leftovers mixed with Binance rows and produced two daily bars per day. If a future source shares the `base+USDT` namespace, it MUST namespace its cache keys (e.g. a source prefix); the retired-source leftovers were cleared once from the local cache.
 - The mode→source binding lives in `src/ui/App.tsx` (`reviewModeBindings`): workbook review → `okx`, personal review → `binance`.
 - Binance daily candles align to UTC 0:00 (no -8h offset), so a trade near a UTC day boundary may sit on a different chart day than the OKX/UTC+8 view — accepted for the personal mode.
 

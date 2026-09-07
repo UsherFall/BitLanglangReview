@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "源选择/缓存键隔离与命名空间冲突教训所在"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "缓存键/源语义单一概念归属检查"}
