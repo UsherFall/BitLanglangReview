@@ -39,7 +39,8 @@ export function historyPositionToTrade(row: BitgetHistoryPosition, sequence: num
     exitPrice,
     returnRate: null,
     profit: netProfit,
-    turnover: null,
+    // Bitget 无保证金/杠杆: turnover 填开仓名义价值(entryPrice×size)供列表展示; margin 仍 null。
+    turnover: entryPrice * size,
     size,
     maxPositionValue: null,
     fee: toPositiveFee(row.openFee, row.closeFee),

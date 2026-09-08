@@ -704,7 +704,7 @@ export function App() {
                 <span className="time">{trade.entryTime.slice(0, 16).replace('T', ' ')}</span>
                 <strong>{trade.instrument}</strong>
                 <span className={trade.direction === '多' ? 'long' : 'short'}>{trade.direction}</span>
-                <span className="trade-meta">{formatLeverage(trade.leverage)} · 保证金 {formatUsdtAmount(trade.margin)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
+                <span className="trade-meta">{positionMoneyLabel(trade)} · 平仓 {trade.exitTime.slice(5, 16).replace('T', ' ')}</span>
                 <span className={trade.profit >= 0 ? 'profit' : 'loss'}>{formatPercent(trade.returnRate)} / {trade.profit.toFixed(2)}</span>
                 <span className="tags">{trade.review?.tags.join(' · ') || '未标记'}</span>
               </button>
@@ -2119,4 +2119,14 @@ function nullableProfitTone(value: number | null): 'good' | 'bad' | undefined {
 function formatLeverage(value: number | null): string {
   if (value === null) return '—';
   return `${Number.isInteger(value) ? value.toString() : value.toFixed(2)}x`;
+}
+
+/**
+ * 行内"仓位金额"段: 有 margin 的源(xlsx)显示杠杆+保证金(现状); 无 margin 的
+ * Bitget 个人源显示可算的开仓名义价值(turnover), 不伪造保证金。
+ */
+function positionMoneyLabel(trade: ReviewedTrade): string {
+  return trade.margin !== null
+    ? `${formatLeverage(trade.leverage)} · 保证金 ${formatUsdtAmount(trade.margin)}`
+    : `名义价值 ${formatUsdtAmount(trade.turnover)}`;
 }

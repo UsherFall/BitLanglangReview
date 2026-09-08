@@ -92,11 +92,12 @@ describe('historyPositionToTrade', () => {
       profit: -0.65356802,
       fee: 0.00742596,
       sourceNote: 'bitget:history-position',
-      // Bitget cannot supply these.
+      // Bitget cannot supply margin/leverage; turnover is the computable
+      // entry notional (entryPrice × size) shown in the personal module rows.
       leverage: null,
       margin: null,
       returnRate: null,
-      turnover: null,
+      turnover: 0.64967 * 10,
       maxPositionValue: null,
       amplitude: null,
     });
