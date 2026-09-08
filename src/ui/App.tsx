@@ -58,7 +58,9 @@ type TradeResponse = {
   configured?: boolean;
 };
 
-/** Response of `POST /api/tags/rename` and `POST /api/tags/delete`. */
+
+
+/** Response of `POST /api/tags/rename` and `POST /api/tags/delete` (module-scoped). */
 type TagMutationResponse = {
   affected: number;
   tags: string[];
@@ -353,18 +355,19 @@ export function App() {
   }
 
   /**
-   * Renames (`to`) or deletes (`to === null`) a tag for EVERY trade, then patches
-   * the local snapshot with the server's post-mutation state: the tag list, per-tag
-   * counts, every loaded trade's tags, and the active tag filter (renaming the
-   * filtered tag keeps the queue; deleting it clears the filter so the queue does
-   * not silently empty out). The editor patches its own draft tags, so it is left
-   * alone here — remounting it would throw away an unsaved note.
+   * Renames (`to`) or deletes (`to === null`) a tag for EVERY trade — tag names
+   * are global across both review modules. The server responds with the MODULE-
+   * scoped tag list/counts for the active review mode (`module` param), so the
+   * local snapshot patches synchronously without a refetch. The editor patches
+   * its own draft tags, so it is left alone here — remounting it would throw
+   * away an unsaved note.
    */
   async function mutateTag({ from, to }: TagMutation): Promise<void> {
+    const module = reviewMode === 'bitget' ? 'bitget' : 'trade';
     const response = await fetch(to === null ? '/api/tags/delete' : '/api/tags/rename', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(to === null ? { tag: from } : { from, to }),
+      body: JSON.stringify(to === null ? { tag: from, module } : { from, to, module }),
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null;

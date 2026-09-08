@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
 import { okxInstrumentToBinanceSymbol } from '../domain/instrument-symbol';
-import type { TradeReview } from '../domain/review';
+import { scopeReviewsToTrades, type TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import type { CandleSource } from './market-data';
@@ -67,15 +67,32 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));
       const instrumentService = new OkxInstrumentService();
 
+      // Module-scoped reviews for tag payloads: 'trade' = xlsx universe,
+      // 'bitget' = mapped bg- universe, absent = every review (legacy global).
+      const scopedReviewsForModule = (module?: string): TradeReview[] => {
+        const allReviews = reviewStore.listReviews();
+        if (module === 'trade') return scopeReviewsToTrades(allReviews, trades.map((trade) => trade.id));
+        if (module === 'bitget') {
+          const ids = bitgetPositionStore
+            .listAll()
+            .map((cached, sequence) => historyPositionToTrade(cached.row, sequence))
+            .filter((trade): trade is NonNullable<ReturnType<typeof historyPositionToTrade>> => trade !== null)
+            .map((trade) => trade.id);
+          return scopeReviewsToTrades(allReviews, ids);
+        }
+        return allReviews;
+      };
+
       server.middlewares.use('/api/trades', async (req, res) => {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
         const url = new URL(req.url ?? '', 'http://local');
         const options = toQueueOptions(url.searchParams);
         const reviews = reviewStore.listReviews();
+        const scopedReviews = scopeReviewsToTrades(reviews, trades.map((trade) => trade.id));
         send(res, 200, {
           trades: buildReviewQueue(trades, reviews, options),
           instruments: [...new Set(trades.map((trade) => trade.instrument))].sort(),
-          ...tagPayload(reviewStore, reviews),
+          ...tagPayload(reviewStore, scopedReviews),
         });
       });
 
@@ -93,21 +110,21 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // its state instead of refetching /api/trades.
       server.middlewares.use('/api/tags/rename', async (req, res) => {
         if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
-        const parsed = JSON.parse((await readBody(req)) || '{}') as { from?: string; to?: string };
+        const parsed = JSON.parse((await readBody(req)) || '{}') as { from?: string; to?: string; module?: string };
         const from = parsed.from?.trim() ?? '';
         const to = parsed.to?.trim() ?? '';
         if (!from || !to) return send(res, 400, { error: 'from and to are required' });
         const affected = reviewStore.renameTag(from, to);
-        send(res, 200, { affected, ...tagPayload(reviewStore, reviewStore.listReviews()) });
+        send(res, 200, { affected, ...tagPayload(reviewStore, scopedReviewsForModule(parsed.module)) });
       });
 
       server.middlewares.use('/api/tags/delete', async (req, res) => {
         if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
-        const parsed = JSON.parse((await readBody(req)) || '{}') as { tag?: string };
+        const parsed = JSON.parse((await readBody(req)) || '{}') as { tag?: string; module?: string };
         const tag = parsed.tag?.trim() ?? '';
         if (!tag) return send(res, 400, { error: 'tag is required' });
         const affected = reviewStore.deleteTag(tag);
-        send(res, 200, { affected, ...tagPayload(reviewStore, reviewStore.listReviews()) });
+        send(res, 200, { affected, ...tagPayload(reviewStore, scopedReviewsForModule(parsed.module)) });
       });
 
       server.middlewares.use('/api/free-replay/instruments', async (req, res) => {
@@ -310,11 +327,12 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
                 .filter((trade): trade is NonNullable<ReturnType<typeof historyPositionToTrade>> => trade !== null)
             : [];
           const queue = buildReviewQueue(trades, reviews, options);
+          const scopedReviews = scopeReviewsToTrades(reviews, trades.map((trade) => trade.id));
           send(res, 200, {
             trades: queue,
             instruments: [...new Set(trades.map((trade) => trade.instrument))].sort(),
             configured,
-            ...tagPayload(reviewStore, reviews),
+            ...tagPayload(reviewStore, scopedReviews),
           });
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load Bitget trades' });
