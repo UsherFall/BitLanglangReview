@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveDataPath } from './data-root';
 
 export type BitgetKeyConfig = {
   apiKey: string;
@@ -7,7 +8,7 @@ export type BitgetKeyConfig = {
   passphrase: string;
 };
 
-const DEFAULT_KEYS_PATH = path.resolve('data', 'bitget-keys.json');
+const DEFAULT_KEYS_PATH = resolveDataPath('bitget-keys.json');
 
 export function loadBitgetKeys(keysPath = DEFAULT_KEYS_PATH): BitgetKeyConfig | null {
   let raw: string;

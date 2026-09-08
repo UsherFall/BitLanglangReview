@@ -8,6 +8,7 @@ import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import type { CandleSource } from './market-data';
 import { BinanceCandleSource } from './binance-candles';
+import { resolveDataPath } from './data-root';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
 import { BitgetClient } from './bitget-client';
@@ -38,10 +39,10 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
   return {
     name: 'trading-review-api',
     configureServer(server) {
-      fs.mkdirSync(path.resolve('data'), { recursive: true });
+      fs.mkdirSync(resolveDataPath(), { recursive: true });
       const trades = loadTradesFromWorkbook(workbookPath);
-      const reviewStore = new ReviewStore(path.resolve('data/review.sqlite'));
-      const candleStore = new CandlestickStore(path.resolve('data/review.sqlite'));
+      const reviewStore = new ReviewStore(resolveDataPath('review.sqlite'));
+      const candleStore = new CandlestickStore(resolveDataPath('review.sqlite'));
       // Review-chart candlesticks: FreeReplay and the workbook TradeReview keep
       // the OKX source by default; the personal review mode (Bitget-sourced
       // trades) requests source=binance — Bitget's own public candles only keep
@@ -61,9 +62,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const scanCandleSource = marketDataSource === 'okx' ? candleService : binanceCandleSource;
       const coinScanService = new CoinScanService(tickerSource, scanCandleSource);
       const marketHeatService = new MarketHeatService(binanceTickerSource, binanceCandleSource);
-      const drawingStore = new DrawingStore(path.resolve('data/review.sqlite'));
-      const freeReplaySessionStore = new FreeReplaySessionStore(path.resolve('data/review.sqlite'));
-      const bitgetPositionStore = new BitgetPositionStore(path.resolve('data/review.sqlite'));
+      const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
+      const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));
+      const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));
       const instrumentService = new OkxInstrumentService();
 
       server.middlewares.use('/api/trades', async (req, res) => {
