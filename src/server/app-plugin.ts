@@ -214,7 +214,21 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       server.middlewares.use('/api/scan', async (req, res) => {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
         const url = new URL(req.url ?? '', 'http://local');
-        if (url.searchParams.get('method') !== 'shrink') {
+        const method = url.searchParams.get('method') ?? '';
+        if (method === 'heat') {
+          // 选币「热度」: 复用复盘的市场热度能力(恒 Binance、固定 Top80), 展示整体场子读数。
+          const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
+          if (anchor !== undefined && anchor <= 0) {
+            return send(res, 400, { error: 'Invalid scan parameters' });
+          }
+          try {
+            send(res, 200, await marketHeatService.computeHeat({ anchor: anchor ?? Date.now() }));
+          } catch (error) {
+            send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
+          }
+          return;
+        }
+        if (method !== 'shrink') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
         const topN = parseScanParam(url.searchParams.get('topN'), 60);
