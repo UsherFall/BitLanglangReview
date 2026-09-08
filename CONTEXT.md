@@ -69,7 +69,7 @@ The first version of the review website, intended for one reviewer on one local 
 _Avoid_: team platform, cloud service
 
 **Review Tag**:
-A custom user-created label that groups **Trades** by review meaning, such as setup quality, mistake type, or strategy pattern. Each **Trade** can have zero or more **Review Tags**, and the first version does not provide preset tags. A tag name is a shared, global identifier: every **Trade** that carries the same name references the same tag, so renaming or deleting a tag updates all of those **Trades** at once rather than only the one being reviewed.
+A custom user-created label that groups **Trades** by review meaning, such as setup quality, mistake type, or strategy pattern. Each **Trade** can have zero or more **Review Tags**, and the first version does not provide preset tags. A tag name is a shared, global identifier: every **Trade** that carries the same name references the same tag, so renaming or deleting a tag updates all of those **Trades** at once rather than only the one being reviewed. In each review module (交割单复盘 vs 个人交割单复盘) the tag dropdown and per-tag `N 笔` count cover only that module's own **Trades** — the two modules count separately — while tag names and rename/delete still act globally across both.
 _Avoid_: category, single-select type, preset label, per-trade tag copy
 
 **Review Note**:
