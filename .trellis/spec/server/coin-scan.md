@@ -2,7 +2,7 @@
 
 ## 1. Scope / Trigger
 
-The 选币 (Coin Scan) module finds instruments by pluggable scan methods. V1 ships only the **shrink** (收敛结构) method. It scans a parameterized universe of **Binance USDT-M perpetuals** by default (switchable to OKX SWAP via `MARKET_DATA_SOURCE=okx`) and detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source (all USDT-M perpetuals above the `minQuoteVolume24h` floor, taking the top `topN`).
+The 选币 (Coin Scan) module finds instruments by pluggable scan methods. V1 ships only the **shrink** (收敛结构) method; 09/08 adds the **heat** (热度) method, which returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`). It scans a parameterized universe of **Binance USDT-M perpetuals** by default (switchable to OKX SWAP via `MARKET_DATA_SOURCE=okx`) and detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source (all USDT-M perpetuals above the `minQuoteVolume24h` floor, taking the top `topN`).
 
 **The fractal triangle module was removed** (8/13, user decision): swing detection, backscan, and geometry classification are gone. The scan is purely volatility-driven — there is only one structure kind, `'convergence'`. A rising/falling TREND is rejected by the band's flatness gate, not by a separate triangle detector.
 
@@ -26,13 +26,15 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 
 | Field | Type | Default | Constraint |
 | --- | --- | --- | --- |
-| `method` | string | — | must be `shrink`; anything else → 400 |
+| `method` | string | — | `shrink` (收敛结构) or `heat` (热度); anything else → 400 |
 | `topN` | number | 50 | `>= 1` |
 | `minQuoteVolume24h` | number | 10_000_000 | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
 | `anchor` | number (optional) | now | epoch ms; bars whose close time (`timestamp + timeframe`) is `<= anchor` are treated as completed. Absent / empty / NaN → `Date.now()`. Present and `<= 0` → 400 |
 | `minScore` | number (optional) | 0 | `>= 0`; a timeframe counts as converged only when `score >= minScore`. The 宁少勿滥 strength knob (UI default 0.7). Absent → 0. Present and `< 0` → 400 |
 
 Non-numeric params fall back to the default. Invalid final values → 400.
+
+`method=heat` responds with `MarketHeatResult` (`domain/market-heat.ts`) instead — the overall market-temperature reading for the fixed Binance Top80 pool at `anchor` (same definition and Binance-only sources as the review 市场热度; UI renders it through the shared `MarketHeatView`). Only `anchor` applies for heat.
 
 ### Response (`ScanResponse`)
 
@@ -144,7 +146,7 @@ scanShrink(params):
 | Condition | Error |
 | --- | --- |
 | non-GET method | 405 |
-| `method` != `shrink` | 400 `Unsupported scan method` |
+| `method` not in {`shrink`,`heat`} | 400 `Unsupported scan method` |
 | `topN < 1` / `minQuoteVolume24h < 0` | 400 `Invalid scan parameters` |
 | `anchor` present and `<= 0` | 400 `Invalid scan parameters` |
 | `minScore` present and `< 0` | 400 `Invalid scan parameters` |

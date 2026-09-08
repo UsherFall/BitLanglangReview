@@ -133,7 +133,7 @@ The reviewer-chosen local date and minute where a **Free Replay** begins. The st
 _Avoid_: second-level timestamp, exchange server time, exact tick
 
 **Coin Scan** (选币):
-A review mode for finding **Instruments** from the configured market-data source (Binance USDT-M perpetuals by default; OKX swap switchable) using pluggable scan methods. V1 ships only the **Shrink Method**; the module is built so future find-coin methods can be added. A **Coin Scan** is a parameterized panel: choose a method and its parameters, scan, then read a ranked result list. The scan pool excludes **TradFi Instruments** whose underlying **Market Session** is closed at the scan anchor (**Session Gating**), so a closed-market contract never occupies a top slot.
+A review mode for finding **Instruments** from the configured market-data source (Binance USDT-M perpetuals by default; OKX swap switchable) using pluggable scan methods. Methods: the **Shrink Method** (缩量/收敛, per-coin volatility convergence) and the **Heat Method** (热度, the overall market-temperature reading of the fixed Binance Top80 pool — the same reading as 市场热度 in trade review; see **Market Temperature**). A **Coin Scan** is a parameterized panel: choose a method and its parameters, scan, then read a ranked result list. The scan pool excludes **TradFi Instruments** whose underlying **Market Session** is closed at the scan anchor (**Session Gating**), so a closed-market contract never occupies a top slot.
 _Avoid_: market screener, strategy backtest
 
 **Shrink Method** (缩量方法):
