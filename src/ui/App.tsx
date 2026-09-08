@@ -14,7 +14,8 @@ import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMod
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
-import { CoinScanPanel, CoinScanResults } from './CoinScanPanel';
+import { CoinScanPanel, CoinScanResults, type ScanResult } from './CoinScanPanel';
+import { HeatScanResults } from './HeatScanResults';
 import { BitgetControlBar } from './BitgetControlBar';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
 import { LeaderCoinPanel } from './LeaderCoinPanel';
@@ -211,7 +212,7 @@ export function App() {
   // Bumped when a reveal has no further candlestick to show, so the chart
   // retries the future fetch instead of ignoring the click silently.
   const [futureRetryToken, setFutureRetryToken] = useState(0);
-  const [scanResult, setScanResult] = useState<ScanResponse | null>(null);
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   // Bumped by the Bitget sync bar so the trade queue refetches after a sync.
   const [tradeRefreshToken, setTradeRefreshToken] = useState(0);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
@@ -766,7 +767,11 @@ export function App() {
         ) : (
           <div className="empty-state">选择交易对和开始时间，开始回溯复盘</div>
         ) : reviewMode === 'scan' ? (
-          <CoinScanResults result={scanResult} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} />
+          scanResult && scanResult.method === 'heat' ? (
+            <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} />
+          ) : (
+            <CoinScanResults result={scanResult ? scanResult.data : null} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} />
+          )
         ) : selectedTrade ? (
           <>
             <header className="detail-header">

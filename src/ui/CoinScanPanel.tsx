@@ -5,15 +5,35 @@ import {
   type ScanResponse,
   type ScanRow,
 } from '../domain/coin-scan';
+import type { MarketHeatResult } from '../domain/market-heat';
+
+/** 选币扫描结果: 按方法区分载荷。 */
+export type ScanResult =
+  | { method: 'shrink'; data: ScanResponse }
+  | { method: 'heat'; data: MarketHeatResult; anchorLabel: string };
 
 export type CoinScanPanelProps = {
-  onScanned: (result: ScanResponse) => void;
+  onScanned: (result: ScanResult) => void;
 };
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function localDateTimeLabel(epochMs: number): string {
+  const date = new Date(epochMs);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function anchorScanLabel(anchorEpoch: number | null): string {
+  return anchorEpoch === null ? `当前 ${localDateTimeLabel(Date.now())}` : `锚点 ${localDateTimeLabel(anchorEpoch)}`;
+}
+
 export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
+  const [method, setMethod] = useState<'shrink' | 'heat'>('shrink');
   const [topN, setTopN] = useState('60');
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
-  // 结构强度阈值主旋钮:调高 = 宁少勿滥. Default 0.7 = prefer fewer, stronger structures.
+  // 结构强度阈值主旋钮:调高 = 宁少勿滥.
   const [minScore, setMinScore] = useState('0.6');
   // Optional scan anchor (local datetime); empty = scan "now".
   const [anchorInput, setAnchorInput] = useState('');
@@ -22,10 +42,12 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
 
   async function scan() {
-    const inputs = [topN, minQuoteVolume24h, minScore];
-    if (inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
-      setError('参数无效,请检查');
-      return;
+    if (method === 'shrink') {
+      const inputs = [topN, minQuoteVolume24h, minScore];
+      if (inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
+        setError('参数无效,请检查');
+        return;
+      }
     }
     const anchorEpoch = anchorInput.trim() === '' ? null : Date.parse(anchorInput);
     if (anchorInput.trim() !== '' && !Number.isFinite(anchorEpoch)) {
@@ -36,18 +58,25 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
     setError(null);
     setScanWarnings([]);
     try {
-      const query = new URLSearchParams({
-        method: 'shrink',
-        topN,
-        minQuoteVolume24h,
-        minScore,
-      });
+      const query = new URLSearchParams({ method });
+      if (method === 'shrink') {
+        query.set('topN', topN);
+        query.set('minQuoteVolume24h', minQuoteVolume24h);
+        query.set('minScore', minScore);
+      }
       if (anchorEpoch !== null) query.set('anchor', String(anchorEpoch));
       const response = await fetch(`/api/scan?${query.toString()}`);
-      const payload = (await response.json()) as ScanResponse & { error?: string };
+      const payload = (await response.json()) as (ScanResponse | MarketHeatResult) & { error?: string };
       if (!response.ok) throw new Error(payload.error || '扫描失败');
-      setScanWarnings(payload.warnings ?? []);
-      onScanned(payload);
+      if (method === 'heat') {
+        const heat = payload as MarketHeatResult;
+        setScanWarnings(heat.warnings ?? []);
+        onScanned({ method: 'heat', data: heat, anchorLabel: anchorScanLabel(anchorEpoch) });
+      } else {
+        const scan = payload as ScanResponse;
+        setScanWarnings(scan.warnings ?? []);
+        onScanned({ method: 'shrink', data: scan });
+      }
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : '扫描失败');
     } finally {
@@ -59,38 +88,45 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
     <div className="coin-scan-panel">
       <label>
         方法
-        <select value="shrink" disabled>
+        <select value={method} onChange={(event) => setMethod(event.target.value as 'shrink' | 'heat')}>
           <option value="shrink">收敛结构</option>
+          <option value="heat">热度</option>
         </select>
       </label>
       <div className="coin-scan-params">
-        <label>
-          扫描数量
-          <input type="number" min="1" value={topN} onChange={(event) => setTopN(event.target.value)} />
-        </label>
-        <label>
-          最低成交额
-          <input type="number" min="0" value={minQuoteVolume24h} onChange={(event) => setMinQuoteVolume24h(event.target.value)} />
-        </label>
-        <label>
-          结构强度阈值
-          <input
-            type="number"
-            min="0"
-            max="1"
-            step="0.05"
-            value={minScore}
-            onChange={(event) => setMinScore(event.target.value)}
-            title="调高 = 宁少勿滥"
-          />
-        </label>
+        {method === 'shrink' && (
+          <>
+            <label>
+              扫描数量
+              <input type="number" min="1" value={topN} onChange={(event) => setTopN(event.target.value)} />
+            </label>
+            <label>
+              最低成交额
+              <input type="number" min="0" value={minQuoteVolume24h} onChange={(event) => setMinQuoteVolume24h(event.target.value)} />
+            </label>
+            <label>
+              结构强度阈值
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.05"
+                value={minScore}
+                onChange={(event) => setMinScore(event.target.value)}
+                title="调高 = 宁少勿滥"
+              />
+            </label>
+          </>
+        )}
         <label>
           扫描时间点
           <input type="datetime-local" value={anchorInput} onChange={(event) => setAnchorInput(event.target.value)} />
         </label>
       </div>
       <p className="panel-status hint">
-        一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。
+        {method === 'shrink'
+          ? '一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
+          : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
       </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
