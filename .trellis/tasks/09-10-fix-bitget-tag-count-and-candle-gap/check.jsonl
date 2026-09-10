@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对默认 earlier 行为不变（仍丢弃 anchor 所在 bar）、缓存完成谓词不把 anchor bar 泄漏给选币/市场热度、连续性种子未被改动"}
+{"file": ".trellis/spec/server/market-heat.md", "reason": "市场热度依赖完成 bar 守卫；确认改动后其读数与跳过行为不变"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 行为验证要求与测试运行方式（npm test）"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "确认复用了 scopedReviewsForModule/tagPayload 而非新增第二套计数实现"}
