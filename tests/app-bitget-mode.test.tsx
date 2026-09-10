@@ -57,7 +57,7 @@ function makeFetch(options: { configured: boolean; syncResult?: unknown; bitgetT
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
     if (url.startsWith('/api/free-replay/sessions')) return new Response(JSON.stringify({ sessions: [] }));
     if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: [] }));
-    if (url === '/api/reviews') return new Response(init?.body ?? '{}');
+    if (url === '/api/reviews') return new Response(JSON.stringify({ review: JSON.parse(init?.body ?? '{}'), tags: [], tagCounts: {} }));
     return new Response(JSON.stringify({}));
   });
 }
