@@ -17,11 +17,13 @@ type BinanceKline = [string, string, string, string, string, string, string, str
  * candle `openTime` (UTC 0:00 boundary — Binance daily candles align with the
  * user's chart view, so NO OKX-style -8h offset is applied).
  *
- * The still-forming bar is dropped before saving to the cache
- * (`openTime + intervalMs <= anchor`), matching the scan's expectation that
- * every metric is computed only over completed candles. Caching reuses the
- * shared `CandlestickStore`; instrument names (`XAUUSDT` vs OKX `XAU-USDT-SWAP`)
- * differ, so Binance and OKX candles never collide in the store.
+ * `earlier` returns the bars strictly before the anchor — including the bar that
+ * CONTAINS the anchor — matching `CandlestickService` (OKX) so a review window
+ * centred on a trade entry never drops the entry's own bar. Callers that need
+ * completed bars only (coin scan, market heat) drop the still-forming bar
+ * themselves. Caching reuses the shared `CandlestickStore`; instrument names
+ * (`XAUUSDT` vs OKX `XAU-USDT-SWAP`) differ, so Binance and OKX candles never
+ * collide in the store.
  *
  * Namespace warning: the cache key IS the native `base+USDT` symbol, so Binance
  * rows collide with any OTHER source whose symbol vocabulary is also
@@ -40,7 +42,7 @@ export class BinanceCandleSource implements CandleSource {
 
   async getCandlesticks(request: CandleRequest): Promise<Candlestick[]> {
     const cached = this.listCached(request);
-    if (!request.refresh && cached.length >= request.limit && isCacheFresh(request, cached)) {
+    if (!request.refresh && cached.length >= request.limit && isCacheFresh(request, cached) && coversAnchorBar(request, cached)) {
       return cached;
     }
 
@@ -64,8 +66,10 @@ export class BinanceCandleSource implements CandleSource {
       .map((row) => toCandlestick(request.instrument, request.timeframe, row))
       .filter((candle) => {
         if (request.direction === 'earlier') {
-          // Completed bars only: the still-forming bar is openTime + step > anchor.
-          return candle.timestamp + step <= request.anchor;
+          // Bars strictly before the anchor, matching `CandlestickService`: the
+          // anchor's containing bar has an open time below the anchor and is
+          // therefore kept, so an entry candle is never left out of the window.
+          return candle.timestamp < request.anchor;
         }
         return candle.timestamp > request.anchor;
       })
@@ -96,6 +100,31 @@ function isCacheFresh(request: CandleRequest, cached: Candlestick[]): boolean {
   if (request.anchor <= Date.now() - step * 2) return true; // historical anchor
   const newest = cached[cached.length - 1]?.timestamp ?? 0;
   return request.anchor - newest <= step * 2;
+}
+
+/**
+ * Cache-completeness gate for `earlier`. A cache that holds `limit` bars but
+ * stops one bar short of the anchor (rows written before the anchor's containing
+ * bar became part of `earlier`) must NOT satisfy the cache hit — otherwise the
+ * hole is permanent, because `listBefore` happily returns a full-looking run
+ * that simply ends too early. The newest cached bar must therefore reach the
+ * anchor: one bar of slack is expected (a boundary anchor has its containing bar
+ * in `later`, so `earlier` stops at `anchor - step`), a two-bar hole is not.
+ *
+ * The spacing comes from the cache itself — `contiguousCandles` guarantees a
+ * gapless run — rather than from `boundaryAnchor`: that floors by the nominal
+ * `1W`/`1M` step, but Binance weeks open on Monday and months on the 1st, so a
+ * floored reference lands INSIDE the current bar and would report "one bar
+ * short" forever, bypassing the cache on every request. The nominal step is kept
+ * as a floor so a short calendar month (28 days) cannot tighten the check.
+ */
+function coversAnchorBar(request: CandleRequest, cached: Candlestick[]): boolean {
+  if (request.direction !== 'earlier') return true;
+  const newest = cached[cached.length - 1]?.timestamp;
+  if (newest === undefined) return false;
+  const previous = cached[cached.length - 2]?.timestamp;
+  const spacing = Math.max(timeframeMs(request.timeframe), previous === undefined ? 0 : newest - previous);
+  return request.anchor - newest <= spacing;
 }
 
 function contiguousCandles(candles: Candlestick[], anchor: number, timeframe: ReviewTimeframe, direction: CandleRequest['direction']): Candlestick[] {

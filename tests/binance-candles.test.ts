@@ -80,17 +80,89 @@ describe('BinanceCandleSource', () => {
     expect(fetchJson).toHaveBeenCalledTimes(1);
   });
 
-  it('drops the still-forming bar (openTime + step > anchor)', async () => {
+  it('excludes the bar sitting exactly on the anchor boundary', async () => {
     const store = new CandlestickStore(':memory:');
     const fetchJson = vi.fn(async (_url: string) => [
       kline(1653381000000, '29350', '12'), // 10:30 completed
-      kline(1653381300000, '29480', '20'), // 10:35 still forming when anchor = 10:35
+      kline(1653381300000, '29480', '20'), // 10:35 — the bar at the anchor boundary
     ]);
     const source = new BinanceCandleSource(store, fetchJson);
 
     const candles = await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor: 1653381300000, direction: 'earlier', limit: 2 });
 
     expect(candles.map((candle) => candle.timestamp)).toEqual([1653381000000]);
+  });
+
+  it('returns the bar CONTAINING a non-aligned earlier anchor, matching OKX', async () => {
+    const store = new CandlestickStore(':memory:');
+    const fetchJson = vi.fn(async (_url: string) => [
+      kline(1653381300000, '29480', '20'), // 10:35
+      kline(1653381600000, '29510', '30'), // 10:40 — contains an anchor of 10:42
+    ]);
+    const source = new BinanceCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'XAUUSDT',
+      timeframe: '5m',
+      anchor: 1653381600000 + 2 * 60_000,
+      direction: 'earlier',
+      limit: 2,
+    });
+
+    expect(candles.map((candle) => candle.timestamp)).toEqual([1653381300000, 1653381600000]);
+  });
+
+  it('refills a full-looking cache that stops one bar short of the anchor', async () => {
+    const store = new CandlestickStore(':memory:');
+    const anchor = 1653381600000 + 2 * 60_000; // inside the 10:40 bar
+    // Two cached bars ending at 10:35: enough to satisfy `limit`, but the
+    // anchor's own bar is missing, so the cache hit must not be taken.
+    store.save([
+      { instrument: 'XAUUSDT', timeframe: '5m', timestamp: 1653381000000, open: 1, high: 2, low: 0.5, close: 29350, volume: 12 },
+      { instrument: 'XAUUSDT', timeframe: '5m', timestamp: 1653381300000, open: 1, high: 2, low: 0.5, close: 29480, volume: 20 },
+    ]);
+    const fetchJson = vi.fn(async (_url: string) => [
+      kline(1653381300000, '29480', '20'), // 10:35
+      kline(1653381600000, '29510', '30'), // 10:40
+    ]);
+    const source = new BinanceCandleSource(store, fetchJson);
+
+    const first = await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor, direction: 'earlier', limit: 2 });
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(first.map((candle) => candle.timestamp)).toEqual([1653381300000, 1653381600000]);
+
+    // The hole is filled, so the next read is served from the cache.
+    const second = await source.getCandlesticks({ instrument: 'XAUUSDT', timeframe: '5m', anchor, direction: 'earlier', limit: 2 });
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+  });
+
+  it("reuses a 1W cache that already holds the anchor's bar", async () => {
+    const store = new CandlestickStore(':memory:');
+    // Binance weekly bars open on Monday, but `boundaryAnchor` floors by a
+    // nominal 7-day grid anchored at the epoch (Thursdays). A floored
+    // "expected newest bar" therefore lands INSIDE the current week and would
+    // report the cache as one bar short on every request.
+    const week = Date.parse('2026-06-15T00:00:00Z'); // Monday
+    const previousWeek = week - 7 * 24 * 60 * 60_000;
+    store.save([
+      { instrument: 'XAUUSDT', timeframe: '1W', timestamp: previousWeek, open: 1, high: 2, low: 0.5, close: 29350, volume: 12 },
+      { instrument: 'XAUUSDT', timeframe: '1W', timestamp: week, open: 1, high: 2, low: 0.5, close: 29480, volume: 20 },
+    ]);
+    const fetchJson = vi.fn(async (_url: string) => []);
+    const source = new BinanceCandleSource(store, fetchJson);
+
+    // Friday of that week: the containing weekly bar is already cached.
+    const candles = await source.getCandlesticks({
+      instrument: 'XAUUSDT',
+      timeframe: '1W',
+      anchor: Date.parse('2026-06-19T12:00:00Z'),
+      direction: 'earlier',
+      limit: 2,
+    });
+
+    expect(fetchJson).not.toHaveBeenCalled();
+    expect(candles.map((candle) => candle.timestamp)).toEqual([previousWeek, week]);
   });
 
   it('maps 1D later anchors to UTC 0:00 boundaries without the OKX -8h offset', async () => {

@@ -44,12 +44,18 @@ function buildService(options: {
   noData?: string[];
   warnings?: string[];
   onFetch?: (instrument: string) => void;
+  /** Append the anchor's own (still-forming) bar, as the sources now may. */
+  anchorBar?: boolean;
 }) {
   const warnings = options.warnings ?? [];
   const getCandlesticks = vi.fn(async ({ instrument, anchor }: { instrument: string; anchor: number }) => {
     options.onFetch?.(instrument);
     if (options.noData?.includes(instrument)) return [];
-    return candlesFor(instrument, options.changes?.[instrument] ?? 0, anchor);
+    const candles = candlesFor(instrument, options.changes?.[instrument] ?? 0, anchor);
+    if (options.anchorBar) {
+      candles.push({ instrument, timeframe: '15m', timestamp: anchor, open: 100, high: 100, low: 100, close: 100, volume: 10 });
+    }
+    return candles;
   });
   const service = new MarketHeatService(
     { listTickers: vi.fn(async () => options.tickers) },
@@ -103,6 +109,19 @@ describe('MarketHeatService.computeHeat', () => {
     expect(getCandlesticks.mock.calls.map(([call]) => call.instrument)).not.toContain('TSLAUSDT');
     // 2/2 covered coins up, median (0.5 + 1)/2 = 0.75 → breadth up only → warm.
     expect(result.tier).toBe('warm');
+  });
+
+  it('drops the anchor bar instead of degrading the instrument to no-data', async () => {
+    const tickers = [ticker('BTCUSDT', 1e9)];
+    // The source now hands back the anchor's own bar (OKX always did; Binance
+    // does since `earlier` includes the anchor bar). It must be filtered out,
+    // not treated as an incomplete-history skip.
+    const { service } = buildService({ tickers, changes: { BTCUSDT: 1 }, anchorBar: true });
+    const result = await service.computeHeat({ anchor: ANCHOR });
+
+    expect(result.stats.coveredCount).toBe(1);
+    expect(result.skipped.noDataCount).toBe(0);
+    expect(result.stats.medianChangePct).toBeCloseTo(1, 5);
   });
 
   it('skips members whose history does not reach 24h back as no-data', async () => {
