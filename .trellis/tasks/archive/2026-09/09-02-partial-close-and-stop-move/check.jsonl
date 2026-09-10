@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify Free Replay paper state wiring, restore normalization, auto-save not broken"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verification checklist: test expectations, aria-label queries, no mojibake reintroduction"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type consistency of paper session payload across App/panel/domain"}
+{"file": ".trellis/tasks/09-02-partial-close-and-stop-move/prd.md", "reason": "Acceptance criteria to verify against"}
+{"file": ".trellis/tasks/09-02-partial-close-and-stop-move/design.md", "reason": "Design contracts to check implementation against"}

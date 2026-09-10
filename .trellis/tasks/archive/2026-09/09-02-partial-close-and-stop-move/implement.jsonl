@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "paper trading state lives in App.tsx and is derived/persisted via Free Replay auto-save; normalize restore path per these rules"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "UI-local paper trading types are domain-of-UI; keep time ms vs cursor seconds conversions explicit at marker/chart boundaries"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Vitest expectations, aria-label based Chinese UI test queries, no jsdom pointer-events reliance"}
+{"file": ".trellis/tasks/09-02-partial-close-and-stop-move/prd.md", "reason": "Task requirements and acceptance criteria"}
+{"file": ".trellis/tasks/09-02-partial-close-and-stop-move/design.md", "reason": "Data model (legs/FIFO/normalize), function signatures, UI layout"}
+{"file": ".trellis/tasks/09-02-partial-close-and-stop-move/implement.md", "reason": "Ordered implementation checklist and review gates"}
