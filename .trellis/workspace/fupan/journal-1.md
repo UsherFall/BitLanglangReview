@@ -275,3 +275,27 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 ### Status
 
 [IN PROGRESS] 待提交
+
+
+## Session 17: 修复个人交割单复盘标签计数与K线跳空
+<!-- trellis-session: v=2 fp=f54aeb1aecb59624 -->
+
+**Date**: 2026-09-10
+**Task**: 修复个人交割单复盘标签计数与K线跳空
+**Branch**: `master`
+
+### Summary
+
+个人交割单复盘两个缺陷。(1) 标签笔数：保存复盘后 /api/reviews 回传模块作用域 {review,tags,tagCounts}，App 就地替换，新增/增减/归零消失即时生效。(2) K线跳空：Binance earlier 过滤 timestamp+step<=anchor 会丢掉入场所在K线，later 又从其下一根开始，导致非边界入场在每个周期缺一根；对齐 OKX 语义改为 timestamp<anchor，并新增 coversAnchorBar 让停在C-1的旧缓存强制补取(1W/1M 按缓存自身间距判定)，市场热度完成bar守卫改为过滤。15m/1H 真实路由实测0缺口，tsc干净，npm test 48 files/280 tests 全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da261a2` | fix: 个人交割单复盘入场K线跳空(Binance earlier 对齐 OKX) |
+| `cdd960e` | fix: 保存复盘后即时刷新模块作用域标签笔数 |
+| `8c41d49` | docs: 同步 spec 与任务规划(标签笔数契约/Binance earlier 语义/热度守卫) |
+
+### Status
+
+[OK] **Completed**

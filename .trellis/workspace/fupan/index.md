@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-15
+- **Total Sessions**: 17
+- **Last Active**: 2026-09-10
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~241 | Active |
+| `journal-1.md` | ~301 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-09-10 | 修复个人交割单复盘标签计数与K线跳空 | `da261a2`, `cdd960e`, `8c41d49` | `master` |
 | 7 | 2026-07-15 | Free Replay timeframe cursor anchoring | `da99c91` | `master` |
 | 6 | 2026-07-14 | Fix Free Replay zoom cursor follow | `486b096` | `master` |
 | 5 | 2026-07-14 | Fix drawing deselect on blank chart click | `5c77fc4`, `f015a61` | `master` |
