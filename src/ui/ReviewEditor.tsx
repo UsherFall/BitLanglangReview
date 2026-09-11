@@ -6,19 +6,34 @@ import type { ReviewedTrade } from '../domain/review-queue';
 /** A global tag edit: rename when `to` is a name, delete when `to` is null. */
 export type TagMutation = { from: string; to: string | null };
 
+/** The active review module, which scopes the tag list and per-tag counts. */
+export type ReviewModule = 'trade' | 'bitget';
+
+/**
+ * `/api/reviews` answers with the saved review plus the module-scoped tag list
+ * and counts, so the caller can patch `tagCounts` in place.
+ */
+export type SavedReviewPayload = {
+  review: TradeReview;
+  tags: string[];
+  tagCounts: Record<string, number>;
+};
+
 export function ReviewEditor({
   trade,
+  module,
   availableTags = [],
   tagCounts = {},
   onMutateTag,
   onSaved,
 }: {
   trade: ReviewedTrade;
+  module: ReviewModule;
   availableTags?: string[];
   tagCounts?: Record<string, number>;
   /** Renames/deletes a tag across every trade; rejects when the request fails. */
   onMutateTag?: (mutation: TagMutation) => Promise<void>;
-  onSaved: (review: TradeReview) => void;
+  onSaved: (payload: SavedReviewPayload) => void;
 }) {
   const [draftTags, setDraftTags] = useState<string[]>(() => trade.review?.tags ?? []);
   const [draftTagInput, setDraftTagInput] = useState('');
@@ -33,7 +48,7 @@ export function ReviewEditor({
 
   async function saveReview() {
     setIsSaving(true);
-    const review = (await fetch('/api/reviews', {
+    const payload = (await fetch('/api/reviews', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -41,11 +56,12 @@ export function ReviewEditor({
         tags: cleanTags([...draftTags, draftTagInput]),
         note: draftNote,
         starred: trade.review?.starred ?? false,
+        module,
       }),
-    }).then((response) => response.json())) as TradeReview;
-    setDraftTags(review.tags);
+    }).then((response) => response.json())) as SavedReviewPayload;
+    setDraftTags(payload.review.tags);
     setDraftTagInput('');
-    onSaved(review);
+    onSaved(payload);
     setIsSaving(false);
   }
 

@@ -22,7 +22,7 @@ Server data is fetched through these routes from `src/server/app-plugin.ts`:
 - `/api/trades` returns reviewed trades, source workbook instruments, and saved review tags.
 - `/api/bitget/trades` returns the same queue contract for cached Bitget positions plus `configured: boolean`.
 - `/api/bitget/config` (`GET`/`POST`/`DELETE`) manages the locally stored read-only key; `POST /api/bitget/sync` fetches closed position history. Both live behind `BitgetControlBar` in the Bitget module.
-- `/api/reviews` saves a `TradeReview`.
+- `/api/reviews` saves a `TradeReview` and answers `{ review, tags, tagCounts }`, scoped to the `module` sent in the request body. `App.handleReviewSaved` replaces its tag list/counts from that payload (tag counts are module-scoped and recomputed server-side, so a tag that just lost its last trade disappears); `ReviewEditor` and `App.toggleStarred` must both send `module`.
 - `/api/candles` returns cached/fetched candlesticks for initial, earlier, or later modes.
 - `/api/drawings` lists, saves, and deletes instrument-level chart drawings.
 - `/api/free-replay/instruments` returns OKX SWAP instruments.

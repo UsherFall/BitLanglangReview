@@ -289,7 +289,10 @@ function makeFetch(options: { savedReview?: { tradeId: string; tags: string[]; n
         tags: ['breakout'],
       }));
     }
-    if (url === '/api/reviews') return new Response(JSON.stringify(options.savedReview));
+    if (url === '/api/reviews') {
+      const review = options.savedReview;
+      return new Response(JSON.stringify({ review, tags: review?.tags ?? [], tagCounts: {} }));
+    }
     if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP'] }));
     if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [] }));
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));

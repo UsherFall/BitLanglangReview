@@ -24,6 +24,7 @@ Covers `src/domain/market-heat.ts` (pure types/tier/normalizer/constants), `src/
 - `reviewCoin`: the reviewed coin's row copy with `isReviewCoin: true`, or null (no data / unmapped).
 - `skipped`: `closedCount` (session-closed tickers), `noDataCount`, `unmappedReviewInstrument` (symbol not normalizable to Binance).
 - `warnings`: rate-limit backoff messages raised during this computation (429), surfaced not swallowed.
+- Completed-bar guard: `heatRowFromCandles` DROPS bars with `timestamp + intervalMs > anchor` (the anchor's still-forming bar) instead of returning `null` for the whole instrument. Sources may hand it back — OKX always has, and Binance's `earlier` does since 09/10 — so a null-on-sight guard would degrade every instrument to no-data. Only when no completed bar remains does the row read `noData`.
 
 ### Tier rule (5-tier)
 

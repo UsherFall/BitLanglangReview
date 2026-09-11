@@ -8,10 +8,11 @@ import { ReviewEditor } from '../src/ui/ReviewEditor';
 describe('ReviewEditor', () => {
   it('keeps tag and note drafts local, resets them when the selected trade changes, and saves the current drafts', async () => {
     const onSaved = vi.fn();
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ tradeId: 't2', tags: ['breakout', 'late'], note: 'wait for close', starred: true })));
+    const saved = { tradeId: 't2', tags: ['breakout', 'late'], note: 'wait for close', starred: true, updatedAt: '2024-05-21T00:00:00.000Z' };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ review: saved, tags: ['breakout', 'late'], tagCounts: { breakout: 1, late: 1 } })));
     vi.stubGlobal('fetch', fetchMock);
 
-    const { rerender } = render(<ReviewEditor trade={makeTrade({ id: 't1', tags: ['old'], note: 'first note', starred: true })} availableTags={['breakout', 'late']} onSaved={onSaved} />);
+    const { rerender } = render(<ReviewEditor trade={makeTrade({ id: 't1', tags: ['old'], note: 'first note', starred: true })} module="trade" availableTags={['breakout', 'late']} onSaved={onSaved} />);
 
     const tags = screen.getByLabelText('标签');
     const note = screen.getByLabelText('备注');
@@ -25,7 +26,7 @@ describe('ReviewEditor', () => {
     fireEvent.keyDown(tags, { key: 'Enter' });
     fireEvent.change(note, { target: { value: 'wait for close' } });
 
-    rerender(<ReviewEditor trade={makeTrade({ id: 't2', tags: ['fresh'], note: 'second note', starred: true })} availableTags={['breakout', 'late']} onSaved={onSaved} />);
+    rerender(<ReviewEditor trade={makeTrade({ id: 't2', tags: ['fresh'], note: 'second note', starred: true })} module="trade" availableTags={['breakout', 'late']} onSaved={onSaved} />);
     expect(screen.getByRole('button', { name: '移除标签 fresh' })).toBeInTheDocument();
     expect(screen.getByLabelText('备注')).toHaveValue('second note');
 
@@ -37,10 +38,10 @@ describe('ReviewEditor', () => {
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'wait for close' } });
     fireEvent.click(screen.getByRole('button', { name: /保存复盘/ }));
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ tradeId: 't2', tags: ['breakout', 'late'], note: 'wait for close', starred: true }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith({ review: saved, tags: ['breakout', 'late'], tagCounts: { breakout: 1, late: 1 } }));
     expect(fetchMock).toHaveBeenCalledWith('/api/reviews', expect.objectContaining({
       method: 'POST',
-      body: JSON.stringify({ tradeId: 't2', tags: ['breakout', 'late'], note: 'wait for close', starred: true }),
+      body: JSON.stringify({ tradeId: 't2', tags: ['breakout', 'late'], note: 'wait for close', starred: true, module: 'trade' }),
     }));
   });
 });

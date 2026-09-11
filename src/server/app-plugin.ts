@@ -96,12 +96,17 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         });
       });
 
+      // Saving answers with the saved review PLUS the module-scoped tag list and
+      // per-tag counts, so the UI patches `tagCounts` in place after an add or
+      // remove instead of leaving a stale "N 笔". Same scope helper the tag
+      // rename/delete routes use.
       server.middlewares.use('/api/reviews', async (req, res) => {
         if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
         const body = await readBody(req);
-        const parsed = JSON.parse(body || '{}') as { tradeId?: string; tags?: string[]; note?: string; starred?: boolean };
+        const parsed = JSON.parse(body || '{}') as { tradeId?: string; tags?: string[]; note?: string; starred?: boolean; module?: string };
         if (!parsed.tradeId) return send(res, 400, { error: 'tradeId is required' });
-        send(res, 200, reviewStore.saveReview({ tradeId: parsed.tradeId, tags: parsed.tags ?? [], note: parsed.note ?? '', starred: parsed.starred ?? false }));
+        const review = reviewStore.saveReview({ tradeId: parsed.tradeId, tags: parsed.tags ?? [], note: parsed.note ?? '', starred: parsed.starred ?? false });
+        send(res, 200, { review, ...tagPayload(reviewStore, scopedReviewsForModule(parsed.module)) });
       });
 
       // Tag names are shared across every review, so renaming / deleting is a

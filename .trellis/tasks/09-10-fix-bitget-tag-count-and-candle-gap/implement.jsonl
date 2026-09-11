@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "Binance 源 forming-bar 过滤、连续性种子与缓存命名空间规则；本任务要改 CandleRequest 与 BinanceCandleSource，必须遵守其警告"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "/api/reviews 与 /api/candles 的路由契约、请求解析与响应/错误约定"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "保存复盘后就地 patch data 状态的既有约定，以及不得在前端复制队列/计数逻辑"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "TradeReview 契约与 Review Tag 语义（标签名全局、笔数按模块）"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Review Editor -> /api/reviews -> ReviewStore 与 Chart -> /api/candles -> CandlestickStore 两条跨层链路"}

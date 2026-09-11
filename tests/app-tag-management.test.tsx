@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReviewedTrade } from '../src/domain/review-queue';
 import { App } from '../src/ui/App';
@@ -96,7 +96,14 @@ function makeFetch(state: TradeState) {
       }
       return new Response(JSON.stringify({ affected: 1, ...tagPayload(state.trades) }));
     }
-    if (url === '/api/reviews') return new Response(init?.body ?? '{}');
+    if (url === '/api/reviews' && init?.method === 'POST') {
+      const saved = JSON.parse(init.body ?? '{}') as { tradeId: string; tags: string[]; note: string; starred?: boolean };
+      const trade = state.trades.find((item) => item.id === saved.tradeId);
+      if (trade) {
+        trade.review = { tradeId: saved.tradeId, tags: saved.tags, note: saved.note, starred: saved.starred ?? false, updatedAt: '2024-05-21T00:00:00.000Z' };
+      }
+      return new Response(JSON.stringify({ review: trade?.review, ...tagPayload(state.trades) }));
+    }
     if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
     if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [] }));
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
@@ -178,6 +185,46 @@ describe('Tag management', () => {
     // trade's chips but survives in the global tag list shown in the dropdown.
     expect(screen.getByRole('button', { name: '重命名标签 scalp' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '重命名标签 breakout' })).toBeNull();
+  });
+
+  it('recomputes the dropdown count right after a save adds a tag to another trade', async () => {
+    const state: TradeState = {
+      trades: [makeTrade('t1', [], ''), makeTrade('t2', ['breakout'], '')],
+    };
+    vi.stubGlobal('fetch', makeFetch(state));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByLabelText('标签')).toBeInTheDocument());
+
+    // t1 is selected and carries no tag yet: add the existing 'breakout' and save.
+    fireEvent.focus(screen.getByLabelText('标签'));
+    fireEvent.click(within(screen.getByRole('listbox')).getByRole('option', { name: 'breakout' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存复盘/ }));
+
+    // Both trades now carry it — the stale copy used to leave this at "1 笔".
+    fireEvent.focus(screen.getByLabelText('标签'));
+    const listbox = screen.getByRole('listbox');
+    await waitFor(() => expect(within(listbox).getByRole('option', { name: /breakout/ })).toBeInTheDocument());
+    expect(within(listbox).getByText('2 笔')).toBeInTheDocument();
+  });
+
+  it('drops a tag from the dropdown once its last trade loses it', async () => {
+    const state: TradeState = {
+      trades: [makeTrade('t1', ['breakout'], ''), makeTrade('t2', ['late'], '')],
+    };
+    vi.stubGlobal('fetch', makeFetch(state));
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByLabelText('标签')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '移除标签 breakout' }));
+    fireEvent.click(screen.getByRole('button', { name: /保存复盘/ }));
+
+    // 'late' still lists, so the dropdown is open and only the emptied tag is gone.
+    fireEvent.focus(screen.getByLabelText('标签'));
+    const listbox = screen.getByRole('listbox');
+    await waitFor(() => expect(within(listbox).getByRole('option', { name: /late/ })).toBeInTheDocument());
+    expect(within(listbox).queryByRole('option', { name: /breakout/ })).toBeNull();
   });
 
   it('updates the active tag filter when the filtered tag is renamed', async () => {

@@ -205,26 +205,28 @@ function heatRowFromCandles(
   refTime: number,
   anchor: number,
 ): HeatRow | null {
-  if (candles.length === 0) return null;
-  const last = candles[candles.length - 1];
-  // Completed-bar guard: a still-forming bar would distort the "as of anchor"
-  // reading. The Binance/OKX sources already exclude forming bars on 'earlier',
-  // but the review coin path may feed arbitrary data.
-  if (last.timestamp + step > anchor) return null;
+  // Completed-bar guard: the anchor's containing bar is still forming at the
+  // anchor instant and would distort the "as of anchor" reading. Sources may
+  // return it (OKX always has, and Binance does now that `earlier` includes the
+  // anchor's bar), so drop incomplete bars here rather than degrading the whole
+  // instrument to no-data.
+  const completed = candles.filter((candle) => candle.timestamp + step <= anchor);
+  if (completed.length === 0) return null;
+  const last = completed[completed.length - 1];
   let refIndex = -1;
-  for (let i = candles.length - 1; i >= 0; i -= 1) {
-    if (candles[i].timestamp + step <= refTime) {
+  for (let i = completed.length - 1; i >= 0; i -= 1) {
+    if (completed[i].timestamp + step <= refTime) {
       refIndex = i;
       break;
     }
   }
   if (refIndex < 0) return null;
-  const refClose = candles[refIndex].close;
+  const refClose = completed[refIndex].close;
   const curClose = last.close;
   if (!(refClose > 0) || !(curClose > 0)) return null;
   // Candles carry base volume only; quote volume ≈ Σ close × volume.
   let quote = 0;
-  for (let i = refIndex; i < candles.length; i += 1) quote += candles[i].close * candles[i].volume;
+  for (let i = refIndex; i < completed.length; i += 1) quote += completed[i].close * completed[i].volume;
   return {
     instrument,
     changePct: (curClose / refClose - 1) * 100,

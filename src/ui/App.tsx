@@ -45,7 +45,7 @@ import {
   type PaperTradingSettings,
   type PaperTradingSession,
 } from './free-replay-paper-trading';
-import { ReviewEditor } from './ReviewEditor';
+import { ReviewEditor, type ReviewModule, type SavedReviewPayload } from './ReviewEditor';
 import { firstUnreviewedTrade, reviewProgress } from './review-progress';
 import { allTradeMarkers, tradeMarkers } from './trade-markers';
 
@@ -236,6 +236,9 @@ export function App() {
     setLeaderCoins((current) => current.includes(instrument) ? current.filter((item) => item !== instrument) : [...current, instrument]);
   }
 
+  // Tag list and per-tag counts are module-scoped (xlsx universe vs `bg-`),
+  // so every save/tag route names the module it is acting on.
+  const reviewModule: ReviewModule = reviewMode === 'bitget' ? 'bitget' : 'trade';
   const selectedTrade = data.trades.find((trade) => trade.id === selectedId) ?? data.trades[0] ?? null;
   const progress = reviewProgress(data.trades, selectedTrade?.id ?? '');
   const nextUnreviewedTrade = firstUnreviewedTrade(data.trades);
@@ -346,11 +349,17 @@ export function App() {
     setTradeRefreshToken((token) => token + 1);
   }
 
-  function handleReviewSaved(review: TradeReview) {
+  /**
+   * Patches the saved review in place AND replaces the module-scoped tag list
+   * and per-tag counts with the server's recomputed values, so a tag added or
+   * removed by the save shows its real "N 笔" immediately (a locally merged list
+   * could not drop a tag that just lost its last trade).
+   */
+  function handleReviewSaved({ review, tags, tagCounts }: SavedReviewPayload) {
     setData((current) => ({
       ...current,
-      tags: [...new Set([...current.tags, ...review.tags])].sort(),
-      tagCounts: { ...current.tagCounts },
+      tags,
+      tagCounts,
       trades: current.trades.map((trade) => (trade.id === review.tradeId ? { ...trade, review } : trade)),
     }));
   }
@@ -364,11 +373,10 @@ export function App() {
    * away an unsaved note.
    */
   async function mutateTag({ from, to }: TagMutation): Promise<void> {
-    const module = reviewMode === 'bitget' ? 'bitget' : 'trade';
     const response = await fetch(to === null ? '/api/tags/delete' : '/api/tags/rename', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(to === null ? { tag: from, module } : { from, to, module }),
+      body: JSON.stringify(to === null ? { tag: from, module: reviewModule } : { from, to, module: reviewModule }),
     });
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -403,8 +411,8 @@ export function App() {
       const saved = (await fetch('/api/reviews', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ tradeId: trade.id, tags: nextReview.tags, note: nextReview.note, starred: nextStarred }),
-      }).then((response) => response.json())) as TradeReview;
+        body: JSON.stringify({ tradeId: trade.id, tags: nextReview.tags, note: nextReview.note, starred: nextStarred, module: reviewModule }),
+      }).then((response) => response.json())) as SavedReviewPayload;
       handleReviewSaved(saved);
     } catch {
       setData((current) => ({
@@ -805,6 +813,7 @@ export function App() {
               </div>
               <ReviewEditor
                 trade={selectedTrade}
+                module={reviewModule}
                 availableTags={data.tags}
                 tagCounts={data.tagCounts}
                 onMutateTag={mutateTag}

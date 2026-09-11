@@ -34,7 +34,7 @@ A Trade ID is a stable SHA-256 identifier. Workbook-sourced IDs are created by `
 
 ### 3. Contracts
 
-- `POST /api/reviews` accepts `starred?: boolean`; omitted means `false` at the API boundary.
+- `POST /api/reviews` accepts `starred?: boolean`; omitted means `false` at the API boundary. It also accepts an optional `module` and echoes `{ review, tags, tagCounts }`; tag NAMES stay global (rename/delete rewrite every review), while the returned list/counts are scoped to the module's trade universe.
 - Review Store serializes `starred` as `1` or `0` and deserializes it back to a boolean domain field.
 - `/api/trades?starred=yes` returns only starred trades; `/api/trades?starred=no` returns missing-review and explicitly unstarred trades.
 - `1m` uses a 60,000 ms timeframe duration in both UI chart helpers and server candlestick service.
