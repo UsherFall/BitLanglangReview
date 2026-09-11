@@ -172,13 +172,13 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: Coi
         <div>
           <h1>选币结果</h1>
           <p>扫描 {result.scanned.length} 个 · 收敛 {result.qualifiedCount} 个 · 全周期</p>
+          {result.skippedInstruments && result.skippedInstruments.length > 0 && (
+            <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>
+              已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
+            </p>
+          )}
         </div>
       </header>
-      {result.skippedInstruments && result.skippedInstruments.length > 0 && (
-        <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>
-          已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
-        </p>
-      )}
       <div className="coin-scan-table-wrap">
         <table className="coin-scan-table">
           <thead>

@@ -787,9 +787,13 @@ export function App() {
               </div>
             </header>
             <TradeChart trade={selectedTrade} timeframe={timeframe} candleSource={reviewCandleSource(reviewMode)} tradesEndpoint={tradeReviewEndpoint(reviewMode)} />
-            {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
-            {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
-            {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} onClose={() => setHeatOpen(false)} />}
+            {(otherCoinOpen || leaderCoinOpen || heatOpen) && (
+              <div className="chart-float-stack">
+                {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
+                {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
+                {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} onClose={() => setHeatOpen(false)} />}
+              </div>
+            )}
             <div className="review-panel">
               <div className="metrics">
                 <Metric label="方向" value={selectedTrade.direction} />

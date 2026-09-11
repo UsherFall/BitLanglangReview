@@ -33,9 +33,13 @@ function formatVolume(value: number): string {
  * Presentational market-temperature view (市场热度读数), shared by the review
  * panel (`MarketHeatPanel`, which fetches at a trade's anchor) and the coin-scan
  * heat results (`HeatScanResults`). One source of truth for tier/stats/boards
- * markup so the two surfaces never drift apart.
+ * markup so the two surfaces never drift apart. `layout` only switches the board
+ * container: `stack` (floating review panel) or `columns` (embedded scan card).
  */
-export function MarketHeatView({ result }: { result: MarketHeatResult }) {
+export function MarketHeatView({ result, layout = 'stack' }: {
+  result: MarketHeatResult;
+  layout?: 'stack' | 'columns';
+}) {
   const reviewInstrument = result.reviewCoin?.instrument;
   return (
     <>
@@ -52,8 +56,10 @@ export function MarketHeatView({ result }: { result: MarketHeatResult }) {
         <span className="market-heat-number">异动 <b>{result.stats.volatileCount}</b></span>
         <span className="market-heat-number">覆盖 <b>{result.stats.coveredCount}/{result.stats.poolSize}</b></span>
       </div>
-      <HeatBoard rows={result.topGainers} title="涨幅榜" tone="profit" reviewInstrument={reviewInstrument} empty="当时没有上涨的币" />
-      <HeatBoard rows={result.topLosers} title="跌幅榜" tone="loss" reviewInstrument={reviewInstrument} empty="当时没有下跌的币" />
+      <div className={`market-heat-boards ${layout}`}>
+        <HeatBoard rows={result.topGainers} title="涨幅榜" tone="profit" reviewInstrument={reviewInstrument} empty="当时没有上涨的币" />
+        <HeatBoard rows={result.topLosers} title="跌幅榜" tone="loss" reviewInstrument={reviewInstrument} empty="当时没有下跌的币" />
+      </div>
       {renderSkips(result)}
       {result.warnings.map((warning) => <p key={warning} className="market-heat-warning">{warning}</p>)}
     </>

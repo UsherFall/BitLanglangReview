@@ -35,4 +35,13 @@ describe('HeatScanResults', () => {
     expect(screen.getByText(/已跳过 2 个休市标的/)).toBeInTheDocument();
     expect(screen.queryByText(/复盘币/)).not.toBeInTheDocument();
   });
+
+  it('lays the two boards out as a side-by-side column grid for the embedded coin-scan card', () => {
+    const { container } = render(<HeatScanResults result={heatResult()} label="当前 2026-09-08 10:00" />);
+
+    const boards = container.querySelector('.market-heat-boards');
+    expect(boards).not.toBeNull();
+    expect(boards?.classList.contains('columns')).toBe(true);
+    expect(boards?.querySelectorAll('.market-heat-board')).toHaveLength(2);
+  });
 });

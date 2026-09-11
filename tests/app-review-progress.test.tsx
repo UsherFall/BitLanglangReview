@@ -32,6 +32,7 @@ vi.mock('lightweight-charts', () => ({
       setVisibleRange: chartMocks.setVisibleRange,
       subscribeVisibleLogicalRangeChange: vi.fn(),
       subscribeVisibleTimeRangeChange: vi.fn(),
+      timeToCoordinate: vi.fn(() => null),
       timeToIndex: chartMocks.timeToIndex,
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleTimeRangeChange: vi.fn(),
@@ -217,6 +218,9 @@ describe('App Review Progress', () => {
     fireEvent.click(screen.getByRole('button', { name: '其他币' }));
 
     await waitFor(() => expect(screen.getByLabelText('其他币 K 线')).toBeInTheDocument());
+    // The three right-docked panels share one stacking column (jsdom cannot see
+    // the CSS layering, but the shared container is structural).
+    expect(screen.getByLabelText('其他币 K 线').closest('.chart-float-stack')).not.toBeNull();
   });
 
   it('shows margin in the Trade Review trade list', async () => {
