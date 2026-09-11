@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "定义图表 overlay（SVG + timeToCoordinate）、Market Heat Panel 契约、Coin Scan Panel 约定与样式命名规则；本任务改 OtherCoinChart 标注、热度视图与浮层布局必须遵守"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "约束 chart/ref 与 state 的边界、effect 依赖与订阅清理；本任务新增 ResizeObserver 与可见范围重算订阅必须遵守"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 改动的必需检查项、jsdom 不模拟 pointer-events 的手动验证要求、测试断言写法"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "浮层开关与 entryX 等本地状态的放置约定，禁止引入全局 store"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "组件/助手/CSS 的目录与命名约定（含避免使用 K line 等替代术语）"}
