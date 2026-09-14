@@ -574,13 +574,31 @@ textarea {
   overflow: hidden;
 }
 
-.other-coin-panel {
+/* 右上角浮层堆叠容器: 其他币 / 龙头 / 热度 纵向排列, 互不遮挡.
+   容器本身不滚动, 由各子项收缩 + 内部滚动吸收溢出; 容器左侧空区不挡图表点击. */
+.chart-float-stack {
   position: absolute;
   top: 76px;
   right: 18px;
   z-index: 30;
   width: min(520px, calc(100% - 36px));
+  max-height: calc(100% - 96px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.chart-float-stack > * {
+  pointer-events: auto;
+}
+
+.other-coin-panel {
+  position: relative;
+  width: 100%;
   height: 380px;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
   background: #0b1017;
@@ -681,10 +699,30 @@ textarea {
   font-weight: 600;
 }
 
-.other-coin-chart {
+.other-coin-chart-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+.other-coin-chart {
+  position: absolute;
+  inset: 0;
+}
+
+/* 开单时刻参考线: 用户单位 = CSS px (无 viewBox), y2="100%" 相对元素高度. */
+.other-coin-marker-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.other-coin-marker-overlay line {
+  stroke: rgba(250, 204, 21, 0.4);
+  stroke-width: 1;
 }
 
 .other-coin-status {
@@ -698,11 +736,11 @@ textarea {
 }
 
 .leader-coin-panel {
-  position: absolute;
-  top: 76px;
-  left: 18px;
-  z-index: 30;
-  width: 320px;
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  align-self: flex-end;
+  flex: 0 1 auto;
   max-height: 420px;
   display: flex;
   flex-direction: column;
@@ -803,6 +841,14 @@ textarea {
   gap: 16px;
   padding: 16px 18px;
   border-bottom: 1px solid #2d333b;
+}
+
+/* Flex items default to `min-width: auto`, so the title column could not shrink
+   below its min-content width. The scan skip hint is a single `nowrap` line, so
+   without this it overflows the header instead of ellipsizing. Scoped to the
+   title column so the right-hand timeframe buttons keep their natural width. */
+.detail-header > div:first-child {
+  min-width: 0;
 }
 
 h1 {
@@ -1499,7 +1545,7 @@ label,
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin: 0 0 8px;
+  margin: 4px 0 0;
 }
 
 .coin-scan-table-wrap {
@@ -1680,14 +1726,14 @@ label,
   color: #8b949e;
 }
 
-/* 市场热度浮层（复盘明细头部「热度」按钮打开） */
+/* 市场热度（复盘明细头部「热度」按钮打开的浮层 / 选币「热度」内嵌结果共享样式） */
 .market-heat-panel {
-  position: absolute;
-  top: 76px;
-  right: 18px;
-  z-index: 30;
-  width: min(420px, calc(100% - 36px));
-  max-height: min(560px, calc(100% - 90px));
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  align-self: flex-end;
+  flex: 0 1 auto;
+  max-height: 560px;
   display: flex;
   flex-direction: column;
   background: #0b1017;
@@ -1867,4 +1913,38 @@ label,
   margin: 0;
   font-size: 12px;
   color: #f59f9f;
+}
+
+/* 涨幅榜 / 跌幅榜: 默认纵向堆叠(浮窗), columns = 选币内嵌两栏并排 */
+.market-heat-boards {
+  display: grid;
+  gap: 8px;
+}
+
+.market-heat-boards.columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 24px;
+}
+
+@media (max-width: 720px) {
+  .market-heat-boards.columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* 选币「热度」结果: 页面内嵌卡片, 覆盖 .market-heat-panel 的浮窗定位 */
+.heat-scan-results {
+  position: static;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  /* Reset the floating panel's right-docking so the card stretches to fill the
+     workspace row instead of hugging the content height at the bottom. */
+  align-self: stretch;
+  border-radius: 8px;
+}
+
+.heat-scan-results .market-heat-body {
+  flex: 1 1 auto;
+  min-height: 0;
 }

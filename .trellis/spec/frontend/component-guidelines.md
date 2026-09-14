@@ -26,6 +26,8 @@ Important local patterns:
 
 - `TradeChart` has an all open/close markers mode: a toolbar toggle fetches `/api/trades?instrument=...` (unfiltered), computes `allTradeMarkers` with the active Trade highlighted, and hides the single-trade Eye button while active. Keep the marker list in the pure helper `src/ui/trade-markers.ts` and update both series whitespace and markers when the all-trade set changes.
 
+- `OtherCoinChart` (其他币) marks the active trade's entry candle with a faint vertical reference line (`.other-coin-marker-overlay`, no label). It maps the entry event to a candle with `markerTimeForEvent(entryTime, timeframe, loadedCandles)` then to an x coordinate with `chart.timeScale().timeToCoordinate(...)`; the line only renders when that coordinate is non-null (entry candle loaded and on-scale). Because `autoSize` fires no logical-range event, the x must be recomputed on: initial load and `loadMore` (after `setVisibleRange`, in a `requestAnimationFrame`), the `subscribeVisibleLogicalRangeChange` handler (before the `suppressAutoLoadRef` early return, so programmatic range changes count), a `ResizeObserver` on the chart wrap, and a reset to `null` when `instrument`/`timeframe` change.
+
 ### Free Replay Cursor Follow
 
 When the cursor advances in Free Replay, the chart viewport **must scroll to follow** so the user sees the new candle. Keep the current zoom level (visible span) by computing `span = visible.to - visible.from` before calling `setVisibleRange`:
@@ -62,8 +64,35 @@ Free Replay must keep `progressTime` separate from `cursorTime`. Switching Revie
 
 - Props `{ instrument, entryTime, onClose }`; the heat anchor is the trade's entry time (no entry/exit toggle), and the request is `GET /api/market-heat?anchor=<epochMs>&instrument=<symbol>`, guarded against stale responses. Switching to a different trade CLOSES the panel (App effect on `selectedId`) — a whole-pool candle fetch happens per new anchor, so a reading is computed only when the reviewer clicks 热度 for the current trade; the server's per-anchor memo still makes reopening the same trade a zero-request hit.
 - Renders the 5-tier verdict (热市/偏热/中性/偏冷/冷市), the number row (中位涨跌 / 涨/跌家数 / 异动家数 / 覆盖数), the 涨幅榜/跌幅榜 boards, and the 休市/无行情/无法归一 skip summary plus rate-limit warnings. The reviewed coin's row is highlighted and suffixed `· 复盘币`.
-- Styles live under the `.market-heat-*` naming in `src/ui/styles.css`, reusing the `.other-coin-panel` overlay family.
+- Styles live under the `.market-heat-*` naming in `src/ui/styles.css`.
 - The panel appears only in the trade/bitget detail branch (it never shows in scan or free replay), and the App closes it whenever the selected trade changes (see the entry-anchor bullet above).
+
+## Right-Docked Floating Panels
+
+The three review-detail floaters (其他币 `OtherCoinChart`, 龙头 `LeaderCoinPanel`, 热度 `MarketHeatPanel`) share ONE stacking column, `.chart-float-stack`, rendered by `App.tsx` in the trade/bitget detail branch. Contract:
+
+- The App renders the stack only when at least one panel is open, and always in the fixed order 其他币 → 龙头 → 热度; each panel keeps its own independent toggle state.
+- `.chart-float-stack` is `position: absolute` (right/top docked), so it stays out of `.workspace`'s `grid-template-rows` — the chart and review panel keep their rows.
+- It is `display: flex; flex-direction: column; align-items: flex-end` with a bounded `max-height`. Overflow is absorbed by **shrinkable children with their own internal scroll areas**, NOT by a container-level `overflow: auto` (a scroll container cannot be click-through).
+- The container is `pointer-events: none` with `.chart-float-stack > * { pointer-events: auto }`, so the container's empty left strip does not block clicks on the chart behind it. jsdom does not simulate `pointer-events`, so verify this pass-through manually with `npm run dev`.
+- Individual panels must NOT set their own `position/top/right/left/z-index`; they are `position: relative` flex children (`width: 100%` + `max-width` for the narrower leader/heat panels) so the dock position has a single owner.
+
+## Embedded Scan Results vs Floating Panels
+
+`HeatScanResults` (选币「热度」) reuses `MarketHeatView` inside the workspace, NOT as a floating panel. Two contracts keep the two surfaces from drifting:
+
+- `MarketHeatView` takes `layout?: 'stack' | 'columns'` (default `'stack'`). `'stack'` is the floating review panel; `'columns'` wraps the 涨幅榜/跌幅榜 boards in `.market-heat-boards.columns` (two-column grid) for the wide embedded card. The board markup stays single-source.
+- The embedded card (`<section className="market-heat-panel heat-scan-results">`) MUST reset every floating-positioning property it inherits from `.market-heat-panel`: `position: static; width: auto; max-width: none; max-height: none; align-self: stretch`. Missing `max-width`/`align-self` silently caps the card at the floating panel's `420px` and bottom-aligns it inside the `minmax(360px, 1fr)` grid row instead of filling it.
+
+## Common Mistake: Extra top-level element steals the workspace grid row
+
+**Symptom**: A results view shows a huge vertical gap where a one-line hint should be, or the main table is squeezed.
+
+**Cause**: `.workspace` is `display: grid; grid-template-rows: auto minmax(360px, 1fr) auto`. A results component returns a Fragment, so every top-level element becomes a grid row. Adding a third element (e.g. a standalone skip-hint `<p>`) pushes the intended `1fr` content into row 3 (`auto`) and lets the hint take the `1fr` row.
+
+**Fix**: Keep the results component's top-level element count stable (header + main region). Fold secondary lines such as 选币's 「已跳过 N 个休市标的」 hint into the `.detail-header` title column instead of rendering it as a sibling.
+
+**Prevention**: When adding a top-level element to a Fragment rendered directly under `.workspace`, check how it maps onto the three grid rows.
 
 ## Styling And Accessibility
 

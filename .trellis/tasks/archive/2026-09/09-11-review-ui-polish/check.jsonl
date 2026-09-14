@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验收所需：UI 改动检查项、npm test 要求、jsdom pointer-events 盲区需人工验证"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核对 overlay 手法、Market Heat Panel / Coin Scan Panel 契约是否被破坏，样式命名是否一致"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "核对 effect 依赖、ref/state 划分与订阅清理是否符合约定"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端层质量检查入口（Pre-Development Checklist / Quality Check）"}

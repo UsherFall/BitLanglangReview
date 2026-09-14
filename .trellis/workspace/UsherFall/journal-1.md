@@ -827,3 +827,25 @@ v2 收敛扫描:去振幅相对门(误杀长安静币/放过新鲜旗形),加 sc
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: 复盘/选币界面视觉与标注优化
+<!-- trellis-session: v=2 fp=5dc8e39a9e3f3265 -->
+
+**Date**: 2026-09-11
+**Task**: 复盘/选币界面视觉与标注优化
+**Branch**: `master`
+
+### Summary
+
+R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色竖线;R3 选币跳过休市提示并入标题消除网格行空白;R4 选币热度内嵌两栏布局. tsc+277 测试全绿;同步 component-guidelines spec.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5e50ca9` | feat: 复盘浮层右上堆叠、其他币开单参考线,选币提示与热度版式优化 |
+
+### Status
+
+[OK] **Completed**

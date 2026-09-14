@@ -13,7 +13,7 @@ export function HeatScanResults({ result, label }: { result: MarketHeatResult; l
       </header>
       <section className="market-heat-panel heat-scan-results">
         <div className="market-heat-body">
-          <MarketHeatView result={result} />
+          <MarketHeatView result={result} layout="columns" />
         </div>
       </section>
     </>

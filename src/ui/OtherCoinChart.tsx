@@ -5,7 +5,7 @@ import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { formatChartPrice } from './chart-price';
-import { entryVisibleRange, formatChartTime, timeframeMs } from './chart-time';
+import { entryVisibleRange, formatChartTime, markerTimeForEvent, timeframeMs } from './chart-time';
 
 const DEFAULT_INSTRUMENT = 'BTC-USDT-SWAP';
 
@@ -21,6 +21,7 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
   onClose: () => void;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
+  const chartWrapRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const loadedCandlesRef = useRef<Candlestick[]>([]);
@@ -33,6 +34,8 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
   const [instrument, setInstrument] = useState(DEFAULT_INSTRUMENT);
   const [status, setStatus] = useState('加载 K 线');
   const [showCandidates, setShowCandidates] = useState(false);
+  // Entry-candle reference line position in CSS px; null = not loaded / off-scale.
+  const [entryX, setEntryX] = useState<number | null>(null);
 
   useEffect(() => {
     fetch('/api/free-replay/instruments')
@@ -91,6 +94,7 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
     lastLoadRangeRef.current = { earlier: null, later: null };
     suppressAutoLoadRef.current = true;
     setStatus('加载 K 线');
+    setEntryX(null);
     let cancelled = false;
     const params = new URLSearchParams({ instrument, timeframe, entryTime, mode: 'initial' });
     fetch(`/api/candles?${params}`)
@@ -107,6 +111,10 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
         const range = entryVisibleRange(entryTime, timeframe);
         lastLoadRangeRef.current = { earlier: range, later: range };
         chart.timeScale().setVisibleRange({ from: range.from, to: range.to });
+        window.requestAnimationFrame(() => {
+          if (activeKeyRef.current !== key) return;
+          recomputeEntryX();
+        });
         window.setTimeout(() => {
           suppressAutoLoadRef.current = false;
         }, 0);
@@ -123,6 +131,9 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
     const chart = chartApiRef.current;
     if (!chart) return;
     const handler = (range: LogicalRange | null) => {
+      // Re-align the entry marker before the auto-load early return: programmatic
+      // range changes (instrument/timeframe switch, load-more) also move it.
+      recomputeEntryX();
       if (suppressAutoLoadRef.current) return;
       const series = seriesRef.current;
       const visible = currentVisibleRange(chart);
@@ -146,6 +157,24 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
     chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
     return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
   }, [timeframe, instrument, entryTime]);
+
+  // `autoSize` only re-lays-out the canvas; it fires no logical-range event, so a
+  // panel resize needs its own trigger to keep the marker aligned.
+  useEffect(() => {
+    const wrap = chartWrapRef.current;
+    if (!wrap || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => recomputeEntryX());
+    observer.observe(wrap);
+    return () => observer.disconnect();
+  }, [timeframe, instrument, entryTime]);
+
+  function recomputeEntryX() {
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    const time = markerTimeForEvent(entryTime, timeframe, loadedCandlesRef.current);
+    const coordinate = chart.timeScale().timeToCoordinate(time);
+    setEntryX(coordinate == null ? null : coordinate);
+  }
 
   async function loadMore(direction: LoadDirection) {
     const key = `${instrument}:${timeframe}:${entryTime}`;
@@ -172,6 +201,10 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
       if (visible) {
         chart.timeScale().setVisibleRange({ from: visible.from as UTCTimestamp, to: visible.to as UTCTimestamp });
       }
+      window.requestAnimationFrame(() => {
+        if (activeKeyRef.current !== key) return;
+        recomputeEntryX();
+      });
       window.setTimeout(() => {
         suppressAutoLoadRef.current = false;
       }, 0);
@@ -224,7 +257,12 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
         </button>
       </div>
       <div className="other-coin-title">{instrument}</div>
-      <div ref={chartRef} className="other-coin-chart" />
+      <div ref={chartWrapRef} className="other-coin-chart-wrap">
+        <div ref={chartRef} className="other-coin-chart" />
+        <svg className="other-coin-marker-overlay" aria-hidden="true">
+          {entryX != null && <line x1={entryX} x2={entryX} y1={0} y2="100%" />}
+        </svg>
+      </div>
       {status && <div className="other-coin-status">{status}</div>}
     </div>
   );
