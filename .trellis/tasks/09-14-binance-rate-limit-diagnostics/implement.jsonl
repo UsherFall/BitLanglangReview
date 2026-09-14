@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "币安 K 线抓取、请求节奏（binanceRatePacer 110ms）、429/418 重试与 gate 的权威契约文档；本任务的权重观测与日志契约直接补进该文件的 Error Handling 一节，改动前必须以此为准"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "/api/candles 路由的既有契约；用于确认服务端已返回 { error } 因而无需改动，只改 UI 侧消费方式"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 行为改动后的验证要求与测试选取惯例（npm test + 聚焦用例）"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "新增 ServerCandleError 与 fetchCandles 返回类型的 UI 侧类型约定，避免 UI 局部类型漂移"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "App.tsx 的 status 状态（setStatus 文案）属既有状态管理约定，6 个调用点的 fallback 文案必须与现状一致"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "6 个重复的 fetch('/api/candles') 调用点收敛为单一 fetchCandles 封装，需符合项目对复用粒度的判断标准"}
+{"file": ".trellis/tasks/09-14-binance-rate-limit-diagnostics/research/binance-rate-limits.md", "reason": "本项目实际调用的三个币安端点的官方权重（klines 按 LIMIT 分档、limit=100/150 均为 2；ticker/24hr 无 symbol 为 40；exchangeInfo 为 1）与 REQUEST_WEIGHT 2400/min per-IP 限额的取证记录；日志中「自身权重上限」的推导依据，实现前必须以此为准"}

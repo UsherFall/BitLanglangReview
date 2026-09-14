@@ -3,6 +3,7 @@ import { Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
+import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { formatChartPrice } from './chart-price';
 import { entryVisibleRange, formatChartTime, markerTimeForEvent, timeframeMs } from './chart-time';
@@ -97,11 +98,10 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
     setEntryX(null);
     let cancelled = false;
     const params = new URLSearchParams({ instrument, timeframe, entryTime, mode: 'initial' });
-    fetch(`/api/candles?${params}`)
-      .then((response) => response.json())
-      .then((data: { candles: Candlestick[] }) => {
+    fetchCandles(params)
+      .then((candles) => {
         if (cancelled || activeKeyRef.current !== key) return;
-        const merged = mergeCandles(data.candles);
+        const merged = mergeCandles(candles);
         loadedCandlesRef.current = merged;
         setStatus(merged.length ? '' : '没有拿到 K 线');
         const series = seriesRef.current;
@@ -119,8 +119,8 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
           suppressAutoLoadRef.current = false;
         }, 0);
       })
-      .catch(() => {
-        if (!cancelled) setStatus('K 线加载失败');
+      .catch((error) => {
+        if (!cancelled) setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
       });
     return () => {
       cancelled = true;
@@ -185,7 +185,7 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
     const anchor = direction === 'earlier' ? candles[0].timestamp : candles[candles.length - 1].timestamp;
     const params = new URLSearchParams({ instrument, timeframe, entryTime, mode: direction, anchor: String(anchor) });
     try {
-      const { candles: next } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };
+      const next = await fetchCandles(params);
       if (activeKeyRef.current !== key) return;
       if (!next.length) {
         setStatus('');
@@ -209,8 +209,8 @@ export function OtherCoinChart({ entryTime, timeframe, onClose }: {
         suppressAutoLoadRef.current = false;
       }, 0);
       setStatus('');
-    } catch {
-      setStatus('K 线加载失败');
+    } catch (error) {
+      setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
     } finally {
       loadingRef.current[direction] = false;
     }

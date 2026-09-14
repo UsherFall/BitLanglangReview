@@ -997,6 +997,31 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
     await waitFor(() => expect(sessionPutBodies().at(-1)?.cursorTime).toBe(Date.parse('2024-05-21T10:05:00+08:00') / 1000));
   });
+
+  it('shows the server-provided candle failure reason instead of the generic load text', async () => {
+    const serverError = 'Binance request failed: HTTP 418 (Binance IP auto-banned; retry after ~1659s)';
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ error: serverError }), { status: 502 });
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+
+    await waitFor(() => expect(screen.getByText(serverError)).toBeInTheDocument());
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {

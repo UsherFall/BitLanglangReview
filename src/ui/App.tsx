@@ -13,6 +13,7 @@ import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
 import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
+import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { CoinScanPanel, CoinScanResults, type ScanResult } from './CoinScanPanel';
 import { HeatScanResults } from './HeatScanResults';
@@ -1168,15 +1169,14 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     lastLoadEarlierRangeRef.current = null;
     initializedRangeKeyRef.current = '';
     const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial' });
-    fetch(`/api/candles?${params}`)
-      .then((response) => response.json())
-      .then(({ candles }: { candles: Candlestick[] }) => {
+    fetchCandles(params)
+      .then((candles) => {
         const merged = mergeCandles(candles);
         updateLoadedCandles(merged);
         setRenderedCandles(merged);
         setStatus(merged.length ? '' : '没有 K 线');
       })
-      .catch(() => setStatus('K 线加载失败'));
+      .catch((error) => setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败'));
   }, [replay.instrument, replay.startTime, replay.dataAnchorTime, timeframe]);
 
   useEffect(() => {
@@ -1286,9 +1286,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       mode: 'later',
       anchor: String(last.timestamp),
     });
-    fetch(`/api/candles?${params}`)
-      .then((response) => response.json())
-      .then(({ candles }: { candles: Candlestick[] }) => {
+    fetchCandles(params)
+      .then((candles) => {
         if (!candles.length) return;
         const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
         loadedCandlesRef.current = merged;
@@ -1300,11 +1299,11 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
         setLoadedCandles(merged);
         onCandlesLoaded(merged);
       })
-      .catch(() => {
+      .catch((error) => {
         // Clear the anchor so the next trigger can retry it; keeping it would
         // block any further attempt for this anchor for the whole session.
         lastFutureLoadAnchorRef.current = null;
-        setStatus('后续 K 线加载失败');
+        setStatus(error instanceof ServerCandleError ? error.message : '后续 K 线加载失败');
       })
       .finally(() => {
         loadingFutureRef.current = false;
@@ -1325,7 +1324,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       anchor: String(anchor),
     });
     try {
-      const { candles } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };
+      const candles = await fetchCandles(params);
       if (candles.length) {
         const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
         loadedCandlesRef.current = merged;
@@ -1334,8 +1333,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
         onCandlesLoaded(merged);
       }
       setStatus('');
-    } catch {
-      setStatus('更早 K 线加载失败');
+    } catch (error) {
+      setStatus(error instanceof ServerCandleError ? error.message : '更早 K 线加载失败');
     } finally {
       loadingEarlierRef.current = false;
     }
@@ -1614,9 +1613,8 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     latestAnchorRef.current = null;
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
     const params = new URLSearchParams({ instrument: trade.instrument, timeframe, entryTime: trade.entryTime, mode: 'initial', source: candleSource });
-    fetch(`/api/candles?${params}`)
-      .then((response) => response.json())
-      .then(({ candles }: { candles: Candlestick[] }) => {
+    fetchCandles(params)
+      .then((candles) => {
         if (activeKeyRef.current !== key) return;
         const series = seriesRef.current;
         const chart = chartApiRef.current;
@@ -1633,7 +1631,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
         }, 0);
         setStatus(candles.length ? '' : '没有拿到 K 线');
       })
-      .catch(() => setStatus('K 线加载失败'));
+      .catch((error) => setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败'));
   }, [trade.id, timeframe]);
 
   function currentMarkers(): SeriesMarker<UTCTimestamp>[] {
@@ -1792,7 +1790,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
       source: candleSource,
     });
     try {
-      const { candles } = (await fetch(`/api/candles?${params}`).then((response) => response.json())) as { candles: Candlestick[] };
+      const candles = await fetchCandles(params);
       if (candles.length) {
         candlesRef.current = mergeCandles([...candlesRef.current, ...candles]);
         if (direction === 'earlier') {
@@ -1816,8 +1814,8 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
         }
       }
       setStatus('');
-    } catch {
-      setStatus('K 线加载失败');
+    } catch (error) {
+      setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
     } finally {
       loadingRef.current[direction] = false;
     }

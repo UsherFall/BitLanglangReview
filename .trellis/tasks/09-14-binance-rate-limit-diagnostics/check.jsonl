@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核查 binanceRatePacer / binanceRateGate / RETRY_BY_STATUS 语义零改动，且新增的权重可观测契约已按该文件风格补写"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "按项目标准核验 UI 改动：npm test 全绿、聚焦用例覆盖、文案 fallback 未回归"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核验跨层链路完整性：defaultBinanceFetchJson 的错误包装 → app-plugin 502 { error } → fetchCandles → setStatus 文案，逐层未被截断"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核验 App.tsx / OtherCoinChart.tsx 的改动符合组件与图表 overlay 的既有规范，未引入渲染副作用"}
+{"file": ".trellis/spec/server/index.md", "reason": "核验新增代码仍遵守 server 层边界：诊断输出留在 src/server，不把 UI 渲染关注点带进 server"}

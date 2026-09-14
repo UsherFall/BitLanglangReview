@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createRateGate, fetchJsonWithRetry } from '../src/server/http';
+import { createRateGate, createWeightMonitor, fetchJsonWithRetry } from '../src/server/http';
 
 function jsonResponse(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers });
 }
+
+// Rate-limit responses would otherwise print a `[binance] HTTP 429/418 ...`
+// line through the default console sink; these cases only care about retry and
+// gate behavior, so they inject a silent monitor.
+const silentMonitor = createWeightMonitor(() => {});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -23,7 +28,7 @@ describe('fetchJsonWithRetry (no gate — OKX path, per-request behavior)', () =
       .mockResolvedValueOnce(jsonResponse({}, 429, { 'retry-after': '2' }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-    const promise = fetchJsonWithRetry('https://x', fetchImpl);
+    const promise = fetchJsonWithRetry('https://x', fetchImpl, undefined, silentMonitor);
     await vi.advanceTimersByTimeAsync(100_000);
 
     await expect(promise).resolves.toEqual({ ok: true });
@@ -37,7 +42,7 @@ describe('fetchJsonWithRetry (no gate — OKX path, per-request behavior)', () =
       .mockResolvedValueOnce(jsonResponse({}, 418, { 'retry-after': '60' }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-    const promise = fetchJsonWithRetry('https://x', fetchImpl);
+    const promise = fetchJsonWithRetry('https://x', fetchImpl, undefined, silentMonitor);
     await vi.advanceTimersByTimeAsync(100_000);
 
     await expect(promise).resolves.toEqual({ ok: true });
@@ -48,7 +53,7 @@ describe('fetchJsonWithRetry (no gate — OKX path, per-request behavior)', () =
     vi.useFakeTimers();
     const fetchImpl = vi.fn(async () => jsonResponse({}, 418, { 'retry-after': '60' }));
 
-    const assertion = expect(fetchJsonWithRetry('https://x', fetchImpl)).rejects.toThrow(/HTTP 418/);
+    const assertion = expect(fetchJsonWithRetry('https://x', fetchImpl, undefined, silentMonitor)).rejects.toThrow(/HTTP 418/);
     await vi.advanceTimersByTimeAsync(100_000);
     await assertion;
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -60,7 +65,7 @@ describe('fetchJsonWithRetry (no gate — OKX path, per-request behavior)', () =
 
     // Attach the rejection handler BEFORE advancing timers, or the throw fires
     // as an unhandled rejection mid-advance.
-    const assertion = expect(fetchJsonWithRetry('https://x', fetchImpl)).rejects.toThrow(/HTTP 429/);
+    const assertion = expect(fetchJsonWithRetry('https://x', fetchImpl, undefined, silentMonitor)).rejects.toThrow(/HTTP 429/);
     await vi.advanceTimersByTimeAsync(100_000);
     await assertion;
     expect(fetchImpl).toHaveBeenCalledTimes(3);
@@ -82,7 +87,7 @@ describe('fetchJsonWithRetry (with gate — Binance path, IP-level behavior)', (
       .mockResolvedValueOnce(jsonResponse({}, 429, { 'retry-after': '2' }))
       .mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-    const promise = fetchJsonWithRetry('https://x', fetchImpl, gate);
+    const promise = fetchJsonWithRetry('https://x', fetchImpl, gate, silentMonitor);
     await vi.advanceTimersByTimeAsync(100_000);
 
     await expect(promise).resolves.toEqual({ ok: true });
@@ -96,7 +101,7 @@ describe('fetchJsonWithRetry (with gate — Binance path, IP-level behavior)', (
     const fetchImpl = vi.fn(async () => jsonResponse({}, 418, { 'retry-after': '60' }));
 
     // First hit: 418 → the gate records the ban and the request fails fast (no retry).
-    const assertion = expect(fetchJsonWithRetry('https://x', fetchImpl, gate)).rejects.toThrow(/HTTP 418/);
+    const assertion = expect(fetchJsonWithRetry('https://x', fetchImpl, gate, silentMonitor)).rejects.toThrow(/HTTP 418/);
     await vi.advanceTimersByTimeAsync(10_000);
     await assertion;
     expect(fetchImpl).toHaveBeenCalledTimes(1);

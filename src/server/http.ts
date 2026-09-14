@@ -123,19 +123,126 @@ export function createRequestPacer(minIntervalMs: number, jitterMs: number): { p
 }
 
 /**
- * Shared Binance request-rate budget. Binance's IP auto-ban (418) is a REQUEST
- * RATE trigger, not just a weight-window one; a coin scan alone at ~20 req/s
- * (50ms spacing) still tripped it occasionally. The gate above stops everything
- * AFTER a limit trips; this pacer keeps the whole pipeline under ~9 req/s so the
- * limit is rarely reached in the first place. It lives on
- * `defaultBinanceFetchJson` — the single choke point every Binance outbound
- * request passes through (klines, tickers, exchangeInfo) — so every Binance
- * consumer (coin scan, market heat, future modules) shares one rate budget,
- * cache hits never pace, and OKX/Bitget requests are unaffected.
+ * Shared Binance request-WEIGHT budget. Binance's limits are per IP and measured
+ * in `REQUEST_WEIGHT` (2400/min), NOT in requests per second; an IP ban (418)
+ * follows repeatedly violating that limit and/or not backing off after 429s.
+ * Pacing request starts is how we stay under it: the previous 50ms spacing
+ * (~20 req/s) was 1200 klines/min x weight 2 = 2400 weight/min — exactly the
+ * ceiling — which is what tripped 429s and escalated to 418s. This pacer keeps
+ * the pipeline at ~9 req/s (~1090 weight/min, ~45% of the ceiling) so the limit
+ * is rarely reached in the first place; the gate above stops everything AFTER a
+ * limit trips. It lives on `defaultBinanceFetchJson` — the single choke point
+ * every Binance outbound request passes through (klines, tickers, exchangeInfo) —
+ * so every Binance consumer (coin scan, market heat, future modules) shares one
+ * budget, cache hits never pace, and OKX/Bitget requests are unaffected.
  */
 const BINANCE_MIN_INTERVAL_MS = 110;
 const BINANCE_PACE_JITTER_MS = 15;
 export const binanceRatePacer = createRequestPacer(BINANCE_MIN_INTERVAL_MS, BINANCE_PACE_JITTER_MS);
+
+/**
+ * `X-MBX-USED-WEIGHT-1M` — the used weight **for the IP** in the current minute
+ * ("The limits on the API are based on the IPs, not the API keys"). Only Binance
+ * sends it, so observing it needs no per-source switch: OKX/Bitget responses
+ * simply miss the header and observation becomes a no-op.
+ */
+const BINANCE_WEIGHT_HEADER = 'x-mbx-used-weight-1m';
+
+/** Binance USD-M `REQUEST_WEIGHT` ceiling, per minute and per IP. */
+const BINANCE_WEIGHT_LIMIT_PER_MIN = 2400;
+
+/**
+ * klines weight for the LIMITs this project uses (100 for the coin scan, 150 for
+ * the charts) — both land in `[100,500)` → weight 2.
+ */
+const BINANCE_KLINES_WEIGHT = 2;
+
+/** High-water log step; `0` silences the high-water line (limit events still print). */
+const DEFAULT_WEIGHT_LOG_STEP = 200;
+
+/**
+ * This process's own weight ceiling per minute, DERIVED from the shared pacer
+ * rather than hard-coded: `Math.round(60000 / BINANCE_MIN_INTERVAL_MS)` request
+ * starts × the klines weight. Jitter only widens the real interval, so this is
+ * an upper bound (hence the `≤` in the log line). Printing it next to the
+ * observed per-IP weight is what separates "our own traffic" from "someone else
+ * shares this exit IP".
+ */
+const SELF_WEIGHT_CEILING_PER_MIN = Math.round(60_000 / BINANCE_MIN_INTERVAL_MS) * BINANCE_KLINES_WEIGHT;
+
+/** Where weight log lines go; defaults to `console.warn`. */
+export type WeightLogSink = (message: string) => void;
+
+/** Weight observability for the Binance path: high-water mark + rate-limit events. */
+export type WeightMonitor = {
+  /** Records one response's per-IP used weight; a no-op when the header is absent. */
+  observe(usedWeight: number | null): void;
+  /** Records one rate-limit event (429/418), whether or not a log step was crossed. */
+  recordLimit(status: number, usedWeight: number | null, retryAfterSeconds: number | null): void;
+};
+
+/** `BINANCE_WEIGHT_LOG_STEP` (default 200); a non-finite or negative value falls back. */
+function weightLogStep(): number {
+  const raw = Number(process.env.BINANCE_WEIGHT_LOG_STEP);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_WEIGHT_LOG_STEP;
+}
+
+/** Parses `X-MBX-USED-WEIGHT-1M`; absent or unparsable → `null` (not a failure). */
+function parseUsedWeight(headers: FetchResponse['headers']): number | null {
+  const raw = headers.get(BINANCE_WEIGHT_HEADER);
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Parses `Retry-After` (seconds); absent or unparsable → `null`. */
+function parseRetryAfterSeconds(headers: FetchResponse['headers']): number | null {
+  const raw = headers.get('retry-after');
+  if (raw === null) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Weight monitor. The high-water mark is monotonic for the lifetime of the
+ * process (it resets on restart — persistence is deliberately out of scope) and
+ * only prints when it crosses a `step` boundary, so a 300-request scan produces
+ * a readable ladder instead of 300 lines. Rate-limit events always print: the
+ * weight and `Retry-After` carried by the response that tripped the limit are
+ * the numbers that tell a shared exit IP apart from our own traffic.
+ */
+export function createWeightMonitor(
+  sink: WeightLogSink = (message: string) => console.warn(message),
+  step: number = weightLogStep(),
+): WeightMonitor {
+  let maxObserved = 0;
+  let maxLogged = 0;
+  return {
+    observe(usedWeight) {
+      if (usedWeight === null) return;
+      if (usedWeight > maxObserved) maxObserved = usedWeight;
+      if (step <= 0) return;
+      if (Math.floor(usedWeight / step) <= Math.floor(maxLogged / step)) return;
+      maxLogged = usedWeight;
+      sink(`[binance] used-weight-1m high-water=${maxObserved} (本进程权重上限 ≈≤${SELF_WEIGHT_CEILING_PER_MIN}/min; 限额 ${BINANCE_WEIGHT_LIMIT_PER_MIN}/min)`);
+    },
+    recordLimit(status, usedWeight, retryAfterSeconds) {
+      const retryAfter = retryAfterSeconds === null ? 'unknown' : `${retryAfterSeconds}s`;
+      sink(`[binance] HTTP ${status} used-weight-1m=${usedWeight ?? 'unknown'} retry-after=${retryAfter}`);
+    },
+  };
+}
+
+/** Shared Binance weight monitor; every Binance outbound request reports here. */
+export const binanceWeightMonitor: WeightMonitor = createWeightMonitor();
+
+/**
+ * Silent monitor for the non-Binance path (OKX). `observe` already switches on the
+ * Binance-only weight header, but `recordLimit` switches on the HTTP status — and
+ * OKX answers its own rate limits with 429 — so without this the OKX path would
+ * print a `[binance]` line for a limit Binance never raised.
+ */
+const silentWeightMonitor: WeightMonitor = createWeightMonitor(() => {});
 
 /**
  * JSON GET with exponential-backoff retry for Binance rate-limit responses.
@@ -149,15 +256,32 @@ export const binanceRatePacer = createRequestPacer(BINANCE_MIN_INTERVAL_MS, BINA
  * - 429 → record warning + global backoff, then the current request retries;
  * - 418 → record warning + global ban, then fail fast (never fire during a ban).
  * Without a gate (OKX path) the previous per-request behavior is preserved.
+ *
+ * `monitor` (optional and injectable like `gate`) receives the per-IP weight of
+ * every response plus one line per rate-limit event; it defaults to the shared
+ * `binanceWeightMonitor` and is a no-op for responses without the header.
  */
-export async function fetchJsonWithRetry(url: string, fetchImpl: FetchImpl, gate?: RateGate): Promise<unknown> {
+export async function fetchJsonWithRetry(
+  url: string,
+  fetchImpl: FetchImpl,
+  gate?: RateGate,
+  monitor: WeightMonitor = binanceWeightMonitor,
+): Promise<unknown> {
   for (let attempt = 1; ; attempt += 1) {
     await waitOutGate(gate);
     const response = await fetchImplWithTimeout(url, fetchImpl);
+    // Observe EVERY response, OK or not: a 418 response itself carries the
+    // per-IP weight, and this header is the only window onto traffic we did not
+    // send. No header (OKX/Bitget) → observe(null) → no-op.
+    const usedWeight = parseUsedWeight(response.headers);
+    monitor.observe(usedWeight);
     if (response.ok) return response.json();
     const retry = RETRY_BY_STATUS[response.status];
     if (!retry) throw new Error(`HTTP ${response.status}`);
     const delayMs = retryDelayMs(response, attempt, retry);
+    // Record the limit event next to the gate block, so the weight reported is
+    // the one from the very response that tripped the limit.
+    monitor.recordLimit(response.status, usedWeight, parseRetryAfterSeconds(response.headers));
     if (response.status === 418) {
       gate?.block(Date.now() + delayMs, '418', `币安 IP 被自动封禁(HTTP 418)，${Math.ceil(delayMs / 1000)} 秒内不再发请求，请稍后重试`);
       if (gate) throw new Error('HTTP 418 (Binance IP auto-banned)');
@@ -216,7 +340,9 @@ function sleep(ms: number): Promise<void> {
  * route handlers can convert failures to HTTP 502 without crashing.
  */
 export async function defaultFetchJson(url: string): Promise<unknown> {
-  return labeledFetch(url, 'OKX request failed');
+  // Not Binance: OKX never sends the weight header, and its own 429s must not be
+  // logged as Binance limits (see `silentWeightMonitor`).
+  return labeledFetch(url, 'OKX request failed', undefined, silentWeightMonitor);
 }
 
 /**
@@ -265,9 +391,14 @@ async function readErrorDetail(response: FetchResponse): Promise<string> {
   return '';
 }
 
-async function labeledFetch(url: string, label: string, gate?: RateGate): Promise<unknown> {
+async function labeledFetch(
+  url: string,
+  label: string,
+  gate?: RateGate,
+  monitor: WeightMonitor = binanceWeightMonitor,
+): Promise<unknown> {
   try {
-    return await fetchJsonWithRetry(url, fetchViaProxy, gate);
+    return await fetchJsonWithRetry(url, fetchViaProxy, gate, monitor);
   } catch (error) {
     throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`);
   }
