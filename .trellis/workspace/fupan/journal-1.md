@@ -299,3 +299,43 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: Trellis 0.6.16 升级 + 币安权重可观测埋点,并定位测试环境全量失败
+<!-- trellis-session: v=2 fp=22fe5496e12e81ba -->
+
+**Date**: 2026-09-15
+**Task**: Trellis 0.6.16 升级 + 币安权重可观测埋点,并定位测试环境全量失败
+**Branch**: `master`
+
+### Summary
+
+拆两个 commit 提交 Trellis 框架升级与 09-14 币安限流诊断功能,归档 09-14;顺带定位测试套件全量失败的根因
+
+### Main Changes
+
+- Trellis 0.6.5 升级到 0.6.16,接入 CodeBuddy 平台脚手架(.codebuddy),新增 .gitattributes journal merge=union
+- 09-14:权重头 X-MBX-USED-WEIGHT-1M 可观测 + 429/418 留痕;新增 src/ui/candle-fetch.ts 统一 /api/candles 并透出服务端错误文案
+- 定位测试全量失败根因:@vitest/runner 被加载为两份模块实例,worker 初始化的 collector 状态对测试文件不可见
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b752d6b` | chore(trellis): 升级 0.6.5 → 0.6.16 并接入 CodeBuddy 平台脚手架 |
+| `59518de` | feat(binance): 权重头可观测与 418 留痕,图表路径消费 rate gate warnings |
+
+### Testing
+
+- [OK] npx vitest run:51/51 文件在 collection 阶段失败,抛点 chunk-artifact.js:1848 validateTags(runner.config, ...)
+- [OK] 交叉验证确认与待提交改动无关:还原 vitest.config.ts、最小配置、--no-isolate、切换 threads/forks 均同样失败
+- [OK] node_modules/.vite/vitest 缓存显示 2026-07-08 起 vitest 4.1.9 下即为全量 failed,属长期问题
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 另开任务处理测试环境问题(vitest 4.1.9 + vite 8.1.1 + Node 24.16 + Windows),候选方案:降 vite 到 ^7 或 vitest 到 ^3
+- 其余 6 个 in_progress 任务(09-04、09-06、09-07 系列)待逐个 finish
