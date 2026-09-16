@@ -1,0 +1,29 @@
+{
+  "id": "coin-scan-equity-source",
+  "name": "coin-scan-equity-source",
+  "title": "选币扫描的美股数据源与休市污染",
+  "description": "选币模块要覆盖美股，但美股合约休市时无波动会被扫成收敛；决定换数据源还是修既有休市过滤",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "UsherFall",
+  "assignee": "UsherFall",
+  "createdAt": "2026-09-16",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-16-equity-yahoo-candles",
+    "09-16-scan-module-split"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -1,6 +1,6 @@
 import { defaultBinanceFetchJson, type FetchJson } from './http';
 import { BinanceInstrumentMetadataSource } from './binance-instrument-metadata';
-import { marketSession, type MarketClass } from '../domain/market-session';
+import type { MarketClass } from '../domain/market-class';
 import type { Ticker, TickerSource } from './market-data';
 
 /**
@@ -37,6 +37,13 @@ type BinanceTicker24hr = {
  * multiplies `volCcy24h * last`), and `priceChangePercent` is already a percent,
  * so no conversion is needed here.
  *
+ * Every classified symbol carries its `marketClass` (crypto/commodity included):
+ * consumers decide from it whether the instrument is in the scan pool
+ * (`scan-pool.ts`) and when its market is open (`market-session.ts`). An ABSENT
+ * class therefore means "the metadata could not be read", which is why the
+ * source also exposes `metadataAvailable()` — the scan surfaces that as a
+ * warning instead of silently losing session gating.
+ *
  * The full-market call costs 40 request weight on Binance, so the result is
  * cached briefly. Consumers share one source instance, and 24h volume/price
  * change move slowly enough that a 30s TTL never skews a scan — it just stops
@@ -47,10 +54,12 @@ const TICKER_TTL_MS = 30_000;
 export class BinanceTickerSource implements TickerSource {
   private cache: { at: number; tickers: Ticker[] } | null = null;
   private inflight: Promise<Ticker[]> | null = null;
+  /** Whether the last fetch could attach instrument classes. */
+  private metadataOk = true;
 
   constructor(
     private readonly fetchJson: FetchJson = defaultBinanceFetchJson,
-    /** Optional instrument-class metadata; absent = tickers carry no market class (ungated). */
+    /** Optional instrument-class metadata; absent = tickers carry no market class. */
     private readonly metadataSource: BinanceInstrumentMetadataSource | null = null,
   ) {}
 
@@ -70,11 +79,19 @@ export class BinanceTickerSource implements TickerSource {
     return this.inflight;
   }
 
+  /** False when the last listTickers() ran without instrument-class metadata. */
+  metadataAvailable(): boolean {
+    return this.metadataOk;
+  }
+
   private async fetchAndMap(): Promise<Ticker[]> {
     const [rawResponse, metadata] = await Promise.all([
       this.fetchJson('https://fapi.binance.com/fapi/v1/ticker/24hr'),
       this.metadataSource ? this.metadataSource.load() : Promise.resolve(new Map<string, MarketClass>()),
     ]);
+    // No metadata source wired, or the fetch degraded to an empty map: consumers
+    // lose session gating, so say so rather than pretending everything is crypto.
+    this.metadataOk = this.metadataSource !== null && metadata.size > 0;
     const response = rawResponse as BinanceTicker24hr[];
     if (!Array.isArray(response)) return [];
     return response
@@ -86,10 +103,8 @@ export class BinanceTickerSource implements TickerSource {
           lastPrice: Number(item.lastPrice),
           change24h: Number(item.priceChangePercent),
         };
-        // Only classes with an actual session spec (equities) need gating;
-        // crypto/commodity/pre-IPO stay ungated by leaving the field absent.
         const marketClass = metadata.get(item.symbol as string);
-        if (marketClass && marketSession(marketClass) !== null) ticker.marketClass = marketClass;
+        if (marketClass) ticker.marketClass = marketClass;
         return ticker;
       })
       .filter((ticker) => Number.isFinite(ticker.quoteVolume24h) && Number.isFinite(ticker.lastPrice) && Number.isFinite(ticker.change24h))

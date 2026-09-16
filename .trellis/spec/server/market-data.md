@@ -4,8 +4,9 @@
 
 `src/server/market-data.ts` defines the normalized contracts shared by the coin scan and the market-heat service, so those consumers stay data-source-agnostic:
 
-- `Ticker { instrument, quoteVolume24h, lastPrice, change24h, marketClass? }` — normalized ticker; `quoteVolume24h` is in USDT (each source computes it from its native payload), `change24h` is a percent. Optional `marketClass` (a `MarketClass` from `src/domain/market-session.ts`) marks contracts whose market can be closed; absent = ungated (crypto/commodity/pre-IPO, OKX, or metadata unavailable).
+- `Ticker { instrument, quoteVolume24h, lastPrice, change24h, marketClass? }` — normalized ticker; `quoteVolume24h` is in USDT (each source computes it from its native payload), `change24h` is a percent. Optional `marketClass` (a `MarketClass` from `src/domain/market-class.ts`) is the instrument's underlying-market class. **An ABSENT class means UNKNOWN, not "no session"**: consumers treat it as crypto-like (always open, always scannable), and a source that could not classify reports that through `metadataAvailable?()` so the scan can surface it (09/16).
 - `TickerSource.listTickers(): Promise<Ticker[]>` — full-market snapshot.
+- `TickerSource.metadataAvailable?(): boolean` — optional: whether the last snapshot could attach classes. `false` means session gating was effectively off for that snapshot.
 - `CandleRequest { instrument, timeframe, anchor, direction: 'earlier' | 'later', limit }` and `CandleSource.getCandlesticks(request): Promise<Candlestick[]>` — same contract as `CandlestickService`.
 
 `app-plugin.ts` wires the selected source via `marketDataSource` option (default `'binance'`) with `process.env.MARKET_DATA_SOURCE` as fallback:
@@ -98,7 +99,11 @@ OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins)
 
 ### Instrument-class metadata (Session Gating)
 
-`src/server/binance-instrument-metadata.ts` provides `BinanceInstrumentMetadataSource` (module-shared via `binanceInstrumentMetadata()`): it fetches `fapi/v1/exchangeInfo` once, maps `underlyingType` → `MarketClass` (`EQUITY`→`US_EQUITY`, `HK_EQUITY`/`KR_EQUITY`/`CN_EQUITY`, `COMMODITY`, `PREMARKET`→`PRE_IPO`, `COIN`/`INDEX`→`CRYPTO`, unknown → omitted), and returns a `symbol → MarketClass` map. TTL 6h + in-flight dedupe; any failure/non-array payload degrades to an EMPTY map (no gating), never an error. `BinanceTickerSource` attaches `marketClass` only for classes with a session spec (equities); the coin scan gates on it at the anchor instant using `isMarketOpen` from `src/domain/market-session.ts`. Coverage in `tests/binance-instrument-metadata.test.ts`.
+`src/server/binance-instrument-metadata.ts` provides `BinanceInstrumentMetadataSource` (module-shared via `binanceInstrumentMetadata()`): it fetches `fapi/v1/exchangeInfo` once, maps `underlyingType` → `MarketClass` (`EQUITY`→`US_EQUITY`, `HK_EQUITY`/`KR_EQUITY`/`CN_EQUITY`, `COMMODITY`, `PREMARKET`→`PRE_IPO`, `COIN`/`INDEX`→`CRYPTO`, unknown → omitted), and returns a `symbol → MarketClass` map. TTL 6h + in-flight dedupe; any failure/non-array payload degrades to an EMPTY map, never an error. Coverage in `tests/binance-instrument-metadata.test.ts`.
+
+`BinanceTickerSource` attaches `marketClass` for **every** classified symbol — crypto and commodity included (09/16), because the scan pool policy needs to see HK/CN/pre-IPO in order to exclude them. It also records whether the metadata was readable and exposes `metadataAvailable()`; the coin scan turns that into `ScanResponse.metadataUnavailable`. The coin scan then checks the anchor with `isMarketOpen` and drops untraded candles with `isCandleInSession` (both in `src/domain/market-session.ts`). Coverage in `tests/binance-tickers.test.ts`.
+
+`baseAsset` is intentionally NOT surfaced: the scan classifies by `underlyingType`, and the Yahoo-ticker alias design that briefly needed the upstream symbol was dropped in 09/16 (Yahoo's free chart API rate-limits after ~40 requests).
 
 Coverage is in `tests/binance-tickers.test.ts`.
 

@@ -177,6 +177,11 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: Coi
               已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
             </p>
           )}
+          {result.metadataUnavailable && (
+            <p className="coin-scan-skip-hint" title="币安 exchangeInfo 元数据不可用，本次未按交易时段过滤">
+              休市过滤未生效:合约类别元数据拉取失败，本次结果可能包含休市标的
+            </p>
+          )}
         </div>
       </header>
       <div className="coin-scan-table-wrap">

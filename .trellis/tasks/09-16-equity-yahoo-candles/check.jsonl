@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-16-coin-scan-equity-source/prd.md", "reason": "验收标准来源：池子策略、新鲜度剔除、Yahoo K 线真实性、加密/商品不变"}
+{"file": ".trellis/tasks/09-16-coin-scan-equity-source/design.md", "reason": "设计契约：策略表、Yahoo interval/range 映射、4H 聚合、新鲜度阈值、不写共享缓存"}
+{"file": ".trellis/tasks/09-16-coin-scan-equity-source/research/session-pollution-measurements.md", "reason": "核对实现是否与实测依据一致（Yahoo 响应形状、韩股别名已逐个核对 longName）"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "扫描池与响应契约（skippedInstruments、topN 顺序、anchor 可复现）必须保持"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "数据源接缝与缓存命名空间规则不得被打破（不可把 Yahoo bar 写进共享 candles 表）"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 domain 策略表 -> server 路由 -> UI 文案三层是否一致，且无残留 market-session 引用"}

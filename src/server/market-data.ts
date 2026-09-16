@@ -1,5 +1,5 @@
 import type { Candlestick } from '../domain/candlestick';
-import type { MarketClass } from '../domain/market-session';
+import type { MarketClass } from '../domain/market-class';
 import type { ReviewTimeframe } from '../domain/trade';
 
 /**
@@ -17,14 +17,24 @@ export type Ticker = {
   lastPrice: number;
   change24h: number;
   /**
-   * Market class of the contract. Absent = ungated: always-open classes
-   * (crypto/commodity/pre-IPO), the OKX source, or Binance metadata unavailable.
+   * Class of the underlying market, from the exchange's instrument metadata.
+   * ABSENT means the class is UNKNOWN — not "no session": consumers treat an
+   * unknown class as always-open (crypto-like), which is the pre-09/16
+   * behaviour. A source without metadata (OKX) therefore leaves it unset, and
+   * so does a Binance metadata outage — which is why sources report that state
+   * through `metadataAvailable()` instead of letting it pass silently.
    */
   marketClass?: MarketClass;
 };
 
 export interface TickerSource {
   listTickers(): Promise<Ticker[]>;
+  /**
+   * Whether the last `listTickers()` could attach `marketClass` values.
+   * Optional: sources that never classify instruments omit it. `false` means
+   * session gating was effectively off for that snapshot.
+   */
+  metadataAvailable?(): boolean;
 }
 
 export type CandleRequest = {

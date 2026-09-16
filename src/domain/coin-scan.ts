@@ -113,8 +113,17 @@ export type ScanResponse = {
    * Instruments excluded because their underlying market was closed at the scan
    * anchor (filtered after the 24h-volume gate and before the topN slice, so
    * they never occupy a topN slot). Present only when at least one was skipped.
+   * Classes outside the scan pool (see `scan-pool.ts`) are NOT listed: they are
+   * a pool definition, not a per-scan omission.
    */
   skippedInstruments?: string[];
+  /**
+   * True when the ticker snapshot carried no instrument classes at all, so
+   * session gating was effectively OFF for this scan. Present only when that
+   * happened — it is the one failure mode that silently lets closed-market
+   * contracts back into the results.
+   */
+  metadataUnavailable?: boolean;
 };
 
 /** Minimum band length (in K bars) for a volatility convergence. */

@@ -59,7 +59,7 @@ describe('BinanceTickerSource', () => {
     expect(tickers).toEqual([]);
   });
 
-  it('attaches marketClass for gated equity symbols from the metadata source', async () => {
+  it('attaches marketClass for every classified symbol from the metadata source', async () => {
     const tickerFetch = vi.fn(async () => [
       ...tickerResponse,
       { symbol: 'NVDAUSDT', lastPrice: '200', openPrice: '199', priceChangePercent: '0.5', quoteVolume: '8000000000' },
@@ -77,14 +77,17 @@ describe('BinanceTickerSource', () => {
 
     const nvda = tickers.find((ticker) => ticker.instrument === 'NVDAUSDT');
     expect(nvda?.marketClass).toBe('US_EQUITY');
-    // Crypto/commodity stay ungated (field absent).
     const btc = tickers.find((ticker) => ticker.instrument === 'BTCUSDT');
-    expect(btc?.marketClass).toBeUndefined();
+    expect(btc?.marketClass).toBe('CRYPTO');
     const xau = tickers.find((ticker) => ticker.instrument === 'XAUUSDT');
-    expect(xau?.marketClass).toBeUndefined();
+    expect(xau?.marketClass).toBe('COMMODITY');
+    // PAXG is not in the metadata payload, so its class stays unknown.
+    const paxg = tickers.find((ticker) => ticker.instrument === 'PAXGUSDT');
+    expect(paxg?.marketClass).toBeUndefined();
+    expect(source.metadataAvailable()).toBe(true);
   });
 
-  it('keeps tickers ungated when metadata is unavailable', async () => {
+  it('leaves classes unknown and reports it when metadata is unavailable', async () => {
     const tickerFetch = vi.fn(async () => [
       { symbol: 'NVDAUSDT', lastPrice: '200', openPrice: '199', priceChangePercent: '0.5', quoteVolume: '8000000000' },
     ]);
@@ -97,14 +100,16 @@ describe('BinanceTickerSource', () => {
 
     expect(tickers).toHaveLength(1);
     expect(tickers[0].marketClass).toBeUndefined();
+    expect(source.metadataAvailable()).toBe(false);
   });
 
-  it('keeps tickers ungated when no metadata source is wired', async () => {
+  it('reports metadata as unavailable when no metadata source is wired', async () => {
     const fetchJson = vi.fn(async () => tickerResponse);
     const source = new BinanceTickerSource(fetchJson);
 
     const tickers = await source.listTickers();
 
     expect(tickers[0].marketClass).toBeUndefined();
+    expect(source.metadataAvailable()).toBe(false);
   });
 });

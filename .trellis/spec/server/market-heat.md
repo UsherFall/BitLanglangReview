@@ -18,7 +18,7 @@ Covers `src/domain/market-heat.ts` (pure types/tier/normalizer/constants), `src/
 
 - `anchor`: epoch ms of the trade's entry (default) or exit time. Required, `> 0`; else 400.
 - `instrument`: the review symbol as shown (OKX `BTC-USDT-SWAP` or Bitget/Binance `BTCUSDT`). Required; else 400.
-- Pool: Binance USDT-M top-N by 24h quote volume **after** session gating (`isMarketOpen(marketClass, anchor)`, same as coin scan), plus the reviewed coin force-included by base-asset normalization.
+- Pool: Binance USDT-M top-N by 24h quote volume **after** the scan pool policy (`isScannable`, so HK/A-share/pre-IPO classes are not part of the 场子 reading) and session gating (`isMarketOpen(marketClass, anchor)`, same as coin scan), plus the reviewed coin force-included by base-asset normalization.
 - Stats: `poolSize` = number of instruments actually requested (pool ∪ review coin); `coveredCount` excludes no-data members (history shorter than the 24h window); `medianChangePct` over covered changes; `up/down/volatileCount` (|change| ≥ `VOLATILE_THRESHOLD_PCT`).
 - Boards: strictly-up coins sorted desc / strictly-down asc, `HEAT_MOVERS_LIMIT` each. Rows are **copies** — never mutate the cached row's `isReviewCoin`.
 - `reviewCoin`: the reviewed coin's row copy with `isReviewCoin: true`, or null (no data / unmapped).
@@ -57,7 +57,7 @@ Zero covered coins → `neutral` (no reading), never `cool`.
 ## 6. Tests Required
 
 - `tests/market-heat.test.ts` — pure: 5-tier boundaries (exact thresholds `>=`; breadth-vs-magnitude partial → warm/cool), neutral split, normalizer (OKX `-USDT-SWAP` → Binance name, Bitget passthrough, unmappable → null).
-- `tests/market-heat-service.test.ts` — service with fake sources: hot classification & boards, session gating (closed member neither requested nor counted), no-data skip, forced review coin flagged (with small `poolTopN`), unmapped review symbol, **same-anchor memo = zero refetch**, warnings surfaced.
+- `tests/market-heat-service.test.ts` — service with fake sources: hot classification & boards, session gating (closed member neither requested nor counted), **pool policy (an HK/A-share/pre-IPO member is excluded without being counted as closed)**, no-data skip, forced review coin flagged (with small `poolTopN`), unmapped review symbol, **same-anchor memo = zero refetch**, warnings surfaced.
 - `tests/market-heat-panel.test.tsx` — UI: renders tier/numbers/boards + review marker + skip summary for entry anchor; switching to 离场 refetches with the exit anchor; 502 shows the error without a tier.
 
 ## 7. Wrong vs Correct

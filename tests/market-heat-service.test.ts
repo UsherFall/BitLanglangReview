@@ -111,6 +111,24 @@ describe('MarketHeatService.computeHeat', () => {
     expect(result.tier).toBe('warm');
   });
 
+  it('keeps out-of-scope classes out of the pool without counting them as closed', async () => {
+    // Hong Kong / A-share / pre-IPO instruments are not part of the scan pool, so
+    // they are not part of the 场子 reading either — and they are a pool
+    // definition, not a session skip.
+    const tickers = [
+      ticker('BTCUSDT', 1e9),
+      ticker('HK0700USDT', 3e9, 'HK_EQUITY'),
+      ticker('CXMTUSDT', 2.5e9, 'CN_EQUITY'),
+      ticker('OPENAIUSDT', 2e9, 'PRE_IPO'),
+    ];
+    const { service, getCandlesticks } = buildService({ tickers, changes: { BTCUSDT: 1 } });
+    const result = await service.computeHeat({ anchor: ANCHOR, poolTopN: 10 });
+
+    expect(result.skipped.closedCount).toBe(0);
+    expect(result.stats.poolSize).toBe(1);
+    expect(getCandlesticks.mock.calls.map(([call]) => call.instrument)).toEqual(['BTCUSDT']);
+  });
+
   it('drops the anchor bar instead of degrading the instrument to no-data', async () => {
     const tickers = [ticker('BTCUSDT', 1e9)];
     // The source now hands back the anchor's own bar (OKX always did; Binance

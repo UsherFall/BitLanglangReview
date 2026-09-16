@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选币扫描的池子、参数与响应契约，新增 scope 参数与默认值表前必读"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "/api/scan 的参数解析与 400 约定，新增 scope 校验前必读"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "选品子模块状态由 App 持有、切 scope 清结果的约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "复用既有页签/按钮样式，不新增设计语言"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "scope 贯穿 UI -> /api/scan -> 服务池子过滤三层，需按跨层契约核对"}
+{"file": ".trellis/tasks/09-16-scan-module-split/prd.md", "reason": "本任务需求与验收标准（含 method x scope 合法矩阵与默认值表）"}
+{"file": ".trellis/tasks/09-16-equity-yahoo-candles/design.md", "reason": "依赖：isScannable 池子策略、Ticker.marketClass 语义、时段表与会话序列契约"}
+{"file": ".trellis/tasks/09-16-coin-scan-equity-source/research/session-pollution-measurements.md", "reason": "实测依据：混合池 19/60 名额被 TradFi 占用、结果列表不联动图表"}

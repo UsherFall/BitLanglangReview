@@ -390,3 +390,73 @@ describe('CoinScanService (session gating: skip closed traditional markets)', ()
     expect(result.skippedInstruments).toBeUndefined();
   });
 });
+
+describe('CoinScanService (session-only candle series)', () => {
+  /** Only 5m converges, so every other timeframe can never produce a row. */
+  const onlyFiveMinuteConverges = (timeframe: ReviewTimeframe) => (timeframe === '5m' ? 'strong' : 'uptrend');
+
+  it('never lets closed-market candles reach the detector (same data, equity vs crypto)', async () => {
+    // Monday 2026-03-09 04:01 EDT — one minute after the pre-market open, so the
+    // equity IS in the pool, while the whole 5m fixture (01:25-04:00 ET) sits in
+    // the overnight window where it does not trade. Only 5m can converge, so the
+    // farther-back in-session bars of the longer timeframes cannot mask the effect.
+    const anchor = Date.UTC(2026, 2, 9, 8, 1);
+    const tsla: Ticker = { instrument: 'TSLAUSDT', quoteVolume24h: 900_000_000, lastPrice: 100, change24h: 1, marketClass: 'US_EQUITY' };
+    const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
+    const getCandlesticks = vi.fn(async ({ timeframe, anchor: at }: CandleRequest) =>
+      candlesAt(at, timeframe, onlyFiveMinuteConverges(timeframe) === 'strong' ? strongBars : uptrendBars),
+    );
+    const service = new CoinScanService({ listTickers: vi.fn(async () => [tsla, btc]) }, { getCandlesticks });
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor });
+
+    // The identical candle series converges for crypto and yields nothing for the
+    // equity once the untraded stretch is dropped before the detector runs.
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
+    expect(result.skippedInstruments).toBeUndefined();
+  });
+
+  it('requests a wider raw window for session-gated instruments', async () => {
+    const anchor = Date.UTC(2026, 2, 9, 15, 0); // Monday 11:00 EDT, mid-session
+    const tsla: Ticker = { instrument: 'TSLAUSDT', quoteVolume24h: 900_000_000, lastPrice: 100, change24h: 1, marketClass: 'US_EQUITY' };
+    const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
+    const getCandlesticks = vi.fn(async ({ timeframe, anchor: at }: CandleRequest) =>
+      candlesAt(at, timeframe, strongBars),
+    );
+    const service = new CoinScanService({ listTickers: vi.fn(async () => [tsla, btc]) }, { getCandlesticks });
+
+    await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor });
+
+    const limitsFor = (instrument: string) => [
+      ...new Set(getCandlesticks.mock.calls.filter(([request]) => request.instrument === instrument).map(([request]) => request.limit)),
+    ];
+    // 2x for the gated class (dropped closed-market bars are paid for up front),
+    // unchanged for the 24/7 class.
+    expect(limitsFor('TSLAUSDT')).toEqual([200]);
+    expect(limitsFor('BTCUSDT')).toEqual([100]);
+  });
+
+  it('flags the response when the ticker snapshot carried no instrument classes', async () => {
+    const listTickers = vi.fn(async () => tickers);
+    const getCandlesticks = vi.fn(async ({ timeframe, anchor }: CandleRequest) => candlesAt(anchor, timeframe, strongBars));
+    const degraded = new CoinScanService({ listTickers, metadataAvailable: () => false }, { getCandlesticks });
+
+    const result = await degraded.scanShrink(params);
+
+    // Without classes nothing is session-gated, so closed contracts would be
+    // judged as crypto — the caller must be able to see that.
+    expect(result.metadataUnavailable).toBe(true);
+  });
+
+  it('omits the metadata flag when classes are available', async () => {
+    const source = buildSource(allStrongPlan);
+    const service = new CoinScanService(
+      { listTickers: source.listTickers, metadataAvailable: () => true },
+      { getCandlesticks: source.getCandlesticks },
+    );
+
+    const result = await service.scanShrink(params);
+
+    expect(result.metadataUnavailable).toBeUndefined();
+  });
+});

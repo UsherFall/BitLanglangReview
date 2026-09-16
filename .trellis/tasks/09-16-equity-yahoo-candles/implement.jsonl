@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "纯 domain 层约定，新增 equity-symbol.ts / equity-freshness.ts / market-class.ts 前必读"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "数据源契约、缓存命名空间规则（candles 主键无 source 列）与 Binance earlier 语义，新增 Yahoo CandleSource 前必读"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选币扫描流水线与池子约定，重排 scanShrink 顺序、改 skippedInstruments 语义前必读"}
+{"file": ".trellis/spec/server/market-heat.md", "reason": "热度池同样调用 isMarketOpen，删除 market-session.ts 前必须处理该调用点"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "改动跨越 domain/server/UI 三层（策略表、路由、文案），需按跨层契约核对"}
+{"file": ".trellis/tasks/09-16-coin-scan-equity-source/research/session-pollution-measurements.md", "reason": "本任务全部实测依据：Yahoo 契约与元数据、休市污染量化、K 线重组配对结论、集成面（结果列表不渲染图表）"}
+{"file": ".trellis/tasks/09-04-coin-scan-skip-closed-markets/prd.md", "reason": "被取代的既有契约：休市剔除在 volume 门槛之后、slice 之前，skippedInstruments 回传，历史 anchor 可复现"}

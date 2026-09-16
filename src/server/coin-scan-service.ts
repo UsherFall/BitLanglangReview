@@ -7,8 +7,10 @@ import {
   type ShrinkScanParams,
   type StructureResult,
 } from '../domain/coin-scan';
+import { isCandleInSession, isMarketOpen, marketSession } from '../domain/market-session';
+import type { MarketClass } from '../domain/market-class';
+import { isScannable } from '../domain/scan-pool';
 import type { ReviewTimeframe } from '../domain/trade';
-import { isMarketOpen } from '../domain/market-session';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, Ticker, TickerSource } from './market-data';
 import { binanceRateGate, type RateGate } from './http';
@@ -24,9 +26,25 @@ const SCAN_CONCURRENCY = 5;
  */
 const SCAN_WINDOW = 100;
 
+/**
+ * Raw-candle window for session-gated instruments, which are the only ones whose
+ * candles get filtered: closed-market stretches (overnight, weekends, holidays)
+ * are dropped before the detector runs, so ~2× the raw bars are needed to end up
+ * with `SCAN_WINDOW` tradable ones. Measured density for US equities is 16h of
+ * session per 24h weekday (67%), and 0% across a weekend — 2× keeps a normal
+ * weekday at a full window and a Monday-morning window at ~2/3 of it, while
+ * staying inside Binance's cheapest klines weight band (< 500 → weight 2).
+ */
+const GATED_SCAN_WINDOW = SCAN_WINDOW * 2;
+
 /** Neutral placeholders for a timeframe with no convergence structure. */
 function neutralStructure(): StructureResult {
   return { structure: null, position: 0, score: 0, touchCount: 0, qualified: false };
+}
+
+/** Raw candles to request for one instrument: gated classes pay for the dropped bars. */
+function scanWindowFor(marketClass: MarketClass | undefined): number {
+  return marketClass !== undefined && marketSession(marketClass) !== null ? GATED_SCAN_WINDOW : SCAN_WINDOW;
 }
 
 export class CoinScanService {
@@ -49,14 +67,16 @@ export class CoinScanService {
     this.rateLimitWarnings.takeWarnings();
     const tickers = await this.tickerSource.listTickers();
     const anchor = params.anchor ?? Date.now();
-    // Order: 24h-volume threshold → closed-market exclusion → topN slice. A
-    // closed TradFi contract must NOT occupy a topN slot (it would otherwise
-    // crowd out a live crypto/commodity and burn its topN×5 klines budget).
+    // Order: 24h-volume threshold → pool policy → closed-market exclusion → topN
+    // slice. A closed instrument must NOT occupy a topN slot (it would otherwise
+    // crowd out a live one and burn its topN×5 klines budget), and the same goes
+    // for classes the scan does not cover at all.
     const pooled = tickers.filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h);
     const open: Ticker[] = [];
     const skippedInstruments: string[] = [];
     for (const ticker of pooled) {
-      // Absent marketClass (OKX, metadata down, ungated class) => CRYPTO => always open.
+      // Absent marketClass (OKX, metadata down, unclassified) => crypto => scannable and always open.
+      if (!isScannable(ticker.marketClass)) continue;
       if (isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor)) open.push(ticker);
       else skippedInstruments.push(ticker.instrument);
     }
@@ -73,6 +93,7 @@ export class CoinScanService {
       scanTimeframes.map((timeframe) => ({ ticker, timeframe })),
     );
     const results = await mapLimit(tasks, SCAN_CONCURRENCY, async ({ ticker, timeframe }) => {
+      const step = timeframeMs(timeframe);
       // Request starts are paced globally in `defaultBinanceFetchJson`, so the
       // whole scan shares the Binance rate budget with every other caller.
       const candles = await this.candleSource.getCandlesticks({
@@ -80,17 +101,22 @@ export class CoinScanService {
         timeframe,
         anchor,
         direction: 'earlier',
-        limit: SCAN_WINDOW,
+        limit: scanWindowFor(ticker.marketClass),
         // Fresh bars on every 扫描 click: bypass the shared candle cache freshness
         // gate and update the local cache (user decision).
         refresh: params.anchor === undefined,
       });
-      // Drop the still-forming bar by time (timestamp + step > anchor). The
-      // candle cache may or may not contain the forming bar, so slicing the
-      // newest element unconditionally would wrongly drop the newest COMPLETED
-      // bar. The anchor applies to every timeframe, so a historical scan sees
-      // each timeframe's bars as of that instant.
-      const completed = candles.filter((candle) => candle.timestamp + timeframeMs(timeframe) <= anchor);
+      const marketClass = ticker.marketClass ?? 'CRYPTO';
+      // Two independent filters, both needed:
+      // - drop the still-forming bar by time (the cache may or may not hold it,
+      //   so slicing the newest element unconditionally would wrongly drop the
+      //   newest COMPLETED bar);
+      // - keep only candles that contain real trading time, so a closed-market
+      //   stretch can never read as a quiet 蓄力 band. Ungated classes (crypto,
+      //   commodity) trade around the clock and lose nothing.
+      const completed = candles.filter(
+        (candle) => candle.timestamp + step <= anchor && isCandleInSession(marketClass, candle.timestamp, step),
+      );
       const structure = probeStructure(completed, structureParams);
       return { ticker, timeframe, structure };
     });
@@ -136,6 +162,10 @@ export class CoinScanService {
       params: echoedParams,
       scannedAt: new Date().toISOString(),
     };
+    // A degraded metadata snapshot means NO instrument carried a class, so every
+    // closed equity contract was judged as if it were crypto. Say so: this is the
+    // one failure mode that silently brings the closed-market pollution back.
+    if (this.tickerSource.metadataAvailable?.() === false) response.metadataUnavailable = true;
     // Surface any rate-limit backoffs the scan hit (Binance 429) — a scan can
     // still succeed while the pipeline had to pause for the weight window.
     const warnings = this.rateLimitWarnings.takeWarnings();

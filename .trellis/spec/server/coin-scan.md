@@ -2,7 +2,9 @@
 
 ## 1. Scope / Trigger
 
-The 选币 (Coin Scan) module finds instruments by pluggable scan methods. V1 ships only the **shrink** (收敛结构) method; 09/08 adds the **heat** (热度) method, which returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`). It scans a parameterized universe of **Binance USDT-M perpetuals** by default (switchable to OKX SWAP via `MARKET_DATA_SOURCE=okx`) and detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source (all USDT-M perpetuals above the `minQuoteVolume24h` floor, taking the top `topN`).
+The 选币 (Coin Scan) module finds instruments by pluggable scan methods. V1 ships only the **shrink** (收敛结构) method; 09/08 adds the **heat** (热度) method, which returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`). It scans a parameterized universe of **Binance USDT-M perpetuals** by default (switchable to OKX SWAP via `MARKET_DATA_SOURCE=okx`) and detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source (all USDT-M perpetuals above the `minQuoteVolume24h` floor, taking the top `topN`) after two filters: the **scan pool policy** (which classes are covered at all) and **session gating** (which instruments are open at the anchor).
+
+**Candle series is session-only** (09/16): for a session-gated instrument the detector never sees candles that contain no trading time — closed-market stretches are dropped from the series before `probeStructure` runs, and 2× the raw window is requested to compensate. Ungated classes (crypto, commodity) keep every candle. See "Design Decisions".
 
 **The fractal triangle module was removed** (8/13, user decision): swing detection, backscan, and geometry classification are gone. The scan is purely volatility-driven — there is only one structure kind, `'convergence'`. A rising/falling TREND is rejected by the band's flatness gate, not by a separate triangle detector.
 
@@ -63,7 +65,8 @@ type ScanResponse = {
   qualifiedCount: number;        // = scanned.length
   params: ShrinkScanParams;      // echoes effective params, including resolved anchor
   scannedAt: string;             // ISO
-  skippedInstruments?: string[]; // closed-market contracts excluded before topN (present only when non-empty)
+  skippedInstruments?: string[]; // closed-market instruments excluded before topN (present only when non-empty; pool-policy exclusions are NOT listed)
+  metadataUnavailable?: boolean; // present only when the ticker snapshot carried no instrument classes => gating was off
 };
 ```
 
@@ -106,7 +109,8 @@ scanShrink(params):
   tickers = tickerSource.listTickers()
   anchor = params.anchor ?? Date.now()
   pooled = filter(quoteVolume24h >= minQuoteVolume24h)
-  for ticker in pooled:                                  // session gating (09/06)
+  for ticker in pooled:                                  // pool policy (09/16) + session gating (09/06)
+    if not isScannable(ticker.marketClass): continue     // HK/CN/pre-IPO: not in the universe, not a skip
     if isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor): open.push(ticker)
     else skippedInstruments.push(ticker.instrument)
   top = open.slice(0, topN)                              // closed markets never occupy a topN slot
@@ -115,8 +119,11 @@ scanShrink(params):
   results = mapLimit(tasks, concurrency 5, ({ticker, timeframe}) => {
     // Request starts are paced GLOBALLY in `defaultBinanceFetchJson` (~9 req/s),
     // shared with every other Binance caller; the scan no longer paces itself.
-    candles = candleSource.getCandlesticks({ instrument, timeframe, anchor, direction: 'earlier', limit: SCAN_WINDOW, refresh: anchor === undefined })
-    completed = candles.filter(c => c.timestamp + timeframeMs(timeframe) <= anchor)   // drop forming bar by time
+    step = timeframeMs(timeframe)
+    limit = session-gated ? 2 × SCAN_WINDOW : SCAN_WINDOW
+    candles = candleSource.getCandlesticks({ instrument, timeframe, anchor, direction: 'earlier', limit, refresh: anchor === undefined })
+    completed = candles.filter(c => c.timestamp + step <= anchor            // drop forming bar by time
+                              && isCandleInSession(marketClass, c.timestamp, step)) // drop untraded candles
     return probeStructure(completed, defaultStructureParams())
   })
   for coin in top:
@@ -125,11 +132,15 @@ scanShrink(params):
     if converged.length == 0: continue        // 宁少勿滥
     rows.push({ ..., structures, convergedTimeframes, qualifiedCount, bestScore: max(converged.score) })
   rows.sort(qualifiedCount desc, bestScore desc)   // score larger = stronger
-  return { scanned: rows, qualifiedCount: rows.length, params: { ...params, anchor }, scannedAt }
+  if tickerSource.metadataAvailable?.() === false: response.metadataUnavailable = true
+  return { scanned: rows, qualifiedCount: rows.length, params: { ...params, anchor }, scannedAt, ... }
 ```
 
-- **Uniform candle window**: `SCAN_WINDOW = 100` bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The detector needs a band + a same-length preceding stretch, so the window holds both.
-- **Session gating** (09/06): instruments whose underlying **Market Session** is closed at `anchor` are dropped AFTER the 24h-volume gate and BEFORE the `topN` slice, so a closed TradFi contract never consumes a topN slot nor fires klines requests. Class comes from the ticker's optional `marketClass` (Binance `exchangeInfo` metadata, TTL-cached; absent = ungated). Metadata outage degrades to no gating (scan runs unfiltered). Skipped symbols are echoed as `skippedInstruments` (present only when non-empty) and shown in the UI as 「已跳过 N 个休市标的」. Pure session math lives in `src/domain/market-session.ts` (only `EQUITY`/`HK_EQUITY`/`KR_EQUITY`/`CN_EQUITY` are gated; crypto/commodity/pre-IPO never close).
+- **Uniform candle window**: `SCAN_WINDOW = 100` **tradable** bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The detector needs a band + a same-length preceding stretch, so the window holds both. Session-gated instruments request `2 × SCAN_WINDOW` RAW bars because the untraded ones are dropped — 2× keeps a weekday window full and a Monday-morning window ~2/3 full, while staying in Binance's cheapest klines weight band (`< 500` → weight 2). Cover this with a test that asserts the requested `limit` per class.
+- **Scan pool policy** (09/16): `isScannable(marketClass)` in `src/domain/scan-pool.ts` decides the universe — crypto / indices / commodities / US equities / Korean equities are IN; HK equities, A-shares and pre-IPO are OUT (no trustworthy session, and pre-IPO has no underlying market at all). Symbols outside the policy are **not** reported in `skippedInstruments`; they are a pool definition, not a per-scan skip. An absent class stays IN the pool so a metadata outage cannot empty a scan.
+- **Session gating** (09/06, widened 09/16): instruments whose underlying **Market Session** is closed at `anchor` are dropped AFTER the 24h-volume gate and BEFORE the `topN` slice, so a closed **TradFi Instrument** never consumes a topN slot nor fires klines requests. Class comes from the ticker's optional `marketClass` (Binance `exchangeInfo` metadata, TTL-cached). The US window is **04:00–20:00 ET** (pre-market + regular + after-hours; the thin overnight session is treated as closed). Skipped symbols are echoed as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. Pure session math lives in `src/domain/market-session.ts`.
+- **Session-only series** (09/16): `isCandleInSession(marketClass, open, barMs)` keeps a candle only when part of its span falls inside a session window. Ungated classes short-circuit to `true`. The span test (not an "open time inside the window" test) is what makes the UTC-aligned **daily** candles work: Binance daily candles open at 20:00 ET, so an open-time test would drop every one of them, while a span test keeps exactly the days containing a session and drops weekends and holidays.
+- **Metadata degradation is visible** (09/16): `BinanceTickerSource.metadataAvailable()` reports whether the last snapshot attached classes; when it did not, the response carries `metadataUnavailable` and the UI states that closed-market filtering was off. A silent outage would judge closed equity contracts as crypto.
 - The forming bar is dropped **by time** (`timestamp + timeframeMs(timeframe) <= anchor`). Do not `slice(0, -1)` unconditionally — the candle cache may contain no forming bar.
 - **Concurrency**: 5 in-flight candle fetches (mapLimit-style). Binance request *starts* are paced by the SHARED `binanceRatePacer` (`src/server/http.ts`, `BINANCE_MIN_INTERVAL_MS=110`, jitter 15ms → ~9 req/s) inside `defaultBinanceFetchJson`, so the whole pipeline — one click = 300 forced-fresh klines requests (topN 60 × 5 timeframes) plus any concurrent market-heat fetch — shares a single rate budget well under Binance's IP auto-ban (418) threshold. 50ms/20 req/s (the old per-scan pacer) still tripped 418 occasionally; 110ms is the agreed conservative ceiling (09/07, user decision; scan latency ~15s → ~33s). OKX-path scans are not paced by this budget.
 - **Sorting** is done by the service: `qualifiedCount` descending (cross-timeframe consistency is a stronger signal), then `bestScore` descending.
@@ -164,7 +175,9 @@ scanShrink(params):
   - `detectConvergence`: band quieter than preceding → convergence ≥0.7; uniformly calm → null; short mild band → <0.7; breakout rejected (containment); too few bars → null; non-positive price → null; crash-then-pause detected (known consequence); mild shrink (band ≈ 60% of preceding) → <0.7; stricter `convergenceRatio` filters more.
   - `probeStructure`: forwards to the convergence detector; trending channel → null.
   - defaults: constants + `defaultStructureParams` fills all thresholds.
-- `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, sort `qualifiedCount desc → bestScore desc`, `minScore` gate (0.5 admits weak, 0.7 filters it), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty.
+- `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, sort `qualifiedCount desc → bestScore desc`, `minScore` gate (0.5 admits weak, 0.7 filters it), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty. Plus the 09/16 blocks: session gating (closed equity dropped, kept out of topN, candles never requested; historical weekend anchor behaves the same), **session-only series** (identical candle fixture converges for crypto and yields nothing for an equity whose only bars sit in the closed overnight window), **per-class window** (gated class requests `limit` 200, ungated 100), and **`metadataUnavailable`** (present only when the ticker source reports no classes).
+- `tests/market-session.test.ts` — session math: the 04:00–20:00 US window incl. the DST switch, weekends, NYSE holidays/early closes, HK/KR/CN windows, ungated classes, the current-year coverage assertion, and `isCandleInSession` (edge candles that only partly overlap, the UTC-aligned daily candles that would all be dropped by an open-time test, and ungated classes that never lose a candle).
+- `tests/scan-pool.test.ts` — `isScannable`: crypto/commodity/US/KR in; HK/CN/pre-IPO out; unclassified in.
 - `tests/binance-candles.test.ts` — cache freshness: a stale "now" cache is refreshed; a fresh "now" cache is reused; a historical anchor always reuses the cache.
 
 ## 7. Wrong vs Correct
@@ -203,6 +216,12 @@ No `coinVol` "typical volatility" and no absolute thresholds: every measure is a
 
 The band must be a quiet horizontal band (edge drift ≤ 2× its own noise). Beyond rejecting trends, this also rejects the wide post-dump bands (CBRS 大跌后喘息) whose edges drift too much — so the pure band-vs-preceding rule does not flood the scan with crash-aftermaths.
 
-### Session gating: skip closed traditional-market contracts (09/06)
+### Session gating + session-only series: keep closed markets out of the scan (09/06, reworked 09/16)
 
-Binance USDT-M lists 191 TradFi perpetuals (US/HK/KR/CN equities + commodities + pre-IPO). They print 24/7 candlesticks that simply go quiet when the underlying exchange is closed, so a volatility-shrink scan would otherwise flag a closed market as "extremely converged" — the result list filling with dormant NVDA/TSLA-style contracts. Gate order is 成交额门槛 → 休市剔除 → topN (a closed contract must not steal a slot or burn klines budget). The domain is pure (`market-session.ts`): IANA-timezone windows + built-in NYSE holiday/early-close tables (maintained yearly, coverage asserted in tests), no calendar npm dependency. Commodities/pre-IPO are intentionally ungated (XAU trades 24/7 with real volume). The market-heat module applies the same gate at the review anchor (see `market-heat.md`).
+Binance USDT-M lists 191 TradFi perpetuals (US/HK/KR/CN equities + commodities + pre-IPO). They print 24/7 candlesticks that simply go quiet when the underlying exchange is closed, so a volatility-shrink scan would otherwise flag a closed market as "extremely converged" — the result list filling with dormant NVDA/TSLA-style contracts. Gate order is 成交额门槛 → 池子策略 → 休市剔除 → topN (a closed contract must not steal a slot or burn klines budget). The domain is pure (`market-session.ts`): IANA-timezone windows + built-in NYSE holiday/early-close tables (maintained yearly, coverage asserted in tests), no calendar npm dependency. The market-heat module applies the same pool policy and gate (see `market-heat.md`).
+
+09/16 rework, all measured (`09-16-coin-scan-equity-source/research/session-pollution-measurements.md`):
+
+- **US window widened to 04:00–20:00 ET** — pre-market included. Measured: the 04:00 ET hour carries the highest non-regular volatility (MUUSDT median 5m range 0.222%, 3–4× the 17:00–19:00 ET trough), so the old 09:30–16:00 window was discarding the liveliest extended-session hour. The 20:00–04:00 overnight session stays closed.
+- **Session-only series added** — a closed stretch must not be *measurable*, not merely *unlisted*. Measured on 1H: dropping untraded candles removes ~96 windows whose "convergence" was an artifact of the closed stretch, at the cost of changing the verdict on others (the relative band-vs-preceding test reads differently once both sides hold only traded bars). On 5m the filter is a no-op (the window rarely spans a closure).
+- **Why a calendar and not a smarter source** (all verified): Yahoo's free chart API is the only free source covering US + Korean equities with pre/post bars, and it rate-limits after ~40 requests (429 for >15 min). Binance Stocks' real-session equity K-lines exist **only** as a live WebSocket feed (`{symbol}@kline_5m`, public) with no REST history and no 15m/4h; Binance equity perps are 24/5 in reality (only weekends collapse to 1–2% of peak volume, a US holiday keeps ~half), so "closed" cannot be derived from the data. Hong Kong / A-share / pre-IPO instruments are therefore out of the pool rather than guessed at.

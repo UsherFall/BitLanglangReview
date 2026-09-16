@@ -1,17 +1,24 @@
 import { defaultBinanceFetchJson, type FetchJson } from './http';
-import type { MarketClass } from '../domain/market-session';
+import type { MarketClass } from '../domain/market-class';
 
 /**
- * Binance USDT-M instrument-class metadata from `fapi/v1/exchangeInfo`.
+ * Binance USDT-M instrument metadata from `fapi/v1/exchangeInfo`.
  * Binance marks TradFi perpetuals with `underlyingType` (EQUITY / HK_EQUITY /
  * KR_EQUITY / CN_EQUITY / COMMODITY / PREMARKET) but exposes no trading-session
- * calendar — so this source provides the class, and `src/domain/market-session.ts`
- * decides whether that class is in session at scan time.
+ * calendar — so this source provides the CLASS, and `src/domain/market-session.ts`
+ * decides when that class is open.
  *
  * The full exchangeInfo payload is ~1.1MB and ignores `?symbol=`, so it is
  * fetched whole and cached long (6h TTL + in-flight dedupe). Any failure or a
- * non-array response degrades to an EMPTY map: callers treat an absent class as
- * ungated, so a metadata outage never breaks or narrows a scan.
+ * non-array response degrades to an EMPTY map: an absent class means "not a
+ * TradFi contract" to every consumer, which is the pre-09/16 behaviour. That
+ * degradation is visible rather than silent — the scan reports it
+ * (`ScanResponse.metadataUnavailable`), because an outage would otherwise let
+ * closed equity contracts back into the pool unnoticed.
+ *
+ * `baseAsset` is deliberately NOT surfaced: the scan classifies instruments by
+ * `underlyingType`, and nothing downstream needs the upstream ticker (the
+ * Yahoo-alias design that needed it was dropped in 09/16).
  */
 const EXCHANGE_INFO_URL = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
 const METADATA_TTL_MS = 6 * 60 * 60 * 1000;
@@ -19,7 +26,7 @@ const METADATA_TTL_MS = 6 * 60 * 60 * 1000;
 type BinanceSymbolMeta = { symbol?: string; underlyingType?: string };
 type BinanceExchangeInfo = { symbols?: BinanceSymbolMeta[] };
 
-/** Binance `underlyingType` -> domain `MarketClass`; unknown/missing -> null (ungated). */
+/** Binance `underlyingType` -> domain `MarketClass`; unknown/missing -> null (unclassified). */
 function mapUnderlyingType(underlyingType: string | undefined): MarketClass | null {
   switch (underlyingType) {
     case 'COIN':
@@ -69,7 +76,7 @@ export class BinanceInstrumentMetadataSource {
     try {
       response = (await this.fetchJson(EXCHANGE_INFO_URL)) as BinanceExchangeInfo;
     } catch {
-      // Metadata outage: degrade to "no gating" rather than breaking the scan.
+      // Metadata outage: degrade to "no class" rather than breaking the scan.
       return new Map();
     }
     const symbols = response?.symbols;

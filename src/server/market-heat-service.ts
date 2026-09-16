@@ -13,6 +13,7 @@ import {
 } from '../domain/market-heat';
 import type { Candlestick } from '../domain/candlestick';
 import { isMarketOpen } from '../domain/market-session';
+import { isScannable } from '../domain/scan-pool';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, Ticker, TickerSource } from './market-data';
 import { binanceRateGate, type RateGate } from './http';
@@ -68,11 +69,13 @@ export class MarketHeatService {
     const poolTopN = input.poolTopN ?? HEAT_POOL_TOP_N;
     const tickers = await this.tickerSource.listTickers();
 
-    // Session gating matches the scan: a closed TradFi contract never occupies
-    // a pool slot (it just sits quiet when its exchange is shut).
+    // Pool policy + session gating match the scan: classes the scan does not
+    // cover are not part of the 场子 reading either, and a closed TradFi contract
+    // never occupies a pool slot (it just sits quiet when its exchange is shut).
     const open: Ticker[] = [];
     const closed: string[] = [];
     for (const ticker of tickers) {
+      if (!isScannable(ticker.marketClass)) continue;
       if (isMarketOpen(ticker.marketClass ?? 'CRYPTO', input.anchor)) open.push(ticker);
       else closed.push(ticker.instrument);
     }

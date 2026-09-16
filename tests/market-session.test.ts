@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isCandleInSession,
   isMarketOpen,
   localMarketParts,
   marketSession,
@@ -7,29 +8,34 @@ import {
   US_NYSE_HOLIDAYS,
 } from '../src/domain/market-session';
 
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 // IANA offsets in March/November 2026 for America/New_York:
 // EDT (UTC-4) from 2026-03-08, EST (UTC-5) from 2026-11-01.
 // 2026-03-09 is a Monday, 2026-03-14 a Saturday, 2026-11-02 a Monday.
 
 describe('market sessions', () => {
-  it('opens and closes US equity on the 09:30-16:00 window (EDT Monday)', () => {
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 13, 30))).toBe(true); // 09:30 EDT
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 19, 59))).toBe(true); // 15:59 EDT
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 20, 0))).toBe(false); // 16:00 EDT (right-open)
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 13, 29))).toBe(false); // 09:29 EDT
+  it('opens and closes US equity on the 04:00-20:00 window (pre-market + regular + after-hours)', () => {
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 8, 0))).toBe(true); // 04:00 EDT pre-market open
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 7, 59))).toBe(false); // 03:59 EDT (overnight, still closed)
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 13, 30))).toBe(true); // 09:30 EDT regular open
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 20, 0))).toBe(true); // 16:00 EDT regular close, after-hours open
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 23, 59))).toBe(true); // 19:59 EDT after-hours
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 10, 0, 0))).toBe(false); // 20:00 EDT (right-open)
   });
 
-  it('follows the DST offset switch (09:30 local resolves at different UTC hours)', () => {
-    // Before spring-forward: EST = UTC-5, so 09:30 = 14:30Z on a Friday.
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 6, 14, 30))).toBe(true);
-    // After spring-forward: EDT = UTC-4, so 09:30 = 13:30Z on the following Monday.
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 13, 30))).toBe(true);
-    // The same 13:30Z instant is only 08:30 EST in November -> still pre-open.
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 9, 30, 13, 30))).toBe(true); // 09:30 EDT Fri
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 10, 2, 13, 30))).toBe(false); // 08:30 EST Mon
-    // After fall-back: EST again, 09:30 = 14:30Z.
-    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 10, 2, 14, 30))).toBe(true);
+  it('follows the DST offset switch (04:00 local resolves at different UTC hours)', () => {
+    // Before spring-forward: EST = UTC-5, so 04:00 = 09:00Z on a Friday.
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 6, 9, 0))).toBe(true);
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 6, 8, 59))).toBe(false);
+    // After spring-forward: EDT = UTC-4, so 04:00 = 08:00Z on the following Monday.
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 2, 9, 8, 0))).toBe(true);
+    // The same 08:00Z instant is only 03:00 EST in November -> still overnight.
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 9, 30, 8, 0))).toBe(true); // 04:00 EDT Fri
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 10, 2, 8, 0))).toBe(false); // 03:00 EST Mon
+    // After fall-back: EST again, 04:00 = 09:00Z.
+    expect(isMarketOpen('US_EQUITY', Date.UTC(2026, 10, 2, 9, 0))).toBe(true);
   });
 
   it('treats the DST transition Sundays as closed weekends', () => {
@@ -110,5 +116,53 @@ describe('market sessions', () => {
     const currentYear = String(new Date().getUTCFullYear());
     // Fail loudly when the tables are not maintained into the current year.
     expect(coveredYears.has(currentYear)).toBe(true);
+  });
+});
+
+describe('isCandleInSession (session-only candle series)', () => {
+  const FIVE_MIN = 5 * MINUTE;
+
+  it('keeps intraday US candles that overlap the 04:00-20:00 window', () => {
+    const marketOpen = Date.UTC(2026, 8, 15, 8, 0); // Tue 2026-09-15 04:00 EDT
+    expect(isCandleInSession('US_EQUITY', marketOpen, FIVE_MIN)).toBe(true);
+    expect(isCandleInSession('US_EQUITY', marketOpen - FIVE_MIN, FIVE_MIN)).toBe(false); // 03:55
+    expect(isCandleInSession('US_EQUITY', marketOpen + 16 * HOUR - FIVE_MIN, FIVE_MIN)).toBe(true); // 19:55
+    expect(isCandleInSession('US_EQUITY', marketOpen + 16 * HOUR, FIVE_MIN)).toBe(false); // 20:00
+  });
+
+  it('keeps a candle that only partly overlaps the session (edge candles)', () => {
+    // A 1H candle opening 03:30 ET spans into the 04:00 pre-market open.
+    const open = Date.UTC(2026, 8, 15, 7, 30);
+    expect(isCandleInSession('US_EQUITY', open, HOUR)).toBe(true);
+    expect(isCandleInSession('US_EQUITY', open - HOUR, HOUR)).toBe(false); // 02:30-03:30, fully overnight
+  });
+
+  it('keeps the UTC-aligned 1D candles that contain a US session', () => {
+    // Binance daily candles open at 20:00 ET, so an "open time inside the
+    // window" test would drop EVERY daily candle — the span test does not.
+    const bar = DAY;
+    // 2026-09-15T00:00Z = Mon 20:00 ET -> Tue 20:00 ET: contains the Tuesday session.
+    expect(isCandleInSession('US_EQUITY', Date.UTC(2026, 8, 15), bar)).toBe(true);
+    // 2026-09-11T00:00Z = Thu 20:00 ET -> Fri 20:00 ET: contains the Friday session.
+    expect(isCandleInSession('US_EQUITY', Date.UTC(2026, 8, 11), bar)).toBe(true);
+    // 2026-09-12T00:00Z = Fri 20:00 ET -> Sat 20:00 ET: no session at all.
+    expect(isCandleInSession('US_EQUITY', Date.UTC(2026, 8, 12), bar)).toBe(false);
+    // 2026-09-07T00:00Z = Sun 20:00 ET -> Mon 20:00 ET, and that Monday is Labor
+    // Day, so the candle holds no session and is dropped with the rest of the holiday.
+    expect(isCandleInSession('US_EQUITY', Date.UTC(2026, 8, 7), bar)).toBe(false);
+  });
+
+  it('keeps Korean candles inside 09:00-15:30 KST and drops the rest', () => {
+    const kstOpen = Date.UTC(2026, 8, 15, 0, 0); // Tue 09:00 KST
+    expect(isCandleInSession('KR_EQUITY', kstOpen, HOUR)).toBe(true);
+    expect(isCandleInSession('KR_EQUITY', kstOpen - HOUR, HOUR)).toBe(false); // 08:00-09:00 KST
+    expect(isCandleInSession('KR_EQUITY', Date.UTC(2026, 8, 15, 6, 30), HOUR)).toBe(false); // 15:30 close
+  });
+
+  it('never drops candles for ungated classes', () => {
+    const saturday = Date.UTC(2026, 8, 12, 12, 0);
+    for (const marketClass of ['CRYPTO', 'COMMODITY', 'PRE_IPO'] as const) {
+      expect(isCandleInSession(marketClass, saturday, FIVE_MIN)).toBe(true);
+    }
   });
 });

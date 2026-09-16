@@ -1,10 +1,22 @@
 /**
  * Market session gating (休市跳过): decides whether an instrument class is in
- * its underlying market's trading session at a given instant, so the coin scan
- * can exclude TradFi perpetuals (US/HK/KR/CN equities) whose exchange is closed.
+ * its underlying market's trading session, so the coin scan can (a) exclude
+ * instruments whose market is closed and (b) judge an open instrument only on
+ * the candles that were actually traded.
  *
  * Pure domain: no IO, no fetch. Timezone conversion uses `Intl.DateTimeFormat`
  * with IANA zone names so DST is handled by the platform, never hand-rolled.
+ *
+ * WHY A CALENDAR AT ALL (09/16): the scan reads Binance USDT-M candles, which
+ * print 24/7 for every TradFi contract — a closed market keeps emitting flat
+ * bars. "Is it closed?" therefore cannot be derived from the data (no gaps, no
+ * zero volume: measured — Binance equity perps trade ~24/5 with real volume
+ * overnight, and only weekends collapse to 1-2% of peak volume). The only
+ * usable signal is a session table, which this module owns. The alternative
+ * ("use a source that omits closed bars") was explored and rejected: Yahoo's
+ * free chart API rate-limits after ~40 requests, and Binance Stocks' real
+ * session K-lines exist only as a live WebSocket feed with no history.
+ * See `.trellis/tasks/09-16-coin-scan-equity-source/research/session-pollution-measurements.md`.
  *
  * NOTE ON MAINTENANCE: the NYSE holiday/early-close tables below must be
  * extended each year. `tests/market-session.test.ts` asserts that the current
@@ -12,14 +24,7 @@
  * silently scanning closed markets.
  */
 
-export type MarketClass =
-  | 'CRYPTO'
-  | 'US_EQUITY'
-  | 'HK_EQUITY'
-  | 'KR_EQUITY'
-  | 'CN_EQUITY'
-  | 'COMMODITY'
-  | 'PRE_IPO';
+import type { MarketClass } from './market-class';
 
 /** One market's trading-session definition (local time, minute granularity). */
 export type MarketSessionSpec = {
@@ -36,14 +41,16 @@ export type MarketSessionSpec = {
 };
 
 /** Minute-of-day helpers (window boundaries). */
-const MINUTE_930 = 9 * 60 + 30;
+const MINUTE_0400 = 4 * 60;
+const MINUTE_0900 = 9 * 60;
+const MINUTE_0930 = 9 * 60 + 30;
 const MINUTE_1130 = 11 * 60 + 30;
 const MINUTE_1200 = 12 * 60;
 const MINUTE_1300 = 13 * 60;
 const MINUTE_1500 = 15 * 60;
 const MINUTE_1530 = 15 * 60 + 30;
 const MINUTE_1600 = 16 * 60;
-const MINUTE_0900 = 9 * 60;
+const MINUTE_2000 = 20 * 60;
 
 /** NYSE full-day holidays (2026 + 2027). Extend yearly — see file-top note. */
 export const US_NYSE_HOLIDAYS: readonly string[] = [
@@ -78,12 +85,22 @@ export const US_NYSE_EARLY_CLOSES: Readonly<Record<string, number>> = {
   '2027-11-26': MINUTE_1300, // Day after Thanksgiving
 };
 
-/** Market sessions for the gated classes. CRYPTO / COMMODITY / PRE_IPO have none. */
+/**
+ * Market sessions for the gated classes. CRYPTO / COMMODITY / PRE_IPO have none.
+ *
+ * US equities: 04:00–20:00 ET — pre-market + regular + after-hours as one
+ * continuous window (09/16 widening, user decision). Binance documents the
+ * equity cycle as pre-market / regular / after-hours / OVERNIGHT
+ * (`Perpetual Futures on Traditional Assets` FAQ); the scan deliberately covers
+ * the first three and treats the thin overnight session (20:00–04:00 ET) as
+ * closed, because that is the regime the volatility-shrink scan misreads as
+ * 蓄力 (measured: overnight median 5m range is 1/3 of the regular session's).
+ */
 export const MARKET_SESSIONS: Readonly<Record<MarketClass, MarketSessionSpec>> = {
   US_EQUITY: {
     timezone: 'America/New_York',
     tradingDays: [1, 2, 3, 4, 5],
-    windows: [{ startMinute: MINUTE_930, endMinute: MINUTE_1600 }],
+    windows: [{ startMinute: MINUTE_0400, endMinute: MINUTE_2000 }],
     holidays: US_NYSE_HOLIDAYS,
     earlyCloses: US_NYSE_EARLY_CLOSES,
   },
@@ -91,7 +108,7 @@ export const MARKET_SESSIONS: Readonly<Record<MarketClass, MarketSessionSpec>> =
     timezone: 'Asia/Hong_Kong',
     tradingDays: [1, 2, 3, 4, 5],
     windows: [
-      { startMinute: MINUTE_930, endMinute: MINUTE_1200 },
+      { startMinute: MINUTE_0930, endMinute: MINUTE_1200 },
       { startMinute: MINUTE_1300, endMinute: MINUTE_1600 },
     ],
   },
@@ -104,12 +121,12 @@ export const MARKET_SESSIONS: Readonly<Record<MarketClass, MarketSessionSpec>> =
     timezone: 'Asia/Shanghai',
     tradingDays: [1, 2, 3, 4, 5],
     windows: [
-      { startMinute: MINUTE_930, endMinute: MINUTE_1130 },
+      { startMinute: MINUTE_0930, endMinute: MINUTE_1130 },
       { startMinute: MINUTE_1300, endMinute: MINUTE_1500 },
     ],
   },
-  // Placeholders to keep the record exhaustive; the typed keys below are never
-  // reached by `marketSession` because gated lookups start from MarketClass.
+  // Placeholders to keep the record exhaustive; `marketSession` returns null for
+  // them, so they are never session-gated (they trade 24/7 on Binance).
   CRYPTO: { timezone: 'UTC', tradingDays: [0, 1, 2, 3, 4, 5, 6], windows: [{ startMinute: 0, endMinute: 1440 }] },
   COMMODITY: { timezone: 'UTC', tradingDays: [0, 1, 2, 3, 4, 5, 6], windows: [{ startMinute: 0, endMinute: 1440 }] },
   PRE_IPO: { timezone: 'UTC', tradingDays: [0, 1, 2, 3, 4, 5, 6], windows: [{ startMinute: 0, endMinute: 1440 }] },
@@ -188,6 +205,41 @@ export function isMarketOpen(marketClass: MarketClass, atMs: number): boolean {
     if (minuteOfDay < window.startMinute) return false; // windows are sorted; no later window opens earlier
     const end = endCap !== undefined ? Math.min(window.endMinute, endCap) : window.endMinute;
     if (minuteOfDay >= window.startMinute && minuteOfDay < end) return true;
+  }
+  return false;
+}
+
+/**
+ * Granularity of the session probe inside one candle. 15 minutes is far finer
+ * than any session edge this project cares about (sessions start/end on whole
+ * minutes, and the shortest scanned timeframe is 5m), so the probe stays exact
+ * where it matters and cheap where it would not: a 5m candle costs 1 lookup, a
+ * 1H candle 4, a 1D candle 96.
+ */
+const SESSION_PROBE_STEP_MS = 15 * 60 * 1000;
+
+/**
+ * True when ANY part of the candle's span `[openMs, openMs + barMs)` falls inside
+ * the instrument's trading session — i.e. whether the candle contains real
+ * trading time.
+ *
+ * This is what keeps the scan's candle window honest for a 24/7 synthetic
+ * contract: closed-market stretches (weekends, holidays, overnight) are dropped
+ * from the series, so a "quiet band" can only mean a genuinely quiet market.
+ * The same rule works for every timeframe — a UTC-aligned 1D candle opens at
+ * 20:00 ET, so a naive "open time inside the window" test would drop every daily
+ * candle; a span test instead keeps exactly the days that contain a session.
+ *
+ * Ungated classes (crypto, commodity, pre-IPO) always return true: they trade
+ * around the clock, so no candle is ever dropped.
+ */
+export function isCandleInSession(marketClass: MarketClass, openMs: number, barMs: number): boolean {
+  const spec = marketSession(marketClass);
+  if (!spec) return true;
+  const end = openMs + barMs;
+  const step = Math.min(barMs, SESSION_PROBE_STEP_MS);
+  for (let at = openMs; at < end; at += step) {
+    if (isMarketOpen(marketClass, at)) return true;
   }
   return false;
 }
