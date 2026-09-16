@@ -132,7 +132,7 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
     expect(result.qualifiedCount).toBe(2);
     // Equal counts and equal bestScore keep the stable ticker (quote-volume) order.
     expect(result.scanned[0].instrument).toBe('BTC-USDT-SWAP');
-    expect(result.params).toEqual({ ...params, anchor: expect.any(Number) });
+    expect(result.params).toEqual({ ...params, scope: 'crypto', anchor: expect.any(Number) });
   });
 
   it('fetches each (coin, timeframe) with a uniform window for every timeframe', async () => {
@@ -344,14 +344,26 @@ describe('CoinScanService (session gating: skip closed traditional markets)', ()
     const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
     const xau: Ticker = { instrument: 'XAUUSDT', quoteVolume24h: 100_000_000, lastPrice: 4000, change24h: 1, marketClass: 'COMMODITY' };
     const { getCandlesticks, service } = strongService([tsla, nvda, btc, xau]);
+    const equityService = strongService([tsla, nvda, btc, xau]).service;
 
-    const result = await service.scanShrink({ method: 'shrink', topN: 1, minQuoteVolume24h: 0, anchor: saturdayMs });
-
-    // Only the open crypto occupies the topN slot; closed equities are skipped.
-    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
-    expect(result.skippedInstruments).toEqual(['TSLAUSDT', 'NVDAUSDT']);
+    // Crypto sub-module: the closed equities are not even in this universe, so the
+    // open crypto takes the topN slot and no candles are fetched for them.
+    const cryptoResult = await service.scanShrink({ method: 'shrink', topN: 1, minQuoteVolume24h: 0, anchor: saturdayMs });
+    expect(cryptoResult.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
     const requestedInstruments = new Set(getCandlesticks.mock.calls.map(([req]) => req.instrument));
     expect([...requestedInstruments].sort()).toEqual(['BTCUSDT']);
+
+    // Equity sub-module: every equity is closed, so nothing is scanned, nothing is
+    // requested, and both are reported as skipped.
+    const equityResult = await equityService.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 1,
+      minQuoteVolume24h: 0,
+      anchor: saturdayMs,
+    });
+    expect(equityResult.scanned).toEqual([]);
+    expect(equityResult.skippedInstruments).toEqual(['TSLAUSDT', 'NVDAUSDT']);
   });
 
   it('keeps US equities in the pool when their market is open', async () => {
@@ -359,12 +371,24 @@ describe('CoinScanService (session gating: skip closed traditional markets)', ()
     const mondayMs = Date.UTC(2026, 2, 9, 13, 30);
     const tsla = equityTicker('TSLAUSDT', 1_000_000_000);
     const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
-    const { service } = strongService([tsla, btc]);
 
-    const result = await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor: mondayMs });
+    const equityResult = await strongService([tsla, btc]).service.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 2,
+      minQuoteVolume24h: 0,
+      anchor: mondayMs,
+    });
+    const cryptoResult = await strongService([tsla, btc]).service.scanShrink({
+      method: 'shrink',
+      topN: 2,
+      minQuoteVolume24h: 0,
+      anchor: mondayMs,
+    });
 
-    expect(result.scanned.map((row) => row.instrument).sort()).toEqual(['BTCUSDT', 'TSLAUSDT']);
-    expect(result.skippedInstruments).toBeUndefined();
+    expect(equityResult.scanned.map((row) => row.instrument)).toEqual(['TSLAUSDT']);
+    expect(equityResult.skippedInstruments).toBeUndefined();
+    expect(cryptoResult.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
   });
 
   it('applies the same historical-weekend gating when the anchor is in the past', async () => {
@@ -373,9 +397,15 @@ describe('CoinScanService (session gating: skip closed traditional markets)', ()
     const btc: Ticker = { instrument: 'BTCUSDT', quoteVolume24h: 800_000_000, lastPrice: 60000, change24h: -1 };
     const { service } = strongService([tsla, btc]);
 
-    const result = await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor: saturdayMs });
+    const result = await service.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 2,
+      minQuoteVolume24h: 0,
+      anchor: saturdayMs,
+    });
 
-    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
+    expect(result.scanned).toEqual([]);
     expect(result.skippedInstruments).toEqual(['TSLAUSDT']);
   });
 
@@ -406,14 +436,23 @@ describe('CoinScanService (session-only candle series)', () => {
     const getCandlesticks = vi.fn(async ({ timeframe, anchor: at }: CandleRequest) =>
       candlesAt(at, timeframe, onlyFiveMinuteConverges(timeframe) === 'strong' ? strongBars : uptrendBars),
     );
-    const service = new CoinScanService({ listTickers: vi.fn(async () => [tsla, btc]) }, { getCandlesticks });
+    const cryptoService = new CoinScanService({ listTickers: vi.fn(async () => [btc]) }, { getCandlesticks });
+    const equityService = new CoinScanService({ listTickers: vi.fn(async () => [tsla]) }, { getCandlesticks });
 
-    const result = await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor });
+    const cryptoResult = await cryptoService.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor });
+    const equityResult = await equityService.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 2,
+      minQuoteVolume24h: 0,
+      anchor,
+    });
 
     // The identical candle series converges for crypto and yields nothing for the
     // equity once the untraded stretch is dropped before the detector runs.
-    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
-    expect(result.skippedInstruments).toBeUndefined();
+    expect(cryptoResult.scanned.map((row) => row.instrument)).toEqual(['BTCUSDT']);
+    expect(equityResult.scanned).toEqual([]);
+    expect(equityResult.skippedInstruments).toBeUndefined();
   });
 
   it('requests a wider raw window for session-gated instruments', async () => {
@@ -423,9 +462,11 @@ describe('CoinScanService (session-only candle series)', () => {
     const getCandlesticks = vi.fn(async ({ timeframe, anchor: at }: CandleRequest) =>
       candlesAt(at, timeframe, strongBars),
     );
-    const service = new CoinScanService({ listTickers: vi.fn(async () => [tsla, btc]) }, { getCandlesticks });
+    const cryptoService = new CoinScanService({ listTickers: vi.fn(async () => [btc]) }, { getCandlesticks });
+    const equityService = new CoinScanService({ listTickers: vi.fn(async () => [tsla]) }, { getCandlesticks });
 
-    await service.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor });
+    await cryptoService.scanShrink({ method: 'shrink', topN: 2, minQuoteVolume24h: 0, anchor });
+    await equityService.scanShrink({ method: 'shrink', scope: 'equity', topN: 2, minQuoteVolume24h: 0, anchor });
 
     const limitsFor = (instrument: string) => [
       ...new Set(getCandlesticks.mock.calls.filter(([request]) => request.instrument === instrument).map(([request]) => request.limit)),
@@ -458,5 +499,102 @@ describe('CoinScanService (session-only candle series)', () => {
     const result = await service.scanShrink(params);
 
     expect(result.metadataUnavailable).toBeUndefined();
+  });
+});
+
+describe('CoinScanService (选品 sub-modules: crypto / equity)', () => {
+  /** Monday 2026-03-09 11:00 EDT: US equities open, Korean closed. */
+  const US_ANCHOR = Date.UTC(2026, 2, 9, 15, 0);
+  /** Monday 2026-03-09 11:00 KST: Korean equities open, US closed. */
+  const KR_ANCHOR = Date.UTC(2026, 2, 9, 2, 0);
+  const universe: Ticker[] = [
+    { instrument: 'BTCUSDT', quoteVolume24h: 900_000_000, lastPrice: 60000, change24h: -1, marketClass: 'CRYPTO' },
+    { instrument: 'XAUUSDT', quoteVolume24h: 800_000_000, lastPrice: 4000, change24h: 1, marketClass: 'COMMODITY' },
+    { instrument: 'TSLAUSDT', quoteVolume24h: 700_000_000, lastPrice: 300, change24h: 2, marketClass: 'US_EQUITY' },
+    { instrument: 'SAMSUNGUSDT', quoteVolume24h: 600_000_000, lastPrice: 180, change24h: 1, marketClass: 'KR_EQUITY' },
+    { instrument: 'HK0700USDT', quoteVolume24h: 500_000_000, lastPrice: 430, change24h: 1, marketClass: 'HK_EQUITY' },
+    { instrument: 'OPENAIUSDT', quoteVolume24h: 400_000_000, lastPrice: 1400, change24h: 1, marketClass: 'PRE_IPO' },
+  ];
+
+  function scopedService() {
+    const listTickers = vi.fn(async () => universe);
+    const getCandlesticks = vi.fn(async ({ timeframe, anchor: at }: CandleRequest) =>
+      candlesAt(at, timeframe, strongBars),
+    );
+    return { getCandlesticks, service: new CoinScanService({ listTickers }, { getCandlesticks }) };
+  }
+
+  it('scans only crypto-class instruments in the crypto scope (the default)', async () => {
+    const { getCandlesticks, service } = scopedService();
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 10, minQuoteVolume24h: 0, anchor: US_ANCHOR });
+
+    expect(result.scanned.map((row) => row.instrument).sort()).toEqual(['BTCUSDT', 'XAUUSDT']);
+    expect(result.params.scope).toBe('crypto');
+    // Out-of-pool classes are a pool definition, not a runtime skip.
+    expect(result.skippedInstruments).toBeUndefined();
+    expect([...new Set(getCandlesticks.mock.calls.map(([request]) => request.instrument))].sort()).toEqual([
+      'BTCUSDT',
+      'XAUUSDT',
+    ]);
+  });
+
+  it('scans only the equities whose market is open in the equity scope', async () => {
+    // US and Korean sessions do not overlap (US 04:00-20:00 ET vs KR 09:00-15:30
+    // KST), so each anchor can only ever contain one of them.
+    const { getCandlesticks, service } = scopedService();
+
+    const usOpen = await service.scanShrink({ method: 'shrink', scope: 'equity', topN: 10, minQuoteVolume24h: 0, anchor: US_ANCHOR });
+    const krOpen = await scopedService().service.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 10,
+      minQuoteVolume24h: 0,
+      anchor: KR_ANCHOR,
+    });
+
+    expect(usOpen.scanned.map((row) => row.instrument)).toEqual(['TSLAUSDT']);
+    expect(usOpen.skippedInstruments).toEqual(['SAMSUNGUSDT']);
+    expect(krOpen.scanned.map((row) => row.instrument)).toEqual(['SAMSUNGUSDT']);
+    expect(krOpen.skippedInstruments).toEqual(['TSLAUSDT']);
+    expect([...new Set(getCandlesticks.mock.calls.map(([request]) => request.instrument))]).toEqual(['TSLAUSDT']);
+  });
+
+  it('keeps the two pools disjoint and their union equal to every scannable instrument', async () => {
+    const crypto = await scopedService().service.scanShrink({ method: 'shrink', topN: 10, minQuoteVolume24h: 0, anchor: US_ANCHOR });
+    const usEquity = await scopedService().service.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 10,
+      minQuoteVolume24h: 0,
+      anchor: US_ANCHOR,
+    });
+    const krEquity = await scopedService().service.scanShrink({
+      method: 'shrink',
+      scope: 'equity',
+      topN: 10,
+      minQuoteVolume24h: 0,
+      anchor: KR_ANCHOR,
+    });
+
+    const cryptoRows = crypto.scanned.map((row) => row.instrument).sort();
+    const equityRows = [...usEquity.scanned, ...krEquity.scanned].map((row) => row.instrument).sort();
+    expect(cryptoRows.filter((instrument) => equityRows.includes(instrument))).toEqual([]);
+    // The out-of-pool HK / pre-IPO contracts belong to neither sub-module.
+    expect([...cryptoRows, ...equityRows].sort()).toEqual(['BTCUSDT', 'SAMSUNGUSDT', 'TSLAUSDT', 'XAUUSDT']);
+  });
+
+  it('treats a third-party exchange instrument (no class) as crypto so a metadata outage still scans', async () => {
+    const listTickers = vi.fn(async () => [
+      { instrument: 'MYSTERYUSDT', quoteVolume24h: 1_000_000_000, lastPrice: 10, change24h: 1 } as Ticker,
+    ]);
+    const getCandlesticks = vi.fn(async ({ timeframe, anchor: at }: CandleRequest) =>
+      candlesAt(at, timeframe, strongBars),
+    );
+    const service = new CoinScanService({ listTickers }, { getCandlesticks });
+
+    const result = await service.scanShrink({ method: 'shrink', topN: 10, minQuoteVolume24h: 0, anchor: US_ANCHOR });
+
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['MYSTERYUSDT']);
   });
 });

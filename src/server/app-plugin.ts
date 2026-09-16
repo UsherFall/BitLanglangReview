@@ -6,6 +6,7 @@ import { okxInstrumentToBinanceSymbol } from '../domain/instrument-symbol';
 import { scopeReviewsToTrades, type TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
+import { DEFAULT_SCAN_PARAMS, isScanScope, type ScanScope } from '../domain/scan-scope';
 import type { CandleSource } from './market-data';
 import { BinanceCandleSource } from './binance-candles';
 import { resolveDataPath } from './data-root';
@@ -220,7 +221,20 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
         const url = new URL(req.url ?? '', 'http://local');
         const method = url.searchParams.get('method') ?? '';
+        // 选品 sub-module: `crypto` (default — keeps every pre-09/16 caller
+        // unchanged) or `equity`. An unknown value is a caller error rather than a
+        // silent fallback, because the two scopes rank different universes.
+        const scopeParam = url.searchParams.get('scope');
+        if (scopeParam !== null && scopeParam.trim() !== '' && !isScanScope(scopeParam)) {
+          return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        const scope: ScanScope = scopeParam === null || scopeParam.trim() === '' ? 'crypto' : (scopeParam as ScanScope);
         if (method === 'heat') {
+          // 热度 reads the crypto 场子 (crypto + indices + commodities); the equity
+          // sub-module deliberately has no heat reading.
+          if (scope !== 'crypto') {
+            return send(res, 400, { error: 'Invalid scan parameters' });
+          }
           // 选币「热度」: 复用复盘的市场热度能力(恒 Binance、固定 Top80), 展示整体场子读数。
           const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
           if (anchor !== undefined && anchor <= 0) {
@@ -236,11 +250,14 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (method !== 'shrink') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
-        const topN = parseScanParam(url.searchParams.get('topN'), 60);
-        const minQuoteVolume24h = parseScanParam(url.searchParams.get('minQuoteVolume24h'), 10_000_000);
-        // anchor/minScore are optional. parseScanParam's Number(null) === 0
-        // defect would turn an absent param into 0 and trip the guard, so parse
-        // them with an optional parser that maps null/empty/NaN → undefined.
+        // Parameter defaults depend on the scope; an absent or unparsable value
+        // falls back to that scope's default (never to 0, which would 400).
+        const scopeDefaults = DEFAULT_SCAN_PARAMS[scope];
+        const topN = parseOptionalNumber(url.searchParams.get('topN')) ?? scopeDefaults.topN;
+        const minQuoteVolume24h = parseOptionalNumber(url.searchParams.get('minQuoteVolume24h')) ?? scopeDefaults.minQuoteVolume24h;
+        // anchor/minScore are optional: parse them with the optional parser that
+        // maps null/empty/NaN → undefined, so an absent param never becomes 0 and
+        // trips the guard below.
         const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
         const minScore = parseOptionalNumber(url.searchParams.get('minScore'));
         if (topN < 1 || minQuoteVolume24h < 0) {
@@ -255,6 +272,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         try {
           const result = await coinScanService.scanShrink({
             method: 'shrink',
+            scope,
             topN,
             minQuoteVolume24h,
             anchor,
@@ -363,11 +381,6 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
 
 function trimOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function parseScanParam(value: string | null, fallback: number): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function parseOptionalNumber(value: string | null): number | undefined {

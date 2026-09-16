@@ -1,8 +1,8 @@
-# Coin Scan (选币)
+# Instrument Scan (选品)
 
 ## 1. Scope / Trigger
 
-The 选币 (Coin Scan) module finds instruments by pluggable scan methods. V1 ships only the **shrink** (收敛结构) method; 09/08 adds the **heat** (热度) method, which returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`). It scans a parameterized universe of **Binance USDT-M perpetuals** by default (switchable to OKX SWAP via `MARKET_DATA_SOURCE=okx`) and detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source (all USDT-M perpetuals above the `minQuoteVolume24h` floor, taking the top `topN`) after two filters: the **scan pool policy** (which classes are covered at all) and **session gating** (which instruments are open at the anchor).
+The 选品 (Instrument Scan; renamed from 选币 09/16) module finds instruments by pluggable scan methods, split into two sub-modules: **Crypto Scope** (加密: crypto + indices + commodities) and **Equity Scope** (股票: US + Korean equities). The two pools are disjoint and scanned separately, each with its own parameter defaults. V1 ships only the **shrink** (收敛结构) method; 09/08 adds the **heat** (热度) method, which returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`) and exists **only in the crypto scope**. It scans a parameterized universe of **Binance USDT-M perpetuals** by default (switchable to OKX SWAP via `MARKET_DATA_SOURCE=okx`) and detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source (all USDT-M perpetuals above the `minQuoteVolume24h` floor, taking the top `topN`) after three filters: the **scan pool policy** (which classes are covered at all), the requested **scan scope** (which sub-module), and **session gating** (which instruments are open at the anchor).
 
 **Candle series is session-only** (09/16): for a session-gated instrument the detector never sees candles that contain no trading time — closed-market stretches are dropped from the series before `probeStructure` runs, and 2× the raw window is requested to compensate. Ungated classes (crypto, commodity) keep every candle. See "Design Decisions".
 
@@ -29,12 +29,15 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 | Field | Type | Default | Constraint |
 | --- | --- | --- | --- |
 | `method` | string | — | `shrink` (收敛结构) or `heat` (热度); anything else → 400 |
-| `topN` | number | 50 | `>= 1` |
-| `minQuoteVolume24h` | number | 10_000_000 | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
+| `scope` | string | `crypto` | `crypto` (加密: crypto + indices + commodities) or `equity` (股票: US + Korean equities); anything else → 400; `heat` + `equity` → 400 |
+| `topN` | number | `crypto` 60 / `equity` 30 | `>= 1` |
+| `minQuoteVolume24h` | number | 10_000_000 (both scopes) | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
 | `anchor` | number (optional) | now | epoch ms; bars whose close time (`timestamp + timeframe`) is `<= anchor` are treated as completed. Absent / empty / NaN → `Date.now()`. Present and `<= 0` → 400 |
 | `minScore` | number (optional) | 0 | `>= 0`; a timeframe counts as converged only when `score >= minScore`. The 宁少勿滥 strength knob (UI default 0.7). Absent → 0. Present and `< 0` → 400 |
 
-Non-numeric params fall back to the default. Invalid final values → 400.
+Non-numeric params fall back to the scope's default (never to 0 — an absent `topN` must not become `0` and 400). Invalid final values → 400. The per-scope defaults live in `DEFAULT_SCAN_PARAMS` (`src/domain/scan-scope.ts`) and are mirrored by the panel's inputs.
+
+`scope` decides the universe, not the data source: both scopes read Binance USDT-M candles. `crypto` = every scannable class that is not a US/Korean equity, **including instruments whose class is unknown** (metadata outage) — the pre-09/16 conservative fallback. `equity` = `US_EQUITY` + `KR_EQUITY` only. The two pools never overlap, and classes outside the pool policy appear in neither.
 
 `method=heat` responds with `MarketHeatResult` (`domain/market-heat.ts`) instead — the overall market-temperature reading for the fixed Binance Top80 pool at `anchor` (same definition and Binance-only sources as the review 市场热度; UI renders it through the shared `MarketHeatView`). Only `anchor` applies for heat.
 
@@ -108,9 +111,11 @@ With the UI default minScore 0.7 this surfaces only strong contractions (≈2×+
 scanShrink(params):
   tickers = tickerSource.listTickers()
   anchor = params.anchor ?? Date.now()
+  scope = params.scope ?? 'crypto'
   pooled = filter(quoteVolume24h >= minQuoteVolume24h)
-  for ticker in pooled:                                  // pool policy (09/16) + session gating (09/06)
+  for ticker in pooled:                                  // pool policy (09/16) + scope (09/16) + session gating (09/06)
     if not isScannable(ticker.marketClass): continue     // HK/CN/pre-IPO: not in the universe, not a skip
+    if scanScopeOf(ticker.marketClass) !== scope: continue // belongs to the other sub-module, not a skip either
     if isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor): open.push(ticker)
     else skippedInstruments.push(ticker.instrument)
   top = open.slice(0, topN)                              // closed markets never occupy a topN slot
@@ -178,6 +183,8 @@ scanShrink(params):
 - `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, sort `qualifiedCount desc → bestScore desc`, `minScore` gate (0.5 admits weak, 0.7 filters it), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty. Plus the 09/16 blocks: session gating (closed equity dropped, kept out of topN, candles never requested; historical weekend anchor behaves the same), **session-only series** (identical candle fixture converges for crypto and yields nothing for an equity whose only bars sit in the closed overnight window), **per-class window** (gated class requests `limit` 200, ungated 100), and **`metadataUnavailable`** (present only when the ticker source reports no classes).
 - `tests/market-session.test.ts` — session math: the 04:00–20:00 US window incl. the DST switch, weekends, NYSE holidays/early closes, HK/KR/CN windows, ungated classes, the current-year coverage assertion, and `isCandleInSession` (edge candles that only partly overlap, the UTC-aligned daily candles that would all be dropped by an open-time test, and ungated classes that never lose a candle).
 - `tests/scan-pool.test.ts` — `isScannable`: crypto/commodity/US/KR in; HK/CN/pre-IPO out; unclassified in.
+- `tests/scan-scope.test.ts` — `ScanScope` narrowing, `scanScopeOf` (US/KR → equity, everything else incl. unclassified → crypto), and the per-scope `DEFAULT_SCAN_PARAMS`.
+- `tests/coin-scan-panel.test.tsx` — the sub-module switch: current scope marked, 热度 offered only in the crypto scope, parameters reset to the scope's defaults on switch, 热度 selection dropped when switching to equities, no `onScopeChange` when re-clicking the active scope.
 - `tests/binance-candles.test.ts` — cache freshness: a stale "now" cache is refreshed; a fresh "now" cache is reused; a historical anchor always reuses the cache.
 
 ## 7. Wrong vs Correct
@@ -215,6 +222,10 @@ No `coinVol` "typical volatility" and no absolute thresholds: every measure is a
 ### Flatness gate doubles as the crash-pause rejection
 
 The band must be a quiet horizontal band (edge drift ≤ 2× its own noise). Beyond rejecting trends, this also rejects the wide post-dump bands (CBRS 大跌后喘息) whose edges drift too much — so the pure band-vs-preceding rule does not flood the scan with crash-aftermaths.
+
+### Sub-modules split the POOL, not the data source (09/16)
+
+Both scopes read Binance USDT-M candles; what differs is the universe and the session semantics. The split is driven by a measurement: with one merged pool ranked by 24h quote volume, **19 of the top 60 slots** went to TradFi contracts (MUUSDT 310M, MSTRUSDT 225M, SAMSUNGUSDT 140M…), crowding live crypto out of the scan. It also keeps the crypto scope free of session math — it never drops a candle and never consults a calendar. `ReviewMode` stays `'scan'` and the route stays `/api/scan`; only the labels (选品, 加密/股票) and the `scope` parameter are new, and the absent-scope path is byte-identical to the pre-09/16 behaviour.
 
 ### Session gating + session-only series: keep closed markets out of the scan (09/06, reworked 09/16)
 

@@ -1539,6 +1539,35 @@ label,
   grid-template-columns: 1fr;
 }
 
+.coin-scan-scope-row {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #8b949e;
+}
+
+.coin-scan-scope {
+  display: flex;
+  gap: 6px;
+}
+
+.coin-scan-scope button {
+  flex: 1 1 0;
+  min-height: 26px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #c9d1d9;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.coin-scan-scope button:hover,
+.coin-scan-scope button.selected {
+  border-color: #58a6ff;
+  background: #1f6feb;
+  color: #fff;
+}
+
 .coin-scan-skip-hint {
   font-size: 12px;
   color: #8b949e;

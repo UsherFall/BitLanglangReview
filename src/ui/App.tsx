@@ -3,6 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff,
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
+import type { ScanScope } from '../domain/scan-scope';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
@@ -113,7 +114,7 @@ function reviewModeNavLabel(mode: ReviewMode): string {
 }
 
 function reviewModeTitle(mode: ReviewMode): string {
-  return mode === 'trade' ? '交割单复盘' : mode === 'bitget' ? '个人交割单复盘' : mode === 'scan' ? '选币' : '回溯复盘';
+  return mode === 'trade' ? '交割单复盘' : mode === 'bitget' ? '个人交割单复盘' : mode === 'scan' ? '选品' : '回溯复盘';
 }
 
 function tradeReviewEndpoint(mode: ReviewMode): string {
@@ -214,6 +215,9 @@ export function App() {
   // retries the future fetch instead of ignoring the click silently.
   const [futureRetryToken, setFutureRetryToken] = useState(0);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  // 选品 sub-module (加密 / 股票). Held here so the parameter panel and the result
+  // panel always describe the same scan; switching clears the stale result.
+  const [scanScope, setScanScope] = useState<ScanScope>('crypto');
   // Bumped by the Bitget sync bar so the trade queue refetches after a sync.
   const [tradeRefreshToken, setTradeRefreshToken] = useState(0);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
@@ -623,7 +627,7 @@ export function App() {
           <button className={reviewMode === 'trade' ? 'selected' : ''} onClick={() => setReviewMode('trade')}>交割单复盘</button>
           <button className={reviewMode === 'bitget' ? 'selected' : ''} onClick={() => setReviewMode('bitget')}>个人交割单复盘</button>
           <button className={reviewMode === 'freeReplay' ? 'selected' : ''} onClick={() => setReviewMode('freeReplay')}>回溯复盘</button>
-          <button className={reviewMode === 'scan' ? 'selected' : ''} onClick={() => setReviewMode('scan')}>选币</button>
+          <button className={reviewMode === 'scan' ? 'selected' : ''} onClick={() => setReviewMode('scan')}>选品</button>
         </div>
         {isTradeReviewMode(reviewMode) ? (
           <>
@@ -726,7 +730,16 @@ export function App() {
         </div>
           </>
         ) : reviewMode === 'scan' ? (
-          <CoinScanPanel onScanned={setScanResult} />
+          <CoinScanPanel
+            scope={scanScope}
+            onScopeChange={(next) => {
+              // A result belongs to the scope it was scanned in; never show it
+              // under the other sub-module.
+              setScanResult(null);
+              setScanScope(next);
+            }}
+            onScanned={setScanResult}
+          />
         ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
         )}

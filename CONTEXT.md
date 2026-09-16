@@ -132,12 +132,13 @@ _Avoid_: journal entry, review note
 The reviewer-chosen local date and minute where a **Free Replay** begins. The start time is placed on the containing **Candlestick** in the active **Review Timeframe**.
 _Avoid_: second-level timestamp, exchange server time, exact tick
 
-**Coin Scan** (选币):
-A review mode for finding **Instruments** from the configured market-data source (Binance USDT-M perpetuals by default; OKX swap switchable) using pluggable scan methods. Methods: the **Shrink Method** (缩量/收敛, per-coin volatility convergence) and the **Heat Method** (热度, the overall market-temperature reading of the fixed Binance Top80 pool — the same reading as 市场热度 in trade review; see **Market Temperature**). A **Coin Scan** is a parameterized panel: choose a method and its parameters, scan, then read a ranked result list. The scan pool covers crypto, indices, commodities and the two supported equity markets (US, Korea) — Hong Kong / A-share / pre-IPO instruments are out of scope (**Scan Pool Policy**). A **TradFi Instrument** whose underlying **Market Session** is closed at the scan anchor is dropped (**Session Gating**), and an open one is judged only on the candles that contain real trading time (**Session-only Series**), so a closed-market contract never occupies a top slot and a closed-market stretch can never read as convergence.
+**Instrument Scan** (选品):
+A review mode for finding **Instruments** from the configured market-data source (Binance USDT-M perpetuals by default; OKX swap switchable) using pluggable scan methods. It is split into two sub-modules, **Crypto Scope** (加密: crypto + indices + commodities, 24/7) and **Equity Scope** (股票: US + Korean equities, session-gated) — the two pools are disjoint and are scanned separately, each with its own parameters. Methods: the **Shrink Method** (缩量/收敛, per-instrument volatility convergence) and the **Heat Method** (热度, the overall market-temperature reading of the fixed Binance Top80 pool — the same reading as 市场热度 in trade review; see **Market Temperature**; **crypto scope only**). An **Instrument Scan** is a parameterized panel: choose a sub-module and a method, scan, then read a ranked result list. The pool covers crypto, indices, commodities and the two supported equity markets (US, Korea) — Hong Kong / A-share / pre-IPO instruments are out of scope (**Scan Pool Policy**). A **TradFi Instrument** whose underlying **Market Session** is closed at the scan anchor is dropped (**Session Gating**), and an open one is judged only on the candles that contain real trading time (**Session-only Series**), so a closed-market contract never occupies a top slot and a closed-market stretch can never read as convergence.
+_Avoid_: coin scanner, single mixed pool
 _Avoid_: market screener, strategy backtest
 
 **Shrink Method** (缩量方法):
-The first **Coin Scan** method. It scans the top instruments by 24h quote volume (USDT-M perpetuals only) and ranks them by how much their recent volatility has shrunk relative to each instrument's own recent stretch. The scan pool applies the **Scan Pool Policy** and **Session Gating**: an instrument whose underlying **Market Session** is closed is dropped before the top-N slice, and the surviving window holds only **Session-only Series** candles.
+The first **Instrument Scan** method, available in both sub-modules. It scans the sub-module's top instruments by 24h quote volume (USDT-M perpetuals only) and ranks them by how much their recent volatility has shrunk relative to each instrument's own recent stretch. The pool applies the **Scan Pool Policy**, the sub-module's **Scan Scope**, and **Session Gating**: an instrument whose underlying **Market Session** is closed is dropped before the top-N slice, and the surviving window holds only **Session-only Series** candles.
 _Avoid_: volume drop filter, low volume watch
 
 **Volume Ratio** (量比):
@@ -153,15 +154,15 @@ A Binance USDT-M perpetual whose underlying asset is a traditional-market instru
 _Avoid_: stock, index future
 
 **Market Session** (交易时段):
-The recurring hours during which an exchange is open, defined in that exchange's local timezone (US equities 04:00–20:00 ET — pre-market + regular + after-hours as one window, the thin 20:00–04:00 overnight session treated as closed; HK/A-share with a lunch break; KR 09:00–15:30 KST), with all-day holidays and early closes applied. DST is resolved by the IANA timezone data, not by hand-written offsets. Whether a **TradFi Instrument** participates in a **Coin Scan** is decided by its **Market Session** at the scan **anchor**.
+The recurring hours during which an exchange is open, defined in that exchange's local timezone (US equities 04:00–20:00 ET — pre-market + regular + after-hours as one window, the thin 20:00–04:00 overnight session treated as closed; HK/A-share with a lunch break; KR 09:00–15:30 KST), with all-day holidays and early closes applied. DST is resolved by the IANA timezone data, not by hand-written offsets. Whether a **TradFi Instrument** participates in an **Instrument Scan** is decided by its **Market Session** at the scan **anchor**.
 _Avoid_: UTC trading window, exchange uptime
 
 **Session Gating** (休市跳过):
 Excluding instruments whose underlying **Market Session** is closed at the scan anchor. Gating runs after the 24h quote-volume threshold and before the top-N slice, so a closed **TradFi Instrument** never consumes a top slot and never fires candle requests. Skipped instruments are reported back as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. A metadata outage turns gating off (the scan still runs unfiltered) — the response then carries `metadataUnavailable` and the UI states it, rather than quietly listing closed markets.
 _Avoid_: market filter, closed-market ban**Session-only Series** (会话序列):
-The candle series a **Coin Scan** actually measures for a session-gated instrument: every candle whose span `[open, open + timeframe)` contains no trading time of its **Market Session** is dropped before the detector runs, so weekends / holidays / overnight stretches — and for the UTC-aligned daily candles whole non-trading days — can never read as a quiet 蓄力 band. The scan requests 2× the raw window for gated instruments (Binance's cheapest klines weight band) so the same number of tradable candles remains. Ungated classes (crypto, commodity) keep every candle.
-_Avoid_: 24/7 series, unfiltered candles**Scan Pool Policy** (选币池范围):
-Which instrument classes a **Coin Scan** covers at all: crypto, indices, commodities, US equities and Korean equities. Hong Kong / A-share equities and pre-IPO contracts are excluded — pre-IPO has no underlying market to be open or closed, and the other two sit below the volume floor in practice. Classes outside the policy are not reported as skips; they are simply not part of the universe. An unclassified instrument stays in the pool, so a metadata outage can never empty a scan.
+The candle series an **Instrument Scan** actually measures for a session-gated instrument: every candle whose span `[open, open + timeframe)` contains no trading time of its **Market Session** is dropped before the detector runs, so weekends / holidays / overnight stretches — and for the UTC-aligned daily candles whole non-trading days — can never read as a quiet 蓄力 band. The scan requests 2× the raw window for gated instruments (Binance's cheapest klines weight band) so the same number of tradable candles remains. Ungated classes (crypto, commodity) keep every candle.
+_Avoid_: 24/7 series, unfiltered candles**Scan Pool Policy** (选品池范围):
+Which instrument classes an **Instrument Scan** covers at all: crypto, indices, commodities, US equities and Korean equities. Hong Kong / A-share equities and pre-IPO contracts are excluded — pre-IPO has no underlying market to be open or closed, and the other two sit below the volume floor in practice. Classes outside the policy are not reported as skips; they are simply not part of the universe. An unclassified instrument stays in the pool, so a metadata outage can never empty a scan.
 _Avoid_: unsupported-market filter, silent drop
 
 **市场温度 (Market Temperature)**:
@@ -173,7 +174,7 @@ The universe a **Market Temperature** reading covers: the Binance USDT-M perpetu
 _Avoid_: OKX swap pool, source-workbook instruments only
 
 **Bitget 复盘 (Bitget Review)**:
-The fourth review module (nav label `Bitget复盘`), parallel to **交割单复盘 / 回溯复盘 / 选币**. Its queue/detail/chart workspace is the SAME shared code path as **交割单复盘**, the only difference is the data source endpoint (`/api/bitget/trades` vs `/api/trades`). Data comes from the user's own Bitget USDT-M closed position history, cached locally in SQLite.
+The fourth review module (nav label `Bitget复盘`), parallel to **交割单复盘 / 回溯复盘 / 选品**. Its queue/detail/chart workspace is the SAME shared code path as **交割单复盘**, the only difference is the data source endpoint (`/api/bitget/trades` vs `/api/trades`). Data comes from the user's own Bitget USDT-M closed position history, cached locally in SQLite.
 _Avoid_: calling it 订单复盘 or mixing it with the xlsx source.
 
 **已平仓历史仓位 (History Position)**:

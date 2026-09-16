@@ -10,6 +10,7 @@ import {
 import { isCandleInSession, isMarketOpen, marketSession } from '../domain/market-session';
 import type { MarketClass } from '../domain/market-class';
 import { isScannable } from '../domain/scan-pool';
+import { scanScopeOf } from '../domain/scan-scope';
 import type { ReviewTimeframe } from '../domain/trade';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, Ticker, TickerSource } from './market-data';
@@ -67,16 +68,20 @@ export class CoinScanService {
     this.rateLimitWarnings.takeWarnings();
     const tickers = await this.tickerSource.listTickers();
     const anchor = params.anchor ?? Date.now();
-    // Order: 24h-volume threshold → pool policy → closed-market exclusion → topN
-    // slice. A closed instrument must NOT occupy a topN slot (it would otherwise
-    // crowd out a live one and burn its topN×5 klines budget), and the same goes
-    // for classes the scan does not cover at all.
+    // Sub-module of 选品: `crypto` (always open) or `equity` (session-gated).
+    const scope = params.scope ?? 'crypto';
+    // Order: 24h-volume threshold → pool policy → scope → closed-market exclusion
+    // → topN slice. A closed instrument must NOT occupy a topN slot (it would
+    // otherwise crowd out a live one and burn its topN×5 klines budget), and the
+    // same goes for classes the scan does not cover at all, or that belong to the
+    // other sub-module (the two pools are disjoint by construction).
     const pooled = tickers.filter((ticker) => ticker.quoteVolume24h >= params.minQuoteVolume24h);
     const open: Ticker[] = [];
     const skippedInstruments: string[] = [];
     for (const ticker of pooled) {
       // Absent marketClass (OKX, metadata down, unclassified) => crypto => scannable and always open.
       if (!isScannable(ticker.marketClass)) continue;
+      if (scanScopeOf(ticker.marketClass) !== scope) continue;
       if (isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor)) open.push(ticker);
       else skippedInstruments.push(ticker.instrument);
     }
@@ -153,9 +158,9 @@ export class CoinScanService {
     // Multi-timeframe convergence first (cross-timeframe consistency is a
     // stronger signal), then the strongest structure within each count.
     scanned.sort((a, b) => b.qualifiedCount - a.qualifiedCount || b.bestScore - a.bestScore);
-    // Echo the effective params, including the resolved anchor (Date.now() when
-    // absent), so the response.params.anchor always reflects what was actually used.
-    const echoedParams = { ...params, anchor };
+    // Echo the effective params, including the resolved scope and anchor
+    // (Date.now() when absent), so the response always reflects what ran.
+    const echoedParams = { ...params, scope, anchor };
     const response: ScanResponse = {
       scanned,
       qualifiedCount: scanned.length,

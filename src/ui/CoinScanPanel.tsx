@@ -6,15 +6,22 @@ import {
   type ScanRow,
 } from '../domain/coin-scan';
 import type { MarketHeatResult } from '../domain/market-heat';
+import { DEFAULT_SCAN_PARAMS, SCAN_SCOPES, type ScanScope } from '../domain/scan-scope';
 
-/** 选币扫描结果: 按方法区分载荷。 */
+/** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显。 */
 export type ScanResult =
   | { method: 'shrink'; data: ScanResponse }
   | { method: 'heat'; data: MarketHeatResult; anchorLabel: string };
 
 export type CoinScanPanelProps = {
+  /** 当前子模块 (加密 / 股票); 由 App 持有, 与结果面板共享。 */
+  scope: ScanScope;
+  /** 切换子模块; App 负责清空上一次结果。 */
+  onScopeChange: (scope: ScanScope) => void;
   onScanned: (result: ScanResult) => void;
 };
+
+const SCOPE_LABELS: Record<ScanScope, string> = { crypto: '加密', equity: '股票' };
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
@@ -29,10 +36,10 @@ function anchorScanLabel(anchorEpoch: number | null): string {
   return anchorEpoch === null ? `当前 ${localDateTimeLabel(Date.now())}` : `锚点 ${localDateTimeLabel(anchorEpoch)}`;
 }
 
-export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
+export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanelProps) {
   const [method, setMethod] = useState<'shrink' | 'heat'>('shrink');
-  const [topN, setTopN] = useState('60');
-  const [minQuoteVolume24h, setMinQuoteVolume24h] = useState('10000000');
+  const [topN, setTopN] = useState(String(DEFAULT_SCAN_PARAMS[scope].topN));
+  const [minQuoteVolume24h, setMinQuoteVolume24h] = useState(String(DEFAULT_SCAN_PARAMS[scope].minQuoteVolume24h));
   // 结构强度阈值主旋钮:调高 = 宁少勿滥.
   const [minScore, setMinScore] = useState('0.6');
   // Optional scan anchor (local datetime); empty = scan "now".
@@ -40,6 +47,16 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
+
+  /** Switching sub-module resets the scope-specific params and drops 热度 (crypto-only). */
+  function changeScope(next: ScanScope) {
+    if (next === scope) return;
+    onScopeChange(next);
+    setTopN(String(DEFAULT_SCAN_PARAMS[next].topN));
+    setMinQuoteVolume24h(String(DEFAULT_SCAN_PARAMS[next].minQuoteVolume24h));
+    if (next === 'equity' && method === 'heat') setMethod('shrink');
+    setError(null);
+  }
 
   async function scan() {
     if (method === 'shrink') {
@@ -58,7 +75,7 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
     setError(null);
     setScanWarnings([]);
     try {
-      const query = new URLSearchParams({ method });
+      const query = new URLSearchParams({ method, scope });
       if (method === 'shrink') {
         query.set('topN', topN);
         query.set('minQuoteVolume24h', minQuoteVolume24h);
@@ -86,11 +103,26 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
 
   return (
     <div className="coin-scan-panel">
+      <div className="coin-scan-scope-row">
+        <span>品种</span>
+        <span className="coin-scan-scope">
+          {SCAN_SCOPES.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              className={candidate === scope ? 'selected' : ''}
+              onClick={() => changeScope(candidate)}
+            >
+              {SCOPE_LABELS[candidate]}
+            </button>
+          ))}
+        </span>
+      </div>
       <label>
         方法
         <select value={method} onChange={(event) => setMethod(event.target.value as 'shrink' | 'heat')}>
           <option value="shrink">收敛结构</option>
-          <option value="heat">热度</option>
+          {scope === 'crypto' && <option value="heat">热度</option>}
         </select>
       </label>
       <div className="coin-scan-params">
@@ -124,6 +156,9 @@ export function CoinScanPanel({ onScanned }: CoinScanPanelProps) {
         </label>
       </div>
       <p className="panel-status hint">
+        {scope === 'equity'
+          ? '范围 = 美股 + 韩股:休市时段整体剔除,序列只含真实交易时段 K 线(盘前 04:00 – 盘后 20:00 ET)。'
+          : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
         {method === 'shrink'
           ? '一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
           : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
@@ -170,7 +205,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: Coi
     <>
       <header className="detail-header">
         <div>
-          <h1>选币结果</h1>
+          <h1>选品结果 · {SCOPE_LABELS[result.params.scope ?? 'crypto']}</h1>
           <p>扫描 {result.scanned.length} 个 · 收敛 {result.qualifiedCount} 个 · 全周期</p>
           {result.skippedInstruments && result.skippedInstruments.length > 0 && (
             <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>

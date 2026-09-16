@@ -1,4 +1,5 @@
 import type { Candlestick } from './candlestick';
+import type { ScanScope } from './scan-scope';
 import type { ReviewTimeframe } from './trade';
 
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
@@ -70,6 +71,12 @@ export type StructureParams = {
  */
 export type ShrinkScanParams = {
   method: 'shrink';
+  /**
+   * Sub-module of 选品 to scan: `crypto` (crypto + indices + commodities, always
+   * open) or `equity` (US + Korean equities, session-gated). Absent → `crypto`,
+   * which keeps every pre-09/16 caller unchanged.
+   */
+  scope?: ScanScope;
   topN: number;
   minQuoteVolume24h: number;
   /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */
