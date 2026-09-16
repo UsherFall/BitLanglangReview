@@ -27,7 +27,7 @@ function heatResult(): MarketHeatResult {
 describe('HeatScanResults', () => {
   it('renders the tier, stats, boards, and skip hints for the coin-scan heat method', () => {
     render(<HeatScanResults result={heatResult()} label="当前 2026-09-08 10:00" />);
-    expect(screen.getByText('选币结果 · 热度')).toBeInTheDocument();
+    expect(screen.getByText('选品结果 · 热度')).toBeInTheDocument();
     expect(screen.getByText('热市')).toBeInTheDocument();
     expect(screen.getByText('+2.10%')).toBeInTheDocument();
     expect(screen.getByText('BTCUSDT')).toBeInTheDocument();

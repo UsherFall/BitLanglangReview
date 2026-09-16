@@ -1,24 +1,29 @@
-# 执行计划（父任务）：集成与验收
+# 执行计划（父任务）：集成与验收（已完成）
 
-父任务本身**不实现功能**，实现都在 `09-16-equity-yahoo-candles`（A）与 `09-16-scan-module-split`（B）。这里只列验收动作与顺序。
+父任务不实现功能；实现都在 `09-16-equity-yahoo-candles`（A）与 `09-16-scan-module-split`（B）里，两者均已归档。
 
-## 顺序
+## 集成验收结果
 
-1. A 的完成前检查已全过（`prd.md` AC 1–8；52 文件 / 321 测试全绿；真机单请求验证会话序列）。此时单独验证一次：休市时段的加密扫描结果与改动前一致、美股/韩股不再出现在结果里。
-2. 等 B 的完成前检查全过（`prd.md` AC 1–8）。
-3. 跑本文件的集成验收（下方）。
+- [x] `npx vitest run` → **54 文件 / 336 测试全绿**；`npx tsc --noEmit` 干净。
+- [x] `grep -rn "选币\|Coin Scan" src/ tests/ CONTEXT.md .trellis/spec/` → 仅剩 `coin-scan.md` 里一句「renamed from 选币 09/16」的历史说明（有意保留）。
+- [x] **真机 A**：实时锚点（2026-09-16 07:01Z = 03:01 ET，美股未开盘）扫描 → equity scope 跳过 **50** 个股票类标的、结果为空；加密/商品照常。
+- [x] **真机 B**：历史锚点（2026-09-15 14:00 ET，美股盘中）→ equity rows `SNDK KORU MU SOXL MSTR CRCL SPCX SKHY`，crypto rows `XAU LSK ETH SOL XRP CL ZEC BTC`，**两池互斥**，港/A 股与 Pre-IPO 两池都不出现。
+- [x] **降级可见**：跑真机时币安共享出口 IP 被 418 两次，期间 `metadataAvailable()` 返回 false、响应带 `metadataUnavailable`（该路径在真实环境里被验证过，不是纸面）。
+- [x] 一致性：`CONTEXT.md` 术语为 `Instrument Scan`(选品) / `Crypto Scope` / `Equity Scope` / `Session-only Series` / `Scan Pool Policy` / `Session Gating`；`spec/server/{coin-scan,market-data,market-heat}.md` 与 `spec/frontend/component-guidelines.md`、`spec/server/api-plugin.md` 同步。
 
-## 集成验收动作
+## 交付顺序
 
-- [ ] `npx vitest run` 全绿；`npx tsc --noEmit` 干净。
-- [ ] `grep -rn "market-session" src/ tests/` 为空；`tests/market-session.test.ts` 不存在；`MarketHeatService` 与 `CoinScanService` 都不再 import 日历。
-- [ ] 真机 A：休市时段（周末 / 北京时间白天）`/api/scan?method=shrink&scope=equity` → 结果为空或仅剩开盘市场，且 `skippedInstruments` 列出被跳过的美股/韩股。
-- [ ] 真机 B：加密侧扫描结果与拆分前逐行对比（同一 anchor）→ `instrument`、`qualifiedCount`、`bestScore`、排序完全一致。
-- [ ] 真机 B：`scope=equity` 的结果只含美股/韩股；抽一个标的核对 K 线时间戳落在真实时段内（`AAPLUSDT` 的 1H bar ∈ 04:00–20:00 ET）。
-- [ ] 真机 B：`heat` 在加密侧正常、池子无股票类；`scope=equity&method=heat` 与非法 `scope` 均 400。
-- [ ] 一致性核对：`CONTEXT.md` / `spec/server/{coin-scan,market-data,market-heat}.md` 中不再有「Session Gating 按日历剔除」的表述，术语为 `Instrument Scan`（选品）/ `Equity Candle Source` / `Freshness Gate`。
+1. A 先落地（单独即修掉休市污染，且当时 UI 仍是单列表）—— 已提交归档。
+2. B 在 A 之上做池子分治与 UI 形态 —— 已提交归档。
 
 ## 回滚点
 
-- A 与 B 各自可独立 revert（B 回滚后退化为「单列表但池子已分治」，A 回滚后恢复 09/06 的日历式 gating 且窗口回到 100）。
-- 若不得不临时关掉休市过滤：让 `isScannable` 恒真 + `isCandleInSession` 恒真即退回改动前行为（但会重新引入休市污染，仅作应急）。
+- A、B 各自独立 revert。A 回滚恢复 09/06 的日历式 gating 且窗口回到 100 根；B 回滚退化为「单列表但池子已按 scope 分治」。
+- 应急关掉休市过滤：让 `isScannable` 恒真 + `isCandleInSession` 恒真即退回改动前行为（会重新引入休市污染）。
+
+## 未纳入本轮（另开任务）
+
+- 图表 K 线链路与选品结果的联动（现状不联动）。
+- 股票侧的热度读数（需要另定语义）。
+- 商品单独成子模块；隔夜 session（20:00–04:00 ET）纳入扫描。
+- `spec/frontend/component-guidelines.md` 的 Coin Scan Panel 段落早已与实现脱节（仍描述 `plateauMin`/`maxCompression`/`trendWindow` 等已删除的参数）—— 本轮只做了更名，未重写该段。

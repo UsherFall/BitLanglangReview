@@ -50,9 +50,9 @@ After a Free Replay timeframe switch, the preserved visible candle count can be 
 
 Free Replay must keep `progressTime` separate from `cursorTime`. Switching Review Timeframes preserves `progressTime` and recomputes the derived cursor; it must not floor and store the old cursor as the new true progress. For example, `progressTime = 10:35` maps to `10:30` on `5m` and `04:00` on `4H` so the unfinished `08:00-12:00` candle is not shown.
 
-## Coin Scan Panel
+## Instrument Scan Panel
 
-`CoinScanPanel.tsx` owns the 选币 scan UI (parameter area + results table). Contract:
+`CoinScanPanel.tsx` owns the 选品 scan UI (parameter area + results table). Contract:
 
 - The parameter area always sends every scan param (`topN`, `plateauMin`, `maxCompression`, `maxLatestTrend`, `trendWindow`, `minQuoteVolume24h`) as a number input, pre-filled with the current defaults (e.g. `plateauMin` prefills `2`, `maxCompression` prefills `0.8`, `maxLatestTrend` prefills `0.9`, `trendWindow` prefills `3`, step `0.05` for the ratio thresholds), and validates all inputs are non-empty finite numbers before scanning. There is no `时间周期` selector (one click scans all 5 timeframes — v6) and no `压缩窗口` input (the plateau scans `PLATEAU_BOX_WINDOWS` internally). Volume-related params (`ratioThreshold`, `consecutive`, `window`) are gone — the scan is pure price (v5). An optional `datetime-local` 扫描时间点 input sends `anchor` (epoch ms) when set, or omits it to scan "now"; a past anchor scans historical convergence on every timeframe (bars whose close time `<= anchor`).
 - The results table renders one row per `ScanRow`. Columns are 币 | 最新价 | 24h 涨跌 | 成交额 | 收敛周期 | 状态 | 操作, where 收敛周期 = `convergenceTimeframes.join(', ')` (e.g. `1H`, `1H,4H`). There are no volume columns and no flat 压缩比/收窄趋势 columns — those live in the expandable per-timeframe detail. A 「详情」 button toggles an expandable row (`.coin-scan-detail-row`) containing a sub-table over `row.timeframes` with columns 周期 | 压缩比 | 收窄趋势 | score | 窗口 | plateau宽 | 状态; non-qualified timeframes are dimmed (`:not(.qualified)`), and every cell uses `formatCompression` / `formatLatestTrend` / `formatScore`, which show `—` for the `LARGE_RATIO` flat-window sentinel (>= 1e9) and otherwise `toFixed(2)`, so the user can calibrate `maxCompression` / `maxLatestTrend` by eye. The service already sorts rows (`qualifiedCount` desc then `bestScore` asc); the UI renders them as-is. Qualified rows get the `.qualified` class.
@@ -79,7 +79,7 @@ The three review-detail floaters (其他币 `OtherCoinChart`, 龙头 `LeaderCoin
 
 ## Embedded Scan Results vs Floating Panels
 
-`HeatScanResults` (选币「热度」) reuses `MarketHeatView` inside the workspace, NOT as a floating panel. Two contracts keep the two surfaces from drifting:
+`HeatScanResults` (选品「热度」) reuses `MarketHeatView` inside the workspace, NOT as a floating panel. Two contracts keep the two surfaces from drifting:
 
 - `MarketHeatView` takes `layout?: 'stack' | 'columns'` (default `'stack'`). `'stack'` is the floating review panel; `'columns'` wraps the 涨幅榜/跌幅榜 boards in `.market-heat-boards.columns` (two-column grid) for the wide embedded card. The board markup stays single-source.
 - The embedded card (`<section className="market-heat-panel heat-scan-results">`) MUST reset every floating-positioning property it inherits from `.market-heat-panel`: `position: static; width: auto; max-width: none; max-height: none; align-self: stretch`. Missing `max-width`/`align-self` silently caps the card at the floating panel's `420px` and bottom-aligns it inside the `minmax(360px, 1fr)` grid row instead of filling it.
@@ -90,7 +90,7 @@ The three review-detail floaters (其他币 `OtherCoinChart`, 龙头 `LeaderCoin
 
 **Cause**: `.workspace` is `display: grid; grid-template-rows: auto minmax(360px, 1fr) auto`. A results component returns a Fragment, so every top-level element becomes a grid row. Adding a third element (e.g. a standalone skip-hint `<p>`) pushes the intended `1fr` content into row 3 (`auto`) and lets the hint take the `1fr` row.
 
-**Fix**: Keep the results component's top-level element count stable (header + main region). Fold secondary lines such as 选币's 「已跳过 N 个休市标的」 hint into the `.detail-header` title column instead of rendering it as a sibling.
+**Fix**: Keep the results component's top-level element count stable (header + main region). Fold secondary lines such as 选品's 「已跳过 N 个休市标的」 hint into the `.detail-header` title column instead of rendering it as a sibling.
 
 **Prevention**: When adding a top-level element to a Fragment rendered directly under `.workspace`, check how it maps onto the three grid rows.
 

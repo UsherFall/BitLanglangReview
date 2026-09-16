@@ -1506,7 +1506,7 @@ label,
   }
 }
 
-/* Coin scan (选币) */
+/* Instrument scan (选品) */
 .coin-scan-panel {
   display: grid;
   align-content: start;
@@ -1755,7 +1755,7 @@ label,
   color: #8b949e;
 }
 
-/* 市场热度（复盘明细头部「热度」按钮打开的浮层 / 选币「热度」内嵌结果共享样式） */
+/* 市场热度（复盘明细头部「热度」按钮打开的浮层 / 选品「热度」内嵌结果共享样式） */
 .market-heat-panel {
   position: relative;
   width: 100%;
@@ -1944,7 +1944,7 @@ label,
   color: #f59f9f;
 }
 
-/* 涨幅榜 / 跌幅榜: 默认纵向堆叠(浮窗), columns = 选币内嵌两栏并排 */
+/* 涨幅榜 / 跌幅榜: 默认纵向堆叠(浮窗), columns = 选品内嵌两栏并排 */
 .market-heat-boards {
   display: grid;
   gap: 8px;
@@ -1961,7 +1961,7 @@ label,
   }
 }
 
-/* 选币「热度」结果: 页面内嵌卡片, 覆盖 .market-heat-panel 的浮窗定位 */
+/* 选品「热度」结果: 页面内嵌卡片, 覆盖 .market-heat-panel 的浮窗定位 */
 .heat-scan-results {
   position: static;
   width: auto;

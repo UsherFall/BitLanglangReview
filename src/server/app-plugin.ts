@@ -235,7 +235,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           if (scope !== 'crypto') {
             return send(res, 400, { error: 'Invalid scan parameters' });
           }
-          // 选币「热度」: 复用复盘的市场热度能力(恒 Binance、固定 Top80), 展示整体场子读数。
+          // 选品「热度」: 复用复盘的市场热度能力(恒 Binance、固定 Top80), 展示整体场子读数。
           const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
           if (anchor !== undefined && anchor <= 0) {
             return send(res, 400, { error: 'Invalid scan parameters' });
