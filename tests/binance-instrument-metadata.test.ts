@@ -90,3 +90,50 @@ describe('BinanceInstrumentMetadataSource', () => {
     expect(binanceInstrumentMetadata()).toBe(binanceInstrumentMetadata());
   });
 });
+
+const exchangeInfoWithStatus = {
+  symbols: [
+    { symbol: 'BTCUSDT', underlyingType: 'COIN', status: 'TRADING' },
+    { symbol: 'RAYUSDT', underlyingType: 'COIN', status: 'SETTLING' },
+    { symbol: 'NOSTATUSUSDT', underlyingType: 'COIN' },
+  ],
+};
+
+describe('BinanceInstrumentMetadataSource.symbolStatuses', () => {
+  it('exposes the exchangeInfo status per symbol', async () => {
+    const source = new BinanceInstrumentMetadataSource(vi.fn(async () => exchangeInfoWithStatus));
+
+    const statuses = await source.symbolStatuses();
+
+    expect(statuses.get('BTCUSDT')).toBe('TRADING');
+    expect(statuses.get('RAYUSDT')).toBe('SETTLING');
+  });
+
+  it('omits a symbol whose payload carries no status, so absence means unknown', async () => {
+    const source = new BinanceInstrumentMetadataSource(vi.fn(async () => exchangeInfoWithStatus));
+
+    const statuses = await source.symbolStatuses();
+
+    expect(statuses.has('NOSTATUSUSDT')).toBe(false);
+  });
+
+  it('serves load() and symbolStatuses() from one request', async () => {
+    const fetchJson = vi.fn(async () => exchangeInfoWithStatus);
+    const source = new BinanceInstrumentMetadataSource(fetchJson);
+
+    await source.load();
+    await source.symbolStatuses();
+
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns an empty status map (no throw) when the request fails', async () => {
+    const source = new BinanceInstrumentMetadataSource(
+      vi.fn(async () => {
+        throw new Error('network down');
+      }),
+    );
+
+    await expect(source.symbolStatuses()).resolves.toEqual(new Map());
+  });
+});

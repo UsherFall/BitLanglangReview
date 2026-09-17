@@ -17,7 +17,7 @@ const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new Bi
 const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
 ```
 
-The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and are served by the shared `BinanceCandleSource` (see "Personal Review Candle Source").
+The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source").
 
 ### Market heat always runs on Binance (09/07)
 
@@ -58,9 +58,22 @@ Coverage is in `tests/candlestick-cache.test.ts`.
 
 Coverage is in `tests/binance-candles.test.ts`.
 
-## Personal Review Candle Source: Binance (09/07)
+## Personal Review Candle Source: Binance + OKX fallback (09/17)
 
-The「个人交割单复盘」review mode (trades synced from Bitget) requests `source=binance` on `/api/candles`. The route converts the OKX-style instrument (`ZEC-USDT-SWAP`) to the Binance USDT-M symbol (`ZECUSDT`) with `okxInstrumentToBinanceSymbol` (`src/domain/instrument-symbol.ts`) and serves the request with the shared `BinanceCandleSource` instance (the one coin scan uses by default). No fallback: if Binance has no USDT-M perpetual for the instrument (or the mapping returns null) the chart shows the empty state.
+The「个人交割单复盘」review mode (trades synced from Bitget) requests `source=binance` on `/api/candles`. Bitget/OKX symbol → Binance symbol is NOT a pure string transform — the exchange renames and delists contracts — so the request runs through an ordered candidate CHAIN in `src/server/review-candle-source.ts` (`fetchReviewCandles`, built on `resolveCandleChain` in `src/domain/instrument-symbol.ts`):
+
+1. Binance alias candidate (`BINANCE_SYMBOL_ALIASES`, e.g. `RAY` → `RAYSOLUSDT`), then the plain `base+USDT` candidate;
+2. the OKX fallback on the instrument's own name (`RAY-USDT-SWAP`), served by the same `CandlestickService` the workbook review uses.
+
+A Binance step whose `exchangeInfo.status` is known and not `TRADING` is skipped WITHOUT a request — that is the only way the chain advances to the OKX step. A tradable candidate's answer is final, including an empty window, so scrolling past the present stays silent instead of switching venue; and a Binance fetch failure propagates unchanged, because substituting OKX prices for a rate-limited (429/418) Binance chart would hide the limit. Verified root causes (2026-09-17):
+
+- `SHIBUSDT` does not exist on Binance USDT-M (`fapi/v1/klines` → 400 `-1121`); Binance quotes the same asset as `1000SHIBUSDT`, a **1000x face value**. It is therefore deliberately NOT in the alias table — the candle prices would stop sharing a scale with the trade's entry/exit prices and would need a price-scaling layer (which would also change how drawings read prices). OKX lists the plain `SHIB-USDT-SWAP` at the trade's scale, so the fallback serves it.
+- `RAYUSDT` is `status: "SETTLING"` (Binance settled it in 2022-11) and `fapi/v1/klines` still answers for it with a FROZEN price (`0.248`) and zero volume. Binance lists the same asset as `RAYSOLUSDT`, which is what the alias resolves to. `VANRYUSDT` is also `SETTLING` but has no replacement on Binance and none on OKX, so it is the case that ends in the explicit no-data error.
+- Coverage measured on the user's 47 mappable Bitget positions: 11 symbols exist only on Binance, 2 (`SHIB`, `RAY`) only on OKX, 1 (`VANRY`) on neither. Binance must therefore stay the primary source; OKX is the fallback only.
+
+Chain exhaustion raises `ReviewCandleUnavailableError`, which the route turns into `502 { error }`; the message names the instrument and each source's reason (e.g. `VANRYUSDT 不可用(币安合约状态 SETTLING)`), and the chart status line renders it verbatim. `binanceStatuses` comes from `BinanceInstrumentMetadataSource.symbolStatuses()` — the same 6h-cached `exchangeInfo` fetch the scan already uses.
+
+**Known residual**: when that metadata is unreadable (empty status map) nothing can be validated, so every Binance candidate is attempted and the chain cannot advance to OKX. A `SETTLING` contract is then undetectable and still charts as a flat line, and a symbol Binance does not list (SHIB) still 502s — i.e. exactly the pre-chain behaviour. Closing either would need a "zero-volume window" heuristic (which would misfire on genuinely quiet markets) or a fallback on request errors (which would mask rate limits).
 
 Why not Bitget's own candles? Bitget `/api/v2/mix/market/candles` keeps only a **rolling window per granularity** (measured 09/07 on BTCUSDT): 5m ≈ 30 days, 15m ≈ 1–2 months, 1H ≈ 60–90 days, 4H ≈ a few months, while 1D/1W/1M go back years. Intraday charts for any but recent trades were therefore empty, so the personal review default was moved to Binance, whose `fapi/v1/klines` have no such rolling retention (5m data from 2021+). Historical notes kept for future reference:
 
@@ -70,7 +83,8 @@ Why not Bitget's own candles? Bitget `/api/v2/mix/market/candles` keeps only a *
 
 ### Source selection notes
 
-- `CandleRequest.instrument` is always the **native symbol of the chosen source**; the route converts from the review's OKX-style instrument (`src/domain/instrument-symbol.ts`).
+- `CandleRequest.instrument` is always the **native symbol of the chosen source**. The route resolves the review's OKX-style instrument into a chain (`src/domain/instrument-symbol.ts`) and each step requests its own source with that source's vocabulary.
+- The personal review chain must not leak into the coin scan or market heat: those consumers hold `BinanceCandleSource` directly (the scan pool is defined as Binance USDT-M, so an OKX fallback would rank a different universe), and only the `/api/candles?source=binance` route path runs the chain.
 - **Cache-key namespace rule (09/07)**: the `candles` PK is `(instrument, timeframe, timestamp)` with no source column. Isolation works only when sources use DIFFERENT symbol vocabularies — OKX's `X-USDT-SWAP` vs `base+USDT` — NOT when two sources share a vocabulary. The retired Bitget source and Binance both keyed on `base+USDT` (`ZECUSDT`), so Bitget leftovers mixed with Binance rows and produced two daily bars per day. If a future source shares the `base+USDT` namespace, it MUST namespace its cache keys (e.g. a source prefix); the retired-source leftovers were cleared once from the local cache.
 - The mode→source binding lives in `src/ui/App.tsx` (`reviewModeBindings`): workbook review → `okx`, personal review → `binance`.
 - Binance daily candles align to UTC 0:00 (no -8h offset), so a trade near a UTC day boundary may sit on a different chart day than the OKX/UTC+8 view — accepted for the personal mode.

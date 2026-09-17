@@ -49,7 +49,7 @@ The market time under the reviewer's active navigation point while dragging, scr
 _Avoid_: drifting chart position, unstable drag point, jumpy time axis
 
 **Market Data Source**:
-The external source used to obtain **Candlesticks**. This project uses OKX public market data for futures instruments.
+The external source used to obtain **Candlesticks**. This project uses OKX public market data for futures instruments, and Binance USDT-M perpetuals for the 选品 scan, 市场热度, and the 「个人交割单复盘」charts. A Bitget position's symbol does not always have a tradable Binance counterpart (Binance uses a `1000x` face value for some assets, and it renames or settles contracts), so the personal review chart resolves an ordered candidate chain — Binance symbol candidates first, then OKX on the instrument's own name — and reports "no market data" when neither has it, instead of charting a frozen price.
 _Avoid_: quote provider, exchange data
 
 **Source Workbook**:
