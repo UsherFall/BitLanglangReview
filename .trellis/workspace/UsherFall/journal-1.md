@@ -849,3 +849,42 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: 个人复盘 K 线符号解析修正(SHIB 无图/RAY 直线)
+<!-- trellis-session: v=2 fp=815437ddd0fd6db6 -->
+
+**Date**: 2026-09-17
+**Task**: 个人复盘 K 线符号解析修正(SHIB 无图/RAY 直线)
+**Branch**: `master`
+
+### Summary
+
+个人交割单复盘图表改走符号候选链(币安别名/机械符号 + OKX 回退): SHIB 与 RAY 拿到真实行情, VANRY 给出明确无行情提示
+
+### Main Changes
+
+- domain: 新增 BINANCE_SYMBOL_ALIASES(RAY→RAYSOLUSDT)与 resolveCandleChain(候选链 + usable/reason), 删除无调用者的 okxInstrumentToBinanceSymbol
+- metadata: 新增 symbolStatuses(), 与 load() 共享同一次 exchangeInfo 请求与 6h 缓存; load() 契约不变
+- server: 新增 review-candle-source.ts(fetchReviewCandles), getCandlesForMode 迁入复用; 只有状态判定不可交易才换源, 空窗口与请求报错都不换源
+- app-plugin: source=binance 分支改走候选链; 无行情 502 + 具体 reason, UI 零改动
+- spec: 改写 market-data.md 的 No fallback 段, 同步 api-plugin.md 与 CONTEXT.md, 记录元数据降级残留
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6cc1e15` | fix(review): 个人复盘 K 线改走符号候选链, 币安不可用回退 OKX |
+
+### Testing
+
+- [OK] npx tsc --noEmit 干净; npx vitest run 56 文件/358 测试全绿(基线 54/336)
+- [OK] 真机核对(临时 SQLite): RAY→RAYSOLUSDT 150 根有波动; SHIB→OKX 同量纲; VANRY→明确报错; ZEC→仍走币安
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 同类根因仍在 市场热度: market-heat-service.ts:85 的 normalizeToBinance 会把 RAY 交易映射到已下线的 RAYUSDT, 冻结 K 线被当成 0% 波动池成员; 待决定是否另开任务
