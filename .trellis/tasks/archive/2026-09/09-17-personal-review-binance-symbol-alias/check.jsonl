@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-17-personal-review-binance-symbol-alias/prd.md", "reason": "验收标准来源：R1-R5 与 5 条 AC，含 SHIB/RAY/VANRY 三个实测现象"}
+{"file": ".trellis/tasks/09-17-personal-review-binance-symbol-alias/design.md", "reason": "设计契约：候选链规则、别名表只收同量纲符号、元数据 status 暴露方式、502+message 通道、被否方案与降级残留"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对是否同步改写了「No fallback」段与缓存命名空间不变量；确认扫描/热度路径未被波及"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "核对 /api/candles 行为描述是否同步，502 语义是否与既有约定一致"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "检查 Instrument 语义与 Candlestick 契约未被破坏"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "逐层核对 domain 候选链 -> server 编排 -> route 响应 -> UI 状态行文案的一致性，且无残留的手写符号转换"}

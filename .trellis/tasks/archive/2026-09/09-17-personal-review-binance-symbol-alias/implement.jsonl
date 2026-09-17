@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "domain 层约定(不得 import fetch/fs/SQLite)，新增候选链纯函数前必读"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Instrument / Candlestick 的领域语义，符号归一化改动不得破坏"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "数据源契约、candles 主键无 source 列的命名空间规则、Binance earlier/coversAnchorBar 语义，以及待改写的「No fallback」段"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "/api/candles 路由契约、502 错误通道、connect 中间件前缀规则"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "改动跨越 domain(候选链) -> server(编排/路由) -> UI(状态行)，需按跨层契约核对"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用既有 BinanceInstrumentMetadataSource 缓存与 getCandlesForMode，避免再造第二套 timeframe/合并逻辑"}
