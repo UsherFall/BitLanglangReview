@@ -888,3 +888,25 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - 同类根因仍在 市场热度: market-heat-service.ts:85 的 normalizeToBinance 会把 RAY 交易映射到已下线的 RAYUSDT, 冻结 K 线被当成 0% 波动池成员; 待决定是否另开任务
+
+
+## Session 19: 选品结果表手动降权(沉底+灰化)
+<!-- trellis-session: v=2 fp=976ef8986c3ffe8a -->
+
+**Date**: 2026-09-18
+**Task**: 选品结果表手动降权(沉底+灰化)
+**Branch**: `master`
+
+### Summary
+
+给选品收敛结果表加人工降权:用户判断某币日线结构不适合做多后一键标记,该行沉底+灰化,标记存 localStorage(key scan-demoted)跨扫描保留,与龙头币标记独立。明确不做自动日线判定——口径由人看。新增纯函数 orderScanRows(稳定分组,不重新排名)+ loadStoredStringList 去重;测试 367 全绿,tsc 干净。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cead7eb` | feat(scan): 选品结果表手动降权(沉底 + 灰化) |
+
+### Status
+
+[OK] **Completed**

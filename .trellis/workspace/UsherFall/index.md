@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
-- **Last Active**: 2026-09-17
+- **Total Sessions**: 19
+- **Last Active**: 2026-09-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~890 | Active |
+| `journal-1.md` | ~912 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-09-18 | 选品结果表手动降权(沉底+灰化) | `cead7eb` | `master` |
 | 18 | 2026-09-17 | 个人复盘 K 线符号解析修正(SHIB 无图/RAY 直线) | `6cc1e15` | `master` |
 | 17 | 2026-09-11 | 复盘/选币界面视觉与标注优化 | `5e50ca9` | `master` |
 | 16 | 2026-09-07 | 市场热度复盘 + 全局共享限速 + 删价格警报 | `98a1534`, `b5c5347`, `c6a1231`, `944e80c`, `40f354d`, `6cc7700`, `d1a02b4` | `master` |
