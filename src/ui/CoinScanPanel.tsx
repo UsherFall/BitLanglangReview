@@ -7,6 +7,7 @@ import {
 } from '../domain/coin-scan';
 import type { MarketHeatResult } from '../domain/market-heat';
 import { DEFAULT_SCAN_PARAMS, SCAN_SCOPES, type ScanScope } from '../domain/scan-scope';
+import { orderScanRows } from './coin-scan-rows';
 
 /** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显。 */
 export type ScanResult =
@@ -178,9 +179,12 @@ export type CoinScanResultsProps = {
   result: ScanResponse | null;
   leaderCoins: string[];
   onToggleLeaderCoin: (instrument: string) => void;
+  /** Instruments the user manually demoted (日线结构不适合做多); rendered last and dimmed. */
+  demotedCoins: string[];
+  onToggleDemotedCoin: (instrument: string) => void;
 };
 
-export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: CoinScanResultsProps) {
+export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demotedCoins, onToggleDemotedCoin }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
   const [expandedInstrument, setExpandedInstrument] = useState<string | null>(null);
 
@@ -199,8 +203,10 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: Coi
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  // The service sorts scanned rows (qualifiedCount desc, then bestScore desc); the
-  // UI renders them as-is.
+  // The service sorts scanned rows (qualifiedCount desc, then bestScore desc) and
+  // the UI keeps that order, except that manually demoted rows sink to the bottom
+  // (a stable partition, not a re-rank).
+  const rows = orderScanRows(result.scanned, demotedCoins);
   return (
     <>
       <header className="detail-header">
@@ -233,77 +239,89 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin }: Coi
             </tr>
           </thead>
           <tbody>
-            {result.scanned.map((row) => (
-              <Fragment key={row.instrument}>
-                <tr className="qualified">
-                  <td>{shortInstrument(row.instrument)}</td>
-                  <td>{formatPrice(row.lastPrice)}</td>
-                  <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
-                  <td>{formatVolume(row.quoteVolume24h)}</td>
-                  <td>{formatConvergedStructures(row)}</td>
-                  <td>{formatScore(row.bestScore)}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="coin-scan-copy"
-                      title="展开各周期结构明细"
-                      onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
-                    >
-                      {expandedInstrument === row.instrument ? '收起' : '详情'}
-                    </button>
-                    <button
-                      type="button"
-                      className="coin-scan-copy"
-                      title={leaderCoins.includes(row.instrument) ? `取消 ${shortInstrument(row.instrument)} 的龙头币标记` : `将 ${shortInstrument(row.instrument)} 记为龙头币`}
-                      onClick={() => onToggleLeaderCoin(row.instrument)}
-                    >
-                      {leaderCoins.includes(row.instrument) ? '已记' : '记龙头'}
-                    </button>
-                    <button
-                      type="button"
-                      className="coin-scan-copy"
-                      title={`复制 ${shortInstrument(row.instrument).toLowerCase()}`}
-                      onClick={() => copyInstrument(row.instrument)}
-                    >
-                      {copiedInstrument === row.instrument ? '已复制' : '复制'}
-                    </button>
-                  </td>
-                </tr>
-                {expandedInstrument === row.instrument && (
-                  <tr className="coin-scan-detail-row">
-                    <td colSpan={7}>
-                      <table className="coin-scan-detail-table">
-                        <thead>
-                          <tr>
-                            <th>周期</th>
-                            <th>结构类型</th>
-                            <th>位置</th>
-                            <th>强度分</th>
-                            <th>触碰次数</th>
-                            <th>状态</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {scanTimeframes.map((timeframe) => {
-                            const structure = row.structures[timeframe];
-                            return (
-                              <tr key={timeframe} className={structure.qualified ? 'qualified' : ''}>
-                                <td>{timeframe}</td>
-                                <td>{structureLabel(structure.structure)}</td>
-                                <td>{formatPosition(structure.position)}</td>
-                                <td>{formatScore(structure.score)}</td>
-                                <td>{structure.touchCount}</td>
-                                <td>{structure.qualified ? '合格' : '—'}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+            {rows.map((row) => {
+              const isDemoted = demotedCoins.includes(row.instrument);
+              return (
+                <Fragment key={row.instrument}>
+                  <tr className={isDemoted ? 'demoted' : 'qualified'}>
+                    <td>{shortInstrument(row.instrument)}</td>
+                    <td>{formatPrice(row.lastPrice)}</td>
+                    <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
+                    <td>{formatVolume(row.quoteVolume24h)}</td>
+                    <td>{formatConvergedStructures(row)}</td>
+                    <td>{formatScore(row.bestScore)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="coin-scan-copy"
+                        title="展开各周期结构明细"
+                        onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
+                      >
+                        {expandedInstrument === row.instrument ? '收起' : '详情'}
+                      </button>
+                      <button
+                        type="button"
+                        className="coin-scan-copy"
+                        title={leaderCoins.includes(row.instrument) ? `取消 ${shortInstrument(row.instrument)} 的龙头币标记` : `将 ${shortInstrument(row.instrument)} 记为龙头币`}
+                        onClick={() => onToggleLeaderCoin(row.instrument)}
+                      >
+                        {leaderCoins.includes(row.instrument) ? '已记' : '记龙头'}
+                      </button>
+                      <button
+                        type="button"
+                        className="coin-scan-copy"
+                        aria-pressed={isDemoted}
+                        title={isDemoted ? `取消 ${shortInstrument(row.instrument)} 的降权` : `将 ${shortInstrument(row.instrument)} 降权(沉底并灰化)`}
+                        onClick={() => onToggleDemotedCoin(row.instrument)}
+                      >
+                        {isDemoted ? '已降权' : '降权'}
+                      </button>
+                      <button
+                        type="button"
+                        className="coin-scan-copy"
+                        title={`复制 ${shortInstrument(row.instrument).toLowerCase()}`}
+                        onClick={() => copyInstrument(row.instrument)}
+                      >
+                        {copiedInstrument === row.instrument ? '已复制' : '复制'}
+                      </button>
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
+                  {expandedInstrument === row.instrument && (
+                    <tr className={isDemoted ? 'coin-scan-detail-row demoted' : 'coin-scan-detail-row'}>
+                      <td colSpan={7}>
+                        <table className="coin-scan-detail-table">
+                          <thead>
+                            <tr>
+                              <th>周期</th>
+                              <th>结构类型</th>
+                              <th>位置</th>
+                              <th>强度分</th>
+                              <th>触碰次数</th>
+                              <th>状态</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {scanTimeframes.map((timeframe) => {
+                              const structure = row.structures[timeframe];
+                              return (
+                                <tr key={timeframe} className={structure.qualified ? 'qualified' : ''}>
+                                  <td>{timeframe}</td>
+                                  <td>{structureLabel(structure.structure)}</td>
+                                  <td>{formatPosition(structure.position)}</td>
+                                  <td>{formatScore(structure.score)}</td>
+                                  <td>{structure.touchCount}</td>
+                                  <td>{structure.qualified ? '合格' : '—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

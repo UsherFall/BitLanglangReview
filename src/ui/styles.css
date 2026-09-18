@@ -1623,6 +1623,12 @@ label,
   background: rgba(74, 222, 128, 0.08);
 }
 
+/* 手动降权(人工判断日线结构不适合做多):沉底 + 灰化,仍可读可操作。 */
+.coin-scan-table tbody tr.demoted,
+.coin-scan-detail-row.demoted {
+  opacity: 0.45;
+}
+
 .coin-scan-detail-row td {
   padding: 0 !important;
   background: #0b1017;

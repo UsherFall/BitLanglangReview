@@ -127,6 +127,8 @@ function reviewCandleSource(mode: ReviewMode): CandleSourceId {
 
 const SIDEBAR_CONFIG_KEY = 'sidebar-config';
 const LEADER_COINS_KEY = 'leader-coins';
+// 手动降权的选品标的(人工判断日线结构不适合做多),独立于龙头币标记。
+const SCAN_DEMOTED_KEY = 'scan-demoted';
 const DEFAULT_SIDEBAR_WIDTH = 390;
 const MIN_SIDEBAR_WIDTH = 280;
 const COLLAPSED_SIDEBAR_WIDTH = 40;
@@ -171,10 +173,11 @@ function loadSidebarConfig(): SidebarConfig {
   }
 }
 
-function loadLeaderCoins(): string[] {
+/** Reads a localStorage key holding a JSON string array, tolerating absent/corrupt values. */
+function loadStoredStringList(key: string): string[] {
   if (typeof window === 'undefined') return [];
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(LEADER_COINS_KEY) ?? '[]') as unknown;
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? '[]') as unknown;
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
   } catch {
     return [];
@@ -204,7 +207,8 @@ export function App() {
   const [otherCoinOpen, setOtherCoinOpen] = useState(false);
   const [leaderCoinOpen, setLeaderCoinOpen] = useState(false);
   const [heatOpen, setHeatOpen] = useState(false);
-  const [leaderCoins, setLeaderCoins] = useState<string[]>(() => loadLeaderCoins());
+  const [leaderCoins, setLeaderCoins] = useState<string[]>(() => loadStoredStringList(LEADER_COINS_KEY));
+  const [demotedCoins, setDemotedCoins] = useState<string[]>(() => loadStoredStringList(SCAN_DEMOTED_KEY));
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
@@ -241,6 +245,10 @@ export function App() {
     setLeaderCoins((current) => current.includes(instrument) ? current.filter((item) => item !== instrument) : [...current, instrument]);
   }
 
+  function toggleDemotedCoin(instrument: string) {
+    setDemotedCoins((current) => current.includes(instrument) ? current.filter((item) => item !== instrument) : [...current, instrument]);
+  }
+
   // Tag list and per-tag counts are module-scoped (xlsx universe vs `bg-`),
   // so every save/tag route names the module it is acting on.
   const reviewModule: ReviewModule = reviewMode === 'bitget' ? 'bitget' : 'trade';
@@ -257,6 +265,10 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(LEADER_COINS_KEY, JSON.stringify(leaderCoins));
   }, [leaderCoins]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SCAN_DEMOTED_KEY, JSON.stringify(demotedCoins));
+  }, [demotedCoins]);
 
   // 市场热度 per-trade computation costs a whole-pool candle fetch (~80 req)
   // for each NEW anchor, so it must not auto-follow queue navigation while open:
@@ -792,7 +804,7 @@ export function App() {
           scanResult && scanResult.method === 'heat' ? (
             <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} />
           ) : (
-            <CoinScanResults result={scanResult ? scanResult.data : null} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} />
+            <CoinScanResults result={scanResult ? scanResult.data : null} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} demotedCoins={demotedCoins} onToggleDemotedCoin={toggleDemotedCoin} />
           )
         ) : selectedTrade ? (
           <>
