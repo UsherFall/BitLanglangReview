@@ -8,14 +8,15 @@
  * 82 个 USDT 品种 × 5 周期、各 ≥100 根，足够标定，且零请求。
  *
  * 对比两套口径：
- *   OLD = 现状 `0.7 × calm + 0.3 × min(1, runLen/16)`（直接调用真实 detectConvergence）
- *   NEW = 只保留收缩深度 `score = calm`
+ *   OLD = 改动前的 `0.7 × calm + 0.3 × min(1, runLen/16)`。**冻结在脚本里的镜像**，
+ *         因为生产代码改成 calm-only 后，真实 `detectConvergence` 不再产生这组分数。
+ *   NEW = 只保留收缩深度 `score = calm`（`detectCalmOnly` 镜像），并额外用真实
+ *         `detectConvergence` 做交叉校验，确保实现与标定口径一致。
  * 门槛：OLD 固定 0.6（面板默认）；NEW 扫描 0.43 / 0.50 / 0.60。
  */
 import Database from 'better-sqlite3';
-import { pathToFileURL } from 'node:url';
 
-const REPO = pathToFileURL('D:/haveFun/BitLanglangReview/').href;
+const REPO = new URL('../../../../', import.meta.url).href; // 仓库根（本文件在 .trellis/tasks/<task>/research/ 下）
 const { detectConvergence, defaultStructureParams, scanTimeframes } = await import(REPO + 'src/domain/coin-scan.ts');
 
 const P = defaultStructureParams();
@@ -24,6 +25,8 @@ const WINDOW = 100;
 const OLD_MIN_SCORE = 0.6;
 const NEW_THRESHOLDS = [0.43, 0.50, 0.60];
 const OLD_EQUIVALENT = 0.6 / 0.7 - 0.3 / 0.7; // 旧口径长带的等效 calm 门槛 = 0.4286
+/** 冻结的旧长度刻度。生产代码已删除 lengthScale，基线镜像必须自带这个数。 */
+const OLD_LENGTH_SCALE = 16;
 
 const median = (a) => (a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)] : 0);
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -98,7 +101,10 @@ db.close();
 // ---------------- 计算 ----------------
 const rows = [];
 for (const w of windows) {
-  const oldResult = detectConvergence(w.bars, P);
+  // 注意：基线不能再用真实 detectConvergence —— 生产代码改成 calm-only 之后，
+  // 它就不再是"改动前"了。所以基线走下面冻結的旧公式镜像 detectOldDetail，
+  // 新口径走 detectCalmOnly，真实函数单独用一条交叉校验比对。
+  const oldResult = detectOldDetail(w.bars);
   const newResult = detectCalmOnly(w.bars);
   rows.push({
     instrument: w.instrument,
@@ -107,10 +113,10 @@ for (const w of windows) {
     oldQualified: Boolean(oldResult && oldResult.score >= OLD_MIN_SCORE),
     calm: newResult ? newResult.calm : null,
     newRunLen: newResult ? newResult.runLen : null,
-    oldRunLen: null,
+    oldRunLen: oldResult ? oldResult.runLen : null,
   });
 }
-// OLD 选中的带长：用镜像复算（OLD 取 score 最大，带长度用于统计）
+/** 冻结的旧公式镜像（0.7×calm + 0.3×length）。改动后真实函数已不产生这组分数。 */
 function detectOldDetail(s) {
   if (s.length < P.minRun * 2 || s.some((c) => c.low <= 0)) return null;
   const vol = s.map((c) => (c.high - c.low) / c.low);
@@ -129,15 +135,21 @@ function detectOldDetail(s) {
     const tol = 0.1 * (rh - rl);
     if (lastPrice < rl - tol || lastPrice > rh + tol) continue;
     const calm = clamp01(1 - runMed / preMed);
-    const score = clamp01(0.7 * calm + 0.3 * clamp01(runLen / P.lengthScale));
+    const score = clamp01(0.7 * calm + 0.3 * clamp01(runLen / OLD_LENGTH_SCALE));
     if (!best || score > best.score) best = { score, runLen, calm };
   }
   return best;
 }
-for (let i = 0; i < rows.length; i += 1) {
-  const d = detectOldDetail(windows[i].bars);
-  rows[i].oldRunLen = d ? d.runLen : null;
-  if (d) rows[i].oldScoreMirror = d.score;
+// 交叉校验：实现后的真实 detectConvergence 必须与标定用的 calm-only 镜像完全一致
+// （决策 + 分数）。不一致说明实现与标定口径脱节，整份对照就失效。
+const mismatches = [];
+for (const w of windows) {
+  const real = detectConvergence(w.bars, P);
+  const mirror = detectCalmOnly(w.bars);
+  const realScore = real ? real.score : null;
+  const mirrorScore = mirror ? mirror.calm : null;
+  if ((realScore === null) !== (mirrorScore === null)) { mismatches.push(`${w.instrument}:${w.timeframe} 决策不同`); continue; }
+  if (realScore !== null && Math.abs(realScore - mirrorScore) > 1e-12) mismatches.push(`${w.instrument}:${w.timeframe} 分数 ${realScore} vs ${mirrorScore}`);
 }
 
 const dur = (runLen, tf) => {
@@ -154,7 +166,7 @@ const oldRows = rows.filter((r) => r.oldQualified);
 const oldKeys = new Set(oldRows.map((r) => `${r.instrument}:${r.timeframe}`));
 
 console.log('== OLD 基线（现状）==');
-console.log(`合格窗口 ${oldRows.length}   其中带长<16(早期) ${oldRows.filter((r) => r.oldRunLen < P.lengthScale).length} (${pct(oldRows.filter((r) => r.oldRunLen < P.lengthScale).length, oldRows.length)})`);
+console.log(`合格窗口 ${oldRows.length}   其中带长<16(早期) ${oldRows.filter((r) => r.oldRunLen < OLD_LENGTH_SCALE).length} (${pct(oldRows.filter((r) => r.oldRunLen < OLD_LENGTH_SCALE).length, oldRows.length)})`);
 console.log(`选中带长: 中位 ${median(oldRows.map((r) => r.oldRunLen))}  分布 ${JSON.stringify(oldRows.reduce((m, r) => ((m[r.oldRunLen] = (m[r.oldRunLen] ?? 0) + 1), m), {}))}`);
 console.log('');
 
@@ -165,7 +177,7 @@ for (const th of NEW_THRESHOLDS) {
   const nk = new Set(nr.map((r) => `${r.instrument}:${r.timeframe}`));
   const added = [...nk].filter((k) => !oldKeys.has(k)).length;
   const lost = [...oldKeys].filter((k) => !nk.has(k)).length;
-  const early = nr.filter((r) => r.newRunLen < P.lengthScale).length;
+  const early = nr.filter((r) => r.newRunLen < OLD_LENGTH_SCALE).length;
   console.log(`${th.toFixed(2).padEnd(7)} ${String(nr.length).padEnd(10)} ${String(early).padEnd(12)} ${pct(early, nr.length).padEnd(10)} ${String(added).padEnd(6)} ${String(lost).padEnd(6)} ${lost === 0 ? 'YES' : 'NO'}`);
 }
 console.log('');
@@ -194,7 +206,7 @@ console.log('== NEW 选中的带长 vs OLD（看"16 根堆积"是否消失）=='
 {
   const nr = rows.filter((r) => r.calm !== null && r.calm >= 0.43);
   const hist = (arr) => JSON.stringify(arr.reduce((m, v) => ((m[v] = (m[v] ?? 0) + 1), m), {}));
-  const atSaturation = (arr) => arr.filter((v) => v === P.lengthScale).length;
+  const atSaturation = (arr) => arr.filter((v) => v === OLD_LENGTH_SCALE).length;
   console.log(`OLD 带长分布: ${hist(oldRows.map((r) => r.oldRunLen))}   恰好=16 的: ${atSaturation(oldRows.map((r) => r.oldRunLen))}/${oldRows.length}`);
   console.log(`NEW 带长分布: ${hist(nr.map((r) => r.newRunLen))}   恰好=16 的: ${atSaturation(nr.map((r) => r.newRunLen))}/${nr.length}`);
   console.log(`NEW 带长中位 ${median(nr.map((r) => r.newRunLen))} 根；按周期看选中带长的实际时长中位：`);
@@ -203,3 +215,7 @@ console.log('== NEW 选中的带长 vs OLD（看"16 根堆积"是否消失）=='
     if (t.length) console.log(`   ${tf.padEnd(4)} ${String(t.length).padEnd(3)} 行   带长中位 ${String(median(t)).padEnd(3)} → ${dur(median(t), tf)}`);
   }
 }
+console.log('');
+
+console.log('== 实现一致性交叉校验（真实 detectConvergence vs 标定用的 calm-only 镜像）==');
+console.log(`比对窗口 ${windows.length} 个   决策或分数不一致 = ${mismatches.length} 条${mismatches.length ? ' → ' + mismatches.slice(0, 8).join('; ') : '（完全一致：实现与标定口径吻合）'}`);

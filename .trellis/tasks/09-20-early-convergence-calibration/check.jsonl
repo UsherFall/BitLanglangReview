@@ -2,3 +2,4 @@
 {"file": ".trellis/tasks/09-20-early-convergence-calibration/research/threshold-calibration.md", "reason": "用其中记录的数字对照验收 AC3（合格窗口 ≈19、早期占比 ≥70%、新增 8 / 丢失 24）与 AC4（换血属预期）"}
 {"file": ".trellis/tasks/09-20-early-convergence-calibration/research/minrun-sweep.md", "reason": "核对 Non-Goals 未被越界：minRun 必须仍是 5，不得引入按长度的额外门槛或加权"}
 {"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "score 数值整体下移、StructureParams 少一个字段属跨层契约变化，需确认没有泄漏到服务层与 UI（本任务要求前端零改动）"}
+{"file": ".trellis/tasks/09-20-early-convergence-calibration/research/applied-measurement.md", "reason": "实现后复测证据：门槛 0.60 下 19 窗口/早期 79%/新增 8/丢失 24，且真实函数与标定镜像 352 窗口 0 不一致；用于核对 AC1/AC3/AC4"}

@@ -9,11 +9,12 @@
  * 本脚本扫 minRun = 5/6/8/10/12/15，看行数、带长、各周期（尤其 1D）还剩多少。
  */
 import Database from 'better-sqlite3';
-import { pathToFileURL } from 'node:url';
 
-const REPO = pathToFileURL('D:/haveFun/BitLanglangReview/').href;
+const REPO = new URL('../../../../', import.meta.url).href; // 仓库根（本文件在 .trellis/tasks/<task>/research/ 下）
 const { defaultStructureParams, scanTimeframes } = await import(REPO + 'src/domain/coin-scan.ts');
 const BASE = defaultStructureParams();
+/** 冻结的旧长度刻度（生产代码已删除 lengthScale）。 */
+const OLD_LENGTH_SCALE = 16;
 
 const STEP_MS = { '5m': 3e5, '15m': 9e5, '1H': 36e5, '4H': 144e5, '1D': 864e5 };
 const WINDOW = 100;
@@ -76,7 +77,7 @@ function detectOld(s) {
     const tol = 0.1 * (rh - rl);
     if (lastPrice < rl - tol || lastPrice > rh + tol) continue;
     const calm = clamp01(1 - runMed / preMed);
-    const score = clamp01(0.7 * calm + 0.3 * clamp01(runLen / P.lengthScale));
+    const score = clamp01(0.7 * calm + 0.3 * clamp01(runLen / OLD_LENGTH_SCALE));
     if (!best || score > best.score) best = { score };
   }
   return best;
