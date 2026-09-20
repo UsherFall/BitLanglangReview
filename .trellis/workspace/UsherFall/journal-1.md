@@ -910,3 +910,46 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 20: 收敛扫描包含性闸门真正生效(排除被判定那根K线)
+<!-- trellis-session: v=2 fp=b0b5f76170214cbc -->
+
+**Date**: 2026-09-20
+**Task**: 收敛扫描包含性闸门真正生效(排除被判定那根K线)
+**Branch**: `master`
+
+### Summary
+
+发现并修复收敛扫描的包含性闸门死代码。带必须结尾贴住最新一根K线,而真实K线的 close 必在自己的 [low,high] 内,于是 min(band.low) <= lastPrice <= max(band.high) 恒真,闸门从未触发(实测 28200 个候选带 0 次拒绝),突破保护实际由平坦度兜底。改为确认区间取带内前 runLen-1 根(新常量 CONVERGENCE_CONFIRMED_TAIL),闸门与 position 共用该区间;波动率指标刻意保持用整条带,故通过的带分数不变。
+
+### Main Changes
+
+- 包含性闸门的确认区间改为带内前 runLen-1 根,不再包含被判定那根;position 与闸门共用该区间(消除第二套口径)
+- 新增导出常量 CONVERGENCE_CONFIRMED_TAIL = 1,结构性规则而非标定旋钮
+- 测试:删除依赖非法K线(close 越出自身 [low,high])的旧夹具,新增合法突破被拒的对偶用例 + position 只读确认区间的守卫用例
+- 规范 .trellis/spec/server/coin-scan.md 记录失效原因、修复与实测;更正'平坦度兼任突破过滤'的表述
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `490e983` | fix(scan): 收敛扫描包含性闸门真正生效(排除被判定那根K线) |
+| `d769cd8` | docs(spec): 记录包含性闸门失效与修复(含实测数字与可见影响) |
+
+### Testing
+
+- [OK] npx tsc --noEmit 干净;npm test 57 文件/368 用例全绿(基线 367)
+- [OK] 真实行情探针(60 币 × 5 周期,minScore 0.6):包含性拒绝 0→103,在榜币 29→28,合格(币×周期) 46→45;镜像与真实函数决策 0 条不一致
+- [OK] 负向对照:临时把尾数改回 0 → 两条新增用例如预期失败,证明不是空绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 真正的突破早已被平坦度拦住,本次修复收益在语义归属与被测覆盖;若要让'突破'可见需另开任务(允许带结束在最新一根之前)
+- 面板「位置」百分比(CoinScanPanel.tsx:310)在 5/41 合格行变化,最大 25 个百分点、个别显示 0%/100%;用户已确认保持统一口径
+- 10% 突破容差在闸门真正生效后尚未重新标定
+- .trellis/spec/server/coin-scan.md 多处写 UI default minScore 0.7,实际 CoinScanPanel.tsx:45 是 0.6,与本次无关待修

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
-- **Last Active**: 2026-09-18
+- **Total Sessions**: 20
+- **Last Active**: 2026-09-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~912 | Active |
+| `journal-1.md` | ~955 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-09-20 | 收敛扫描包含性闸门真正生效(排除被判定那根K线) | `490e983`, `d769cd8` | `master` |
 | 19 | 2026-09-18 | 选品结果表手动降权(沉底+灰化) | `cead7eb` | `master` |
 | 18 | 2026-09-17 | 个人复盘 K 线符号解析修正(SHIB 无图/RAY 直线) | `6cc1e15` | `master` |
 | 17 | 2026-09-11 | 复盘/选币界面视觉与标注优化 | `5e50ca9` | `master` |
