@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对修复是否违反既有契约:earlier 仍包含锚点所在 bar(09/10 决策)、coversAnchorBar 的洞修复没有被削弱、缓存键命名空间规则未被破坏"}
+{"file": ".trellis/spec/server/index.md", "reason": "检查 server 层职责边界与代码放置是否合规"}

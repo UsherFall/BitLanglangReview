@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "Candlestick Service / Binance Candles 两节定义了本次要改的两个源的全部既有契约(earlier 包含锚点所在 bar、coversAnchorBar 的洞修复、缓存键命名空间、contiguous 截断规则);改动必须保留这些语义,并在 3.3 阶段把新不变量写回该 spec"}
+{"file": ".trellis/spec/server/index.md", "reason": "server 层边界与职责约定:该层只做本地 Vite middleware + SQLite 持久化,复用 src/domain 契约,不混入 UI 关注点"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "SQLite store 的操作与改动约定,数据清理步骤要按这里的规则操作本地缓存库"}
