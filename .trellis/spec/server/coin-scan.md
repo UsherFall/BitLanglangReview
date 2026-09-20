@@ -33,7 +33,7 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 | `topN` | number | `crypto` 60 / `equity` 30 | `>= 1` |
 | `minQuoteVolume24h` | number | 10_000_000 (both scopes) | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
 | `anchor` | number (optional) | now | epoch ms; bars whose close time (`timestamp + timeframe`) is `<= anchor` are treated as completed. Absent / empty / NaN → `Date.now()`. Present and `<= 0` → 400 |
-| `minScore` | number (optional) | 0 | `>= 0`; a timeframe counts as converged only when `score >= minScore`. The 宁少勿滥 strength knob (UI default 0.7). Absent → 0. Present and `< 0` → 400 |
+| `minScore` | number (optional) | 0 | `>= 0`; a timeframe counts as converged only when `score >= minScore`. The 宁少勿滥 strength knob (UI default **0.6**). Because `score` is the shrink depth and nothing else, this reads directly as an amplitude statement: 0.6 = the band's median per-bar amplitude is at most 40% of the preceding stretch's. Absent → 0. Present and `< 0` → 400 |
 
 Non-numeric params fall back to the scope's default (never to 0 — an absent `topN` must not become `0` and 400). Invalid final values → 400. The per-scope defaults live in `DEFAULT_SCAN_PARAMS` (`src/domain/scan-scope.ts`) and are mirrored by the panel's inputs.
 
@@ -48,7 +48,7 @@ type ConvergenceStructure = 'convergence'; // the only structure kind (triangle 
 type StructureResult = {
   structure: ConvergenceStructure | null; // null = this timeframe has no convergence
   position: number;                       // 0..1: (lastPrice - rangeLow)/(rangeHigh - rangeLow)
-  score: number;                          // convergence strength, larger = stronger, normalized [0,1]
+  score: number;                          // shrink depth = clamp01(1 - runMed/preMed), larger = stronger, [0,1]
   touchCount: number;                     // always 0 (no swing touches; kept for the row contract)
   qualified: boolean;                     // passed the shrink + flatness + containment gates
 };
@@ -83,28 +83,24 @@ Walks the RAW BARS looking for a recent band whose bar-to-bar volatility is mean
 
 No coin-own "typical volatility" baseline: everything is judged against the preceding stretch only (8/13, user decision). A crash-then-pause band (a big dump followed by a quiet stretch) IS detected as a strong shrink because its band is far quieter than the dump; the band's flatness gate usually rejects such wide post-dump bands (their edges drift too much), which is how the CBRS 大跌后喘息 case stays out. Whether further exclusion is needed is flagged as an open calibration decision.
 
-**Score is calm-dominant** (length no longer dominates):
+**Score is the shrink depth ALONE** (09/20 — the length bonus was removed):
 
 ```
-relativeCalm        = clamp01(1 - runMed / preMed)   // how much quieter than before
-lengthContribution  = clamp01(runLen / lengthScale)
-score               = clamp01(0.7 × relativeCalm + 0.3 × lengthContribution)
+relativeCalm = clamp01(1 - runMed / preMed)   // how much quieter the band is than before
+score        = relativeCalm
 ```
 
-With the UI default minScore 0.7 this surfaces only strong contractions (≈2×+ shrinks); mild real shrinks (BR 5m at ~1.3×, score ≈ 0.6) are detected but hidden until the user lowers the knob.
+Duration is deliberately unscored: see "Score is the shrink depth alone (09/20)" under Design Decisions. Because nothing else enters the score, the UI default `minScore` **0.6** reads directly as an amplitude statement — the band's median per-bar amplitude must be at most 40% of the preceding stretch's — and raising the knob is a direct tightening of that ratio.
 
 ### Calibration constants (`src/domain/coin-scan.ts`, all exported)
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
 | `scanTimeframes` | `['5m','15m','1H','4H','1D']` | the 5 scanned timeframes |
-| `DEFAULT_CONVERGENCE_MIN_RUN` | 5 | min band length (K bars) for a convergence |
+| `DEFAULT_CONVERGENCE_MIN_RUN` | 5 | min band length (K bars) for a convergence. Load-bearing since 09/20: with duration unscored the best band tends to be short, so this is the only floor keeping bands from being a couple of bars |
 | `DEFAULT_CONVERGENCE_RATIO` | 0.9 | shrink gate: band median vol must be `< this ×` preceding median vol (0.9 admits mild real shrinks; the score ranks them) |
 | `DEFAULT_CONVERGENCE_FLAT_RATIO` | 2.0 | band flatness: edge regression drift `<= this × runMed` (the band's own noise) |
 | `CONVERGENCE_CONFIRMED_TAIL` | 1 | bars at the band's tail EXCLUDED from the containment range (1 = test the newest bar against the `runLen - 1` bars before it). Structural, not a calibration knob |
-| `DEFAULT_CONVERGENCE_LENGTH_SCALE` | 16 | score length scale (this many bars = full length marks) |
-| `CONVERGENCE_SCORE_CALM_WEIGHT` | 0.7 | calm-dominant score weight |
-| `CONVERGENCE_SCORE_LENGTH_WEIGHT` | 0.3 | length (maturity bonus) score weight |
 
 ### Service aggregation
 
@@ -171,17 +167,17 @@ scanShrink(params):
 
 ## 5. Good/Base/Bad Cases
 
-- **Good**: a coin whose recent band is meaningfully quieter than the same-length stretch before it (e.g. 16 volatile bars then 16 flat calm bars → band/preceding ≈ 0.15, score ≈ 0.9). Strong contractions (AKE 1D-style, score ≈ 0.79) appear at the default minScore 0.7.
+- **Good**: a coin whose recent band is meaningfully quieter than the same-length stretch before it (e.g. 16 volatile bars then 16 flat calm bars → band/preceding ≈ 0.16, score ≈ 0.84). The score IS that complement, so the default `minScore 0.6` admits any band at ≤40% of its preceding stretch.
 - **Base**: a uniformly calm coin (band vol ≈ preceding vol → ratio ≈ 1) has no "越来越小" tension and is rejected. A band with no preceding stretch (too few bars) returns null. A price that has broken out of the band is rejected by containment — and containment must compare the newest bar against a range built WITHOUT it (`CONVERGENCE_CONFIRMED_TAIL`), otherwise the check is vacuous.
 - **Bad**: a rising/falling trend (whose relative amplitude shrinks as price climbs) is rejected by the band's flatness gate. A crash-then-pause band is detected as a strong shrink by the pure band-vs-preceding rule; its wide post-dump edges usually fail the flatness gate, but if a narrow post-crash band shows up it will qualify — an open calibration decision flagged in the task notes.
 
 ## 6. Tests Required
 
 - `tests/coin-scan.test.ts` — pure algorithm:
-  - `detectConvergence`: band quieter than preceding → convergence ≥0.7; uniformly calm → null; short mild band → <0.7; **breakout rejected only when the newest bar left the CONFIRMED range** (09/20 — a paired control/breakout fixture differing in one legal bar, whose comment records the flatness/shrink margins proving containment is the rejecting gate); **`position` read off the confirmed range, not the whole band** (09/20, `position = 0.6` where the whole-band range would give 0.5); too few bars → null; non-positive price → null; crash-then-pause detected (known consequence); mild shrink (band ≈ 60% of preceding) → <0.7; stricter `convergenceRatio` filters more. Fixtures must be LEGAL candles (`low <= open/close <= high`) — an illegal `close` is what let the old containment test reach a gate that real data never reaches.
+  - `detectConvergence`: band quieter than preceding → convergence ≥0.7; uniformly calm → null; short mild band → <0.7; **`score` is the shrink depth alone, independent of band length** (09/20 — same amplitude ratio on a 5-bar vs an 11-bar band, fixtures carrying 5 vs 16 quiet bars after an identical lead, must score identically and must equal `1 - bandMedian/precedingMedian`; under the removed length bonus those two were 0.68 vs 0.89, so the test fails if a duration term returns); **breakout rejected only when the newest bar left the CONFIRMED range** (09/20 — a paired control/breakout fixture differing in one legal bar, whose comment records the flatness/shrink margins proving containment is the rejecting gate); **`position` read off the confirmed range, not the whole band** (09/20, `position = 0.6` where the whole-band range would give 0.5); too few bars → null; non-positive price → null; crash-then-pause detected (known consequence); mild shrink (band ≈ 60% of preceding) → <0.7; stricter `convergenceRatio` filters more. Fixtures must be LEGAL candles (`low <= open/close <= high`) — an illegal `close` is what let the old containment test reach a gate that real data never reaches.
   - `probeStructure`: forwards to the convergence detector; trending channel → null.
   - defaults: constants + `defaultStructureParams` fills all thresholds.
-- `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, sort `qualifiedCount desc → bestScore desc`, `minScore` gate (0.5 admits weak, 0.7 filters it), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty. Plus the 09/16 blocks: session gating (closed equity dropped, kept out of topN, candles never requested; historical weekend anchor behaves the same), **session-only series** (identical candle fixture converges for crypto and yields nothing for an equity whose only bars sit in the closed overnight window), **per-class window** (gated class requests `limit` 200, ungated 100), and **`metadataUnavailable`** (present only when the ticker source reports no classes).
+- `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, sort `qualifiedCount desc → bestScore desc`, `minScore` gate (0.4 admits the weak fixture at 0.415, 0.7 filters it — the permissive value moved from 0.5 when the score became the shrink depth alone), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty. Plus the 09/16 blocks: session gating (closed equity dropped, kept out of topN, candles never requested; historical weekend anchor behaves the same), **session-only series** (identical candle fixture converges for crypto and yields nothing for an equity whose only bars sit in the closed overnight window), **per-class window** (gated class requests `limit` 200, ungated 100), and **`metadataUnavailable`** (present only when the ticker source reports no classes).
 - `tests/market-session.test.ts` — session math: the 04:00–20:00 US window incl. the DST switch, weekends, NYSE holidays/early closes, HK/KR/CN windows, ungated classes, the current-year coverage assertion, and `isCandleInSession` (edge candles that only partly overlap, the UTC-aligned daily candles that would all be dropped by an open-time test, and ungated classes that never lose a candle).
 - `tests/scan-pool.test.ts` — `isScannable`: crypto/commodity/US/KR in; HK/CN/pre-IPO out; unclassified in.
 - `tests/scan-scope.test.ts` — `ScanScope` narrowing, `scanScopeOf` (US/KR → equity, everything else incl. unclassified → crypto), and the per-scope `DEFAULT_SCAN_PARAMS`.
@@ -220,6 +216,30 @@ No `coinVol` "typical volatility" and no absolute thresholds: every measure is a
 
 `score = 0.7 × relativeCalm + 0.3 × length` — the degree of the shrink drives the score; length is a maturity bonus. The UI default minScore (0.7) surfaces only strong contractions; mild real shrinks score ~0.5-0.6 and are hidden until the knob is lowered. The previous length-dominant formula (`0.85×length`) let any long mediocre band score ~0.9 — that inflation is gone.
 
+> **Superseded 09/20** — the length term was removed entirely, and the UI default threshold was re-read as 0.6 (the "0.7" in this entry was stale; see the next entry).
+
+### Score is the shrink depth alone (09/20)
+
+The length term was removed: `score = relativeCalm = clamp01(1 - runMed/preMed)`. The reason is that `clamp01(runLen / lengthScale)` **cannot do the job it was kept for**. With `lengthScale = 16` it is a constant `1.0` for every band of 16 bars or more — so it never ranked two long bands against each other ("maturity bonus" was unachievable) — and it is strictly below 1.0 for shorter bands, so its only observable effect was to push SHORT bands down. That is precisely backwards for a scan whose point is to surface convergence EARLY: at `minScore 0.6` the old formula demanded `calm ≥ 0.723` from a 5-bar band but only `0.429` from a 16-bar band, so "quiet for 5 bars but 4× quieter than before" scored below "quiet for 16 bars but merely half as quiet".
+
+Threshold calibration is offline only (the local `data/review.sqlite` candle cache; repeated Binance probing had triggered HTTP 418). Measured over 86 USDT instruments × 5 timeframes = 352 windows, three thresholds were compared for the new score, with the OLD formula frozen as a mirror:
+
+| threshold | qualified | early (<16 bars) | added | dropped |
+| --- | --- | --- | --- | --- |
+| 0.43 (old formula's long-band equivalent) | 87 | 64 | +52 | **0** (superset) |
+| 0.50 | 54 | 45 | +34 | 15 |
+| **0.60 (chosen)** | **19** | **15** | **+8** | **24** |
+| old baseline (0.7/0.3 + 0.6) | 35 | 9 | — | — |
+
+The superset property is provable and was measured: old-qualified ⟹ `calm ≥ (0.6 − 0.3L)/0.7 ≥ 0.4286`, so a 0.43 threshold cannot lose a single existing result. It was **rejected anyway** in favour of 0.60 — a purer list (宁少勿滥) at the cost of dropping 24 of the 35 existing results. **That churn is expected, not a regression**: any future reader seeing the list shrink by two thirds should read this entry rather than hunt for a bug. The numeric default happened to stay `0.6`, so the panel needed no change.
+
+Two consequences to keep in mind:
+
+- **The chosen band gets systematically shorter** — median band length went from 17 bars to 6 (measured). `minRun` therefore became load-bearing, but raising it was measured and **rejected**: at `minRun ≥ 8` the early-stage gain collapses to zero, 5m goes to zero rows and 1D to one or none. Short bands are the price of early detection, accepted deliberately (the user's stance: what a convergence is worth depends on WHERE it happened, not how long it lasted).
+- The volatility measures were left untouched, so a band that still qualifies scores exactly as its shrink depth — no separate re-calibration of `flatRatio` / `convergenceRatio` / the 10% containment tolerance was needed.
+
+Numbers, probes and the frozen old-formula mirror live in `09-20-early-convergence-calibration/research/` (`threshold-calibration.md`, `minrun-sweep.md`, `applied-measurement.md`). The probe also cross-checks the shipped `detectConvergence` against the calibrated mirror: 0 mismatches over 352 windows.
+
 ### Flatness gate doubles as the crash-pause rejection
 
 The band must be a quiet horizontal band (edge drift ≤ 2× its own noise). Beyond rejecting trends, this also rejects the wide post-dump bands (CBRS 大跌后喘息) whose edges drift too much — so the pure band-vs-preceding rule does not flood the scan with crash-aftermaths.
@@ -230,7 +250,7 @@ Measured 09/20: flatness was ALSO the de-facto breakout filter all along — app
 
 The containment gate spent its whole life as dead code. The band always ends at the last bar, and a real candle's close always lies inside its own `[low, high]`, so `min(band.low) <= lastPrice <= max(band.high)` held by construction and the gate could never reject anything. Measured over 60 crypto instruments × 5 timeframes: **0 rejections out of 28200 candidate bands**. Two consequences: the breakout protection silently fell through to the flatness gate, and the only test covering containment could reach it solely by supplying an impossible candle (`high 100.5` with `close 130`).
 
-Fix: the confirmed range is now built from the band's first `runLen - CONVERGENCE_CONFIRMED_TAIL` bars (`CONVERGENCE_CONFIRMED_TAIL = 1`), and `position` reads that same range — one range, one meaning (`src/domain/coin-scan.ts`). The volatility measures (`runMed` / `preMed` / edge drift) deliberately keep the FULL band: they measure "how quiet is it now" and must include the newest bar, whereas the range is a judgement BASELINE and must not contain the object it judges. Keeping the volatility measures unchanged also means a band that still passes scores exactly as before, which is what makes the impact measurable.
+Fix: the confirmed range is now built from the band's first `runLen - CONVERGENCE_CONFIRMED_TAIL` bars (`CONVERGENCE_CONFIRMED_TAIL = 1`), and `position` reads that same range — one range, one meaning (`src/domain/coin-scan.ts`). The volatility measures (`runMed` / `preMed` / edge drift) deliberately keep the FULL band: they measure "how quiet is it now" and must include the newest bar, whereas the range is a judgement BASELINE and must not contain the object it judges. Keeping the volatility measures unchanged also means a band that still passes scored exactly as before *this* fix, which is what makes the impact measurable (the SCORE formula itself changed separately, later on 09/20 — see "Score is the shrink depth alone (09/20)").
 
 Measured impact (60 crypto instruments × 5 timeframes, `minScore 0.6`, four independent samples): containment rejections **0 → 103~155**, coins on the list Δ ∈ {0, −1}, qualified (coin × timeframe) pairs Δ ∈ {0, −2}. So this is a correctness/semantics fix, not a tightening — real breakouts were already caught by flatness. `research/containment-delta.md` in `09-20-shrink-containment-breakout` holds the numbers, and also records the one user-visible side effect: the panel's 「位置」 percentage (`CoinScanPanel.tsx`, `position × 100`) is unchanged for 36 of 41 qualified rows, moves by up to 25 points on 5, and can read exactly 0%/100% where the newest bar left the confirmed range but stayed inside the tolerance (the pre-existing `clamp01`).
 
