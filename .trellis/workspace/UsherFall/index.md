@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
+- **Total Sessions**: 21
 - **Last Active**: 2026-09-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~955 | Active |
+| `journal-1.md` | ~999 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-09-20 | 收敛评分只保留收缩深度(删除长度项)与门槛重标定 | `37794c1`, `efc00f1` | `master` |
 | 20 | 2026-09-20 | 收敛扫描包含性闸门真正生效(排除被判定那根K线) | `490e983`, `d769cd8` | `master` |
 | 19 | 2026-09-18 | 选品结果表手动降权(沉底+灰化) | `cead7eb` | `master` |
 | 18 | 2026-09-17 | 个人复盘 K 线符号解析修正(SHIB 无图/RAY 直线) | `6cc1e15` | `master` |

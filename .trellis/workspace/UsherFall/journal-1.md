@@ -953,3 +953,47 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 - 面板「位置」百分比(CoinScanPanel.tsx:310)在 5/41 合格行变化,最大 25 个百分点、个别显示 0%/100%;用户已确认保持统一口径
 - 10% 突破容差在闸门真正生效后尚未重新标定
 - .trellis/spec/server/coin-scan.md 多处写 UI default minScore 0.7,实际 CoinScanPanel.tsx:45 是 0.6,与本次无关待修
+
+
+## Session 21: 收敛评分只保留收缩深度(删除长度项)与门槛重标定
+<!-- trellis-session: v=2 fp=a2eafb1d5bd55d96 -->
+
+**Date**: 2026-09-20
+**Task**: 收敛评分只保留收缩深度(删除长度项)与门槛重标定
+**Branch**: `master`
+
+### Summary
+
+删掉 detectConvergence 评分里的长度项:score 由 0.7×calm+0.3×min(1,带长/16) 改为 score=calm。理由:lengthScale=16 在 16 根后饱和,永远无法区分两条长带,唯一可观察作用是把短带往下压 —— 正好惩罚要尽早发现的早期收敛。同时删除 3 个失效导出常量与 StructureParams.lengthScale;默认门槛数值仍 0.60 但含义变为'振幅 ≤ 前段 40%';minRun 保持 5。门槛与 minRun 全部用本地 sqlite 缓存离线标定(连续探测币安曾触发 HTTP 418)。
+
+### Main Changes
+
+- detectConvergence: score = relativeCalm = clamp01(1 - runMed/preMed),长度项与 3 个权重/刻度常量彻底移除
+- StructureParams 删除 lengthScale 字段(类型层面变化);defaultStructureParams 同步
+- 测试:新增'同振幅比、不同带长(5 根 vs 11 根)必须同分'的判别用例;service 测试的宽松门槛 0.5→0.4(weakBars 新分数 0.415);修正多处过期注释
+- 规范:coin-scan.md 评分公式/常量表/测试清单/Design Decisions 四处同步,并修正三处过期的'UI default minScore 0.7'(实际 0.6)
+- 两个离线探针的旧公式基线改为脚本内冻结镜像(生产代码已无旧公式),并新增'真实函数 vs 标定镜像'交叉校验;路径改为 import.meta.url 可移植
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `37794c1` | feat(scan): 收敛评分只保留收缩深度(删除长度项) |
+| `efc00f1` | docs(spec): 记录评分只保留收缩深度与门槛标定(含离线实测) |
+
+### Testing
+
+- [OK] npx tsc --noEmit 通过;npm test 57 文件/369 用例全绿(基线 368)
+- [OK] 离线标定(86 品种 × 5 周期 = 352 窗口):门槛 0.43 是旧结果超集(丢失 0)、0.50 丢 15、0.60 丢 24;实测选 0.60 → 19 窗口/早期 15 条(79%)/新增 8/丢失 24
+- [OK] 实现一致性交叉校验:真实 detectConvergence vs 标定镜像 352 窗口 0 条不一致
+- [OK] minRun 扫描:≥8 时早期收益归零(+8→0)、5m 归零、1D 仅剩 1 条或全没,故保持 5
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 选中的带系统性变短(带长中位 17→6 根),确认区间中位仅 5 根,position 会更抖;这是主动接受的代价
+- 榜单换血:35 条里消失 24 条(门槛口径变化,非回归),已在 spec Design Decisions 与本任务 research 明确记录
+- 下一个独立任务是'关键位置收敛':要定'关键位'是哪一类(前高低/水平位/均线),并且 100 根窗口对关键位远远不够,需要拉更长历史;注意 8/13 曾因'用几何给形态贴标签'整体删掉 swing 检测,做'位置'时须守住'客观价位当判断基准'的边界
