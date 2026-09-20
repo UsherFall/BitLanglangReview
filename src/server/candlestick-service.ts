@@ -33,6 +33,18 @@ export class CandlestickService implements CandleSource {
 
     const response = (await this.fetchJson(url.toString())) as OkxResponse;
     const candles = (response.data ?? [])
+      // Closed-bar invariant (mirrors `BinanceCandleSource`): a still-forming bar
+      // must never reach the cache, or a historical read would reuse a
+      // half-formed high/low/close forever. OKX marks completion itself with
+      // `confirm` (row[8]: '0' = not finished, '1' = finished), so only an
+      // explicit '0' is dropped. An absent or unrecognised value is treated as
+      // closed on purpose: over-dropping would leave this source with no candles
+      // at all, while under-dropping merely preserves the pre-09/20 behaviour.
+      // Do NOT use `timestamp + timeframeMs(timeframe)` — the nominal `1M` step
+      // is 30 days, so a 31-day month would pass a bar that is still running.
+      // This filter is direction-agnostic because an `earlier` request anchored
+      // at "now" receives the in-progress bar too.
+      .filter((row) => row[8] !== '0')
       .map((row) => toCandlestick(request.instrument, request.timeframe, row))
       .filter((candle) => (request.direction === 'earlier' ? candle.timestamp < request.anchor : candle.timestamp > request.anchor))
       .sort((a, b) => a.timestamp - b.timestamp);
@@ -49,10 +61,16 @@ export class CandlestickService implements CandleSource {
 }
 
 /**
- * Same cache-freshness gate as `BinanceCandleSource`: a full cache is reused
- * only when it covers the moment being read. A "current" read whose newest bar
- * lags the anchor by more than two steps is stale and must refresh; a historical
- * anchor (fixed point in the past) is always fresh. `cached` is ascending.
+ * Cache-freshness gate, shared in spirit with `BinanceCandleSource`: a full
+ * cache is reused only when it covers the moment being read. A "current" read
+ * whose newest bar lags the anchor by more than two steps is stale and must
+ * refresh; a historical anchor (fixed point in the past) is always fresh.
+ *
+ * That "history never changes" shortcut is only sound because of the closed-bar
+ * invariant in `getCandlesticks`: every stored row is a CLOSED bar's final
+ * value. The read path has no way to tell a half-formed row apart on its own —
+ * its timestamp is an ordinary past one — so this gate must not be weakened
+ * before the write-side filter is in place.
  */
 function isCacheFresh(request: Request, cached: Candlestick[]): boolean {
   if (request.direction !== 'earlier') return true;

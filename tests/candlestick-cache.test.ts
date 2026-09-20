@@ -157,4 +157,31 @@ describe('Candlestick Cache', () => {
 
     expect(later).toEqual([]);
   });
+
+  // AC2 — OKX marks a bar finished with `confirm` (row[8]); the still-forming one
+  // must not reach the cache. An absent flag stays accepted on purpose (R4).
+  it('stores only OKX bars marked as finished, keeping rows without a confirm flag', async () => {
+    const store = new CandlestickStore(':memory:');
+    const fetchJson = vi.fn(async (_url: string) => ({
+      data: [
+        // [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+        ['1653381000000', '29300', '29400', '29200', '29350', '12', '0', '0', '1'], // finished
+        ['1653381300000', '29350', '29500', '29300', '29480', '20', '0', '0', '0'], // still forming
+        ['1653381600000', '29480', '29600', '29400', '29510', '30'], // older payload, no confirm flag
+      ],
+    }));
+    const service = new CandlestickService(store, fetchJson);
+
+    await service.getCandlesticks({
+      instrument: 'BTC-USDT-SWAP',
+      timeframe: '5m',
+      anchor: 1653381900000,
+      direction: 'earlier',
+      limit: 3,
+    });
+
+    const stored = store.listBefore({ instrument: 'BTC-USDT-SWAP', timeframe: '5m', before: 1653381900000, limit: 10 });
+    expect(stored.map((candle) => candle.timestamp)).toEqual([1653381000000, 1653381600000]);
+    expect(stored.map((candle) => candle.close)).toEqual([29350, 29510]);
+  });
 });

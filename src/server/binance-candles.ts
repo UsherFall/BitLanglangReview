@@ -19,11 +19,19 @@ type BinanceKline = [string, string, string, string, string, string, string, str
  *
  * `earlier` returns the bars strictly before the anchor — including the bar that
  * CONTAINS the anchor — matching `CandlestickService` (OKX) so a review window
- * centred on a trade entry never drops the entry's own bar. Callers that need
- * completed bars only (coin scan, market heat) drop the still-forming bar
- * themselves. Caching reuses the shared `CandlestickStore`; instrument names
- * (`XAUUSDT` vs OKX `XAU-USDT-SWAP`) differ, so Binance and OKX candles never
- * collide in the store.
+ * centred on a trade entry never drops the entry's own bar. That rule is NOT in
+ * conflict with the closed-bar invariant below: an anchor in the past can only
+ * sit inside a bar that has already closed, so the anchor's own bar is still
+ * returned. A LIVE anchor (now) loses the in-progress bar instead, which is the
+ * accepted behaviour change (a half-formed bar has wrong high/low/close and
+ * breaks contiguity with its neighbours).
+ *
+ * Closed-bar invariant: the store — and therefore the read path, which always
+ * ends in `listCached` — only ever holds CLOSED bars, judged by the exchange's
+ * own `closeTime` (row[6]). See `getCandlesticks` for why the nominal step must
+ * not be used for that judgement. Caching reuses the shared `CandlestickStore`;
+ * instrument names (`XAUUSDT` vs OKX `XAU-USDT-SWAP`) differ, so Binance and OKX
+ * candles never collide in the store.
  *
  * Namespace warning: the cache key IS the native `base+USDT` symbol, so Binance
  * rows collide with any OTHER source whose symbol vocabulary is also
@@ -63,6 +71,14 @@ export class BinanceCandleSource implements CandleSource {
 
     const rows = (await this.fetchJson(url.toString())) as BinanceKline[];
     const candles = (Array.isArray(rows) ? rows : [])
+      // Drop the still-forming bar BEFORE it can reach the cache: `closeTime`
+      // (row[6]) is the bar's last millisecond, so `closeTime < now` means the
+      // exchange has finalised it. This gate is direction-agnostic because an
+      // `earlier` request anchored at "now" returns the in-progress bar too.
+      // Do NOT derive it from `timestamp + timeframeMs(timeframe)`: the nominal
+      // `1M` step is 30 days, so a 31-day month would let a still-running bar
+      // through and a 28-day month would discard an already-closed one.
+      .filter((row) => Number(row[6]) < Date.now())
       .map((row) => toCandlestick(request.instrument, request.timeframe, row))
       .filter((candle) => {
         if (request.direction === 'earlier') {
@@ -108,8 +124,9 @@ function isCacheFresh(request: CandleRequest, cached: Candlestick[]): boolean {
  * bar became part of `earlier`) must NOT satisfy the cache hit — otherwise the
  * hole is permanent, because `listBefore` happily returns a full-looking run
  * that simply ends too early. The newest cached bar must therefore reach the
- * anchor: one bar of slack is expected (a boundary anchor has its containing bar
- * in `later`, so `earlier` stops at `anchor - step`), a two-bar hole is not.
+ * reading moment: one bar of slack is expected (a boundary anchor has its
+ * containing bar in `later`, so `earlier` stops at `anchor - step`), a two-bar
+ * hole is not.
  *
  * The spacing comes from the cache itself — `contiguousCandles` guarantees a
  * gapless run — rather than from `boundaryAnchor`: that floors by the nominal
@@ -117,14 +134,27 @@ function isCacheFresh(request: CandleRequest, cached: Candlestick[]): boolean {
  * floored reference lands INSIDE the current bar and would report "one bar
  * short" forever, bypassing the cache on every request. The nominal step is kept
  * as a floor so a short calendar month (28 days) cannot tighten the check.
+ *
+ * The comparison target is `min(anchor, now - step)`, NOT the raw anchor: only
+ * closed bars are cached, so for a live anchor the anchor's own bar is
+ * legitimately missing and asking for it would force a refetch every time. See
+ * the inline note below.
  */
 function coversAnchorBar(request: CandleRequest, cached: Candlestick[]): boolean {
   if (request.direction !== 'earlier') return true;
   const newest = cached[cached.length - 1]?.timestamp;
   if (newest === undefined) return false;
+  const step = timeframeMs(request.timeframe);
   const previous = cached[cached.length - 2]?.timestamp;
-  const spacing = Math.max(timeframeMs(request.timeframe), previous === undefined ? 0 : newest - previous);
-  return request.anchor - newest <= spacing;
+  const spacing = Math.max(step, previous === undefined ? 0 : newest - previous);
+  // Since only closed bars are cached, for a LIVE anchor the anchor's own bar is
+  // LEGITIMATELY absent — comparing against the raw anchor would demand a bar
+  // that cannot exist yet and bypass the cache on every single request.
+  // `now - step` is the newest bar that can possibly be closed, so it is the
+  // real upper bound of what the cache is allowed to reach; a historical anchor
+  // is below it and keeps being compared against itself.
+  const target = Math.min(request.anchor, Date.now() - step);
+  return target - newest <= spacing;
 }
 
 function contiguousCandles(candles: Candlestick[], anchor: number, timeframe: ReviewTimeframe, direction: CandleRequest['direction']): Candlestick[] {

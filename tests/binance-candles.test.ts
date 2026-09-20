@@ -10,6 +10,17 @@ function kline(openTime: number, close: string, volume: string): string[] {
   ];
 }
 
+/**
+ * Same row shape with an explicit `closeTime`, so a still-forming bar (closeTime
+ * in the future) can be modelled — that field is the only thing marking a bar as
+ * closed.
+ */
+function klineEndingAt(openTime: number, closeTime: number, close: string, volume: string): string[] {
+  return [
+    String(openTime), '1', '2', '0.5', close, volume, String(closeTime), '100', '10', '5', '5', '0',
+  ];
+}
+
 const STEP = 5 * 60_000;
 const ANCHOR = 1653381600000; // 2022-05-24T10:40:00.000Z, a 5m boundary.
 
@@ -66,7 +77,9 @@ describe('BinanceCandleSource', () => {
       { instrument: 'XAUUSDT', timeframe: '5m' as const, timestamp: nowBoundary - 3 * step, open: 1, high: 2, low: 0.5, close: 1, volume: 10 },
     ]);
     const fetchJson = vi.fn(async () => [
-      kline(nowBoundary - step, '29480', '20'),
+      // closeTime is the bar's LAST millisecond (`open + step - 1`), so this row
+      // is unambiguously closed no matter which millisecond the test runs in.
+      klineEndingAt(nowBoundary - step, nowBoundary - 1, '29480', '20'),
       kline(nowBoundary - 2 * step, '29350', '12'),
     ]);
     const source = new BinanceCandleSource(store, fetchJson);
@@ -93,6 +106,9 @@ describe('BinanceCandleSource', () => {
     expect(candles.map((candle) => candle.timestamp)).toEqual([1653381000000]);
   });
 
+  // AC6 — the closed-bar filter must not revive the 09/10 "completed bars only"
+  // behaviour: a historical anchor's own bar is closed by definition and stays in
+  // the `earlier` window.
   it('returns the bar CONTAINING a non-aligned earlier anchor, matching OKX', async () => {
     const store = new CandlestickStore(':memory:');
     const fetchJson = vi.fn(async (_url: string) => [
@@ -207,5 +223,82 @@ describe('BinanceCandleSource', () => {
     });
 
     expect(later).toEqual([]);
+  });
+
+  // AC1 — a bar whose closeTime has not passed yet is the bar currently being
+  // formed; it must reach neither the store nor the caller.
+  it('never returns or stores a bar whose closeTime has not passed yet', async () => {
+    const store = new CandlestickStore(':memory:');
+    const nowBoundary = Math.floor(Date.now() / STEP) * STEP;
+    const running = nowBoundary; // the 5m bar being formed right now
+    const fetchJson = vi.fn(async (_url: string) => [
+      klineEndingAt(nowBoundary - 2 * STEP, nowBoundary - STEP - 1, '29350', '12'),
+      klineEndingAt(nowBoundary - STEP, nowBoundary - 1, '29480', '20'),
+      klineEndingAt(running, running + STEP - 1, '99999', '99'), // still forming
+    ]);
+    const source = new BinanceCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'XAUUSDT',
+      timeframe: '5m',
+      anchor: nowBoundary + 1, // inside the still-forming bar
+      direction: 'earlier',
+      limit: 2,
+    });
+
+    expect(candles.map((candle) => candle.timestamp)).toEqual([nowBoundary - 2 * STEP, nowBoundary - STEP]);
+    expect(candles.map((candle) => candle.close)).toEqual([29350, 29480]);
+    expect(store.listAfter({ instrument: 'XAUUSDT', timeframe: '5m', after: running - 1, limit: 10 })).toEqual([]);
+  });
+
+  // AC3 — the closed test must come from the exchange's closeTime, never from
+  // `timestamp + timeframeMs`: the nominal 1M step is 30 days, but calendar
+  // months are 28-31, so a 31-day month would pass a bar that is still running.
+  it('drops a still-running 1M bar even though its nominal 30-day step has elapsed', async () => {
+    const store = new CandlestickStore(':memory:');
+    const now = Date.now();
+    const nominalMonth = 30 * 24 * 60 * 60_000;
+    const calendarMonth = 31 * 24 * 60 * 60_000;
+    // Opened a calendar month ago (so `openTime + nominalMonth` is already in the
+    // past) but Binance still reports a future closeTime.
+    const runningOpen = now - calendarMonth + 60 * 60_000;
+    const runningClose = now + 60 * 60_000;
+    const closedOpen = runningOpen - calendarMonth;
+    const closedClose = runningClose - calendarMonth;
+    const fetchJson = vi.fn(async (_url: string) => [
+      klineEndingAt(closedOpen, closedClose, '70000', '100'),
+      klineEndingAt(runningOpen, runningClose, '99999', '99'),
+    ]);
+    const source = new BinanceCandleSource(store, fetchJson);
+
+    await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '1M', anchor: now, direction: 'earlier', limit: 1 });
+
+    // Premise of the test: a nominal-step check would have called this bar closed.
+    expect(runningOpen + nominalMonth).toBeLessThan(now);
+    const stored = store.listAfter({ instrument: 'BTCUSDT', timeframe: '1M', after: 0, limit: 10 });
+    expect(stored.map((candle) => candle.timestamp)).toEqual([closedOpen]);
+  });
+
+  // AC5 — the in-progress bar is legitimately missing, which must not be mistaken
+  // for a cache hole and re-fetch on every request.
+  it('still reuses the cache for a live anchor even though the in-progress bar is absent', async () => {
+    const store = new CandlestickStore(':memory:');
+    const nowBoundary = Math.floor(Date.now() / STEP) * STEP;
+    const fetchJson = vi.fn(async (_url: string) => [
+      klineEndingAt(nowBoundary - 2 * STEP, nowBoundary - STEP - 1, '29350', '12'),
+      klineEndingAt(nowBoundary - STEP, nowBoundary - 1, '29480', '20'),
+      klineEndingAt(nowBoundary, nowBoundary + STEP - 1, '99999', '99'), // still forming
+    ]);
+    const source = new BinanceCandleSource(store, fetchJson);
+    const request = { instrument: 'XAUUSDT', timeframe: '5m' as const, anchor: nowBoundary + 1, direction: 'earlier' as const, limit: 2 };
+
+    const first = await source.getCandlesticks(request);
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+
+    // The newest cached bar is `anchor - step`; that is as close as a cache of
+    // closed bars can get, so the second read must be served from it.
+    const second = await source.getCandlesticks(request);
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
   });
 });
