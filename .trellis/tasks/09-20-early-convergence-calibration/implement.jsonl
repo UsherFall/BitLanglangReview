@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "本次唯一生产代码改动落在 src/domain/coin-scan.ts；该规范界定 domain 层边界（纯确定性变换，禁用 React/Vite/fs/SQLite/fetch）"}
+{"file": ".trellis/tasks/09-20-early-convergence-calibration/research/threshold-calibration.md", "reason": "门槛标定的全部实测：三档对照、超集性质（0.43 丢失 0 条）、calm 分位、选中带长从 17 根变 6 根；写代码前必须知道 0.60 会丢 24 条旧结果是预期行为"}
+{"file": ".trellis/tasks/09-20-early-convergence-calibration/research/minrun-sweep.md", "reason": "minRun 扫描结论：提高到 8 以上会让早期收益归零（+8→0）、5m 归零、1D 仅剩 1 条或全没，故保持 5 并接受短带脆性；实现时不得偷改 minRun"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "要删除 3 个导出常量与 StructureParams 的一个字段，删除前需确认全仓无其他引用、没有既有的等价 helper 可复用"}
