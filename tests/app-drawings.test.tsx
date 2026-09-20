@@ -69,12 +69,26 @@ describe('App drawings', () => {
 
     const overlay = document.querySelector('svg.drawing-overlay')!;
     fireEvent.click(overlay, { clientX: 10, clientY: 10 });
-    fireEvent.pointerMove(overlay, { clientX: 30, clientY: 20 });
+    fireEvent.pointerMove(overlay, { clientX: 330, clientY: 20 });
 
     await waitFor(() => {
       const draft = Array.from(document.querySelectorAll('line.drawing-shape')).at(-1) as SVGLineElement;
-      expect(draft).toHaveAttribute('x1', '10');
-      expect(draft).toHaveAttribute('x2', '30');
+      // Magnetic snap quantizes every draft endpoint's time to the bar time of
+      // the 5m candlestick containing the pointer (mock: 1px = 1s, bars at
+      // 10:00 and 10:05). The click at x=10 (10:00:10) therefore lands on the
+      // 10:00 bar at x=0 instead of the raw pointer x=10. The moving end still
+      // follows the pointer: x=330 (10:05:30) lands on the 10:05 bar at x=300.
+      expect(draft).toHaveAttribute('x1', '0');
+      expect(draft).toHaveAttribute('x2', '300');
+    });
+
+    // ...and it follows the pointer back: moving inside the first bar again puts
+    // the preview end on that bar, while the first point stays where it was.
+    fireEvent.pointerMove(overlay, { clientX: 20, clientY: 20 });
+    await waitFor(() => {
+      const draft = Array.from(document.querySelectorAll('line.drawing-shape')).at(-1) as SVGLineElement;
+      expect(draft).toHaveAttribute('x1', '0');
+      expect(draft).toHaveAttribute('x2', '0');
     });
   });
 });
@@ -98,7 +112,7 @@ function makeFetch() {
       }));
     }
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [makeDrawing()] }));
-    if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T10:00:00+08:00')] }));
+    if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T10:00:00+08:00'), makeCandle('2024-05-21T10:05:00+08:00')] }));
     return new Response(JSON.stringify({}));
   });
 }

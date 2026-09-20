@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, MapPin, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Eraser, Eye, EyeOff, Magnet, MapPin, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
@@ -17,6 +17,7 @@ import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountFor
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { CoinScanPanel, CoinScanResults, type ScanResult } from './CoinScanPanel';
+import { nextMagnetMode, snapDrawingPoint, type MagnetMode } from './drawing-snap';
 import { HeatScanResults } from './HeatScanResults';
 import { BitgetControlBar } from './BitgetControlBar';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
@@ -150,8 +151,24 @@ type SidebarDrag = {
 type DrawingDrag = {
   drawing: ChartDrawing;
   target: DrawingDragTarget;
+  /**
+   * The **unsnapped** pointer point captured on pointer down. It feeds the
+   * incremental `'body'` translation in `moveDrawing`, so reusing a snapped
+   * point here would quantize the delta and make a whole drawing jump bar by
+   * bar (both horizontally and price-wise) instead of following the pointer.
+   */
   startPoint: ChartPoint;
 };
+
+/** Everything a drawing point needs in order to snap to the candlestick under the pointer. */
+type DrawingSnapOptions = {
+  candles: Candlestick[];
+  timeframe: ReviewTimeframe;
+  mode: MagnetMode;
+};
+
+const MAGNET_MODE_LABELS: Record<MagnetMode, string> = { off: '关', weak: '弱', strong: '强' };
+const MAGNET_MODE_HINTS: Record<MagnetMode, string> = { off: '磁吸：关（点击切换为弱）', weak: '磁吸：弱（点击切换为强）', strong: '磁吸：强（点击切换为关）' };
 
 function clampSidebarWidth(width: number): number {
   const maxWidth = typeof window === 'undefined' ? DEFAULT_SIDEBAR_WIDTH : Math.floor(window.innerWidth * 0.7);
@@ -1122,6 +1139,13 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [hoverPercentage, setHoverPercentage] = useState<number | null>(null);
   const [markersVisible, setMarkersVisible] = useState(true);
+  const [magnetMode, setMagnetMode] = useState<MagnetMode>('weak');
+  // Free Replay keeps later candlesticks loaded (prefetch for the next reveal) but
+  // hidden until the cursor reaches them. The magnet must only see the revealed
+  // ones: otherwise a point drawn in the blank right padding would snap to a
+  // future candle's OHLC and leak its levels.
+  const magnetCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime);
+  const drawingSnap: DrawingSnapOptions = { candles: magnetCandles, timeframe, mode: magnetMode };
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1424,7 +1448,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       setSelectedDrawingId('');
       return;
     }
-    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
     if (!point) return;
     if (drawingTool === 'horizontal') {
       void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: 'horizontal', points: [point] });
@@ -1442,7 +1466,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
 
   function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
     if (drawing.id === 'draft') return;
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    // Unsnapped on purpose: this point only feeds the incremental 'body' translation.
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
     if (!point) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1454,13 +1479,16 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
 
   function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
-    if (!point) return;
+    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
+    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
+    if (!snappedPoint || !rawPoint) return;
     if (!drag) {
-      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(point);
+      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(snappedPoint);
       return;
     }
     event.preventDefault();
+    // Endpoint drags take the snapped point; 'body' translation stays continuous on the raw one.
+    const point = drag.target === 'body' ? rawPoint : snappedPoint;
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
   }
@@ -1468,9 +1496,11 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
     if (!drag) return;
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
+    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
     dragRef.current = null;
     overlayRef.current?.releasePointerCapture(event.pointerId);
+    const point = drag.target === 'body' ? rawPoint : snappedPoint;
     if (!point) return;
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
@@ -1495,6 +1525,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={`magnet-mode${magnetMode !== 'off' ? ' selected' : ''}`} title={MAGNET_MODE_HINTS[magnetMode]} aria-label="磁吸模式" aria-pressed={magnetMode !== 'off'} onClick={() => setMagnetMode((current) => nextMagnetMode(current))}><Magnet size={16} />{MAGNET_MODE_LABELS[magnetMode]}</button>
         <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
       </div>
       {hoverPercentage !== null && <div className="hover-price-percentage">{formatHoverPricePercentage(hoverPercentage)}</div>}
@@ -1537,9 +1568,15 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [markersVisible, setMarkersVisible] = useState(true);
   const [showAllMarkers, setShowAllMarkers] = useState(false);
+  const [magnetMode, setMagnetMode] = useState<MagnetMode>('weak');
   const [allTrades, setAllTrades] = useState<ReviewedTrade[]>([]);
   const showAllMarkersRef = useRef(false);
   const allTradesRef = useRef<ReviewedTrade[]>([]);
+
+  // Read the ref at call time: this chart updates rendered candles without a re-render.
+  function drawingSnapOptions(): DrawingSnapOptions {
+    return { candles: renderedCandlesRef.current, timeframe, mode: magnetMode };
+  }
 
   useEffect(() => {
     markersVisibleRef.current = markersVisible;
@@ -1879,7 +1916,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
       setSelectedDrawingId('');
       return;
     }
-    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnapOptions());
     if (!point) return;
     if (drawingTool === 'horizontal') {
       void saveDrawing({ tradeId: trade.id, instrument: trade.instrument, timeframe, kind: 'horizontal', points: [point] });
@@ -1897,7 +1934,8 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
 
   function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
     if (drawing.id === 'draft') return;
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    // Unsnapped on purpose: this point only feeds the incremental 'body' translation.
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
     if (!point) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1909,13 +1947,16 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
 
   function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
-    if (!point) return;
+    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnapOptions());
+    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
+    if (!snappedPoint || !rawPoint) return;
     if (!drag) {
-      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(point);
+      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(snappedPoint);
       return;
     }
     event.preventDefault();
+    // Endpoint drags take the snapped point; 'body' translation stays continuous on the raw one.
+    const point = drag.target === 'body' ? rawPoint : snappedPoint;
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
   }
@@ -1923,9 +1964,11 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
     const drag = dragRef.current;
     if (!drag) return;
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current);
+    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnapOptions());
+    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
     dragRef.current = null;
     overlayRef.current?.releasePointerCapture(event.pointerId);
+    const point = drag.target === 'body' ? rawPoint : snappedPoint;
     if (!point) return;
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
@@ -1940,6 +1983,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={`magnet-mode${magnetMode !== 'off' ? ' selected' : ''}`} title={MAGNET_MODE_HINTS[magnetMode]} aria-label="磁吸模式" aria-pressed={magnetMode !== 'off'} onClick={() => setMagnetMode((current) => nextMagnetMode(current))}><Magnet size={16} />{MAGNET_MODE_LABELS[magnetMode]}</button>
         <button type="button" className={showAllMarkers ? 'selected' : ''} title={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-label={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-pressed={showAllMarkers} onClick={() => setShowAllMarkers((current) => !current)}><MapPin size={16} /></button>
         {!showAllMarkers ? (
           <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
@@ -2026,15 +2070,15 @@ function drawingStyleForTimeframe(timeframe: ReviewTimeframe): { strokeWidth: nu
   return { strokeWidth: 2, selectedStrokeWidth: 3, handleRadius: 5 };
 }
 
-function pointFromMouse(event: React.MouseEvent<SVGSVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
-  return pointFromClient(event.clientX, event.clientY, chart, series, overlay);
+function pointFromMouse(event: React.MouseEvent<SVGSVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null, snap: DrawingSnapOptions | null = null): ChartPoint | null {
+  return pointFromClient(event.clientX, event.clientY, chart, series, overlay, snap);
 }
 
-function pointFromPointer(event: React.PointerEvent<SVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
-  return pointFromClient(event.clientX, event.clientY, chart, series, overlay);
+function pointFromPointer(event: React.PointerEvent<SVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null, snap: DrawingSnapOptions | null = null): ChartPoint | null {
+  return pointFromClient(event.clientX, event.clientY, chart, series, overlay, snap);
 }
 
-function pointFromClient(clientX: number, clientY: number, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null): ChartPoint | null {
+function pointFromClient(clientX: number, clientY: number, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null, snap: DrawingSnapOptions | null = null): ChartPoint | null {
   if (!chart || !series || !overlay) return null;
   const rect = overlay.getBoundingClientRect();
   const x = clientX - rect.left;
@@ -2042,7 +2086,17 @@ function pointFromClient(clientX: number, clientY: number, chart: IChartApi | nu
   const time = chart.timeScale().coordinateToTime(x);
   const price = series.coordinateToPrice(y);
   if (typeof time !== 'number' || price == null) return null;
-  return { time, price };
+  const point: ChartPoint = { time, price };
+  if (!snap) return point;
+  // The same pointer y drives both the raw price and the OHLC pixel distances.
+  return snapDrawingPoint({
+    point,
+    pointerY: y,
+    candles: snap.candles,
+    timeframe: snap.timeframe,
+    mode: snap.mode,
+    priceToY: (candidate) => series.priceToCoordinate(candidate),
+  });
 }
 
 function moveDrawing(drawing: ChartDrawing, target: DrawingDragTarget, startPoint: ChartPoint, currentPoint: ChartPoint): ChartDrawing {

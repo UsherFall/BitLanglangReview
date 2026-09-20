@@ -1117,6 +1117,21 @@ p {
   cursor: not-allowed;
 }
 
+/* The magnet toggle also spells out its current mode as one character. Keep it on
+   the standard 30x30 toolbar footprint (the toolbar already ends flush against the
+   readout panels at left: 252px) by tucking that label next to the icon instead of
+   letting the button grow. */
+.drawing-toolbar button.magnet-mode {
+  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .candlestick-readout {
   position: absolute;
   z-index: 4;

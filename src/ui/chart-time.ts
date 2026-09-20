@@ -103,7 +103,16 @@ export function formatChartTime(time: Time, timeframe: ReviewTimeframe): string 
   return `${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
-function containingCandleTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[]): number | null {
+/**
+ * The bar time of the candlestick that contains `timestamp`.
+ *
+ * Units: **milliseconds in, milliseconds out** — matching `Candlestick.timestamp`.
+ * Drawing points (`ChartPoint.time`) are in **seconds**, so callers coming from a
+ * drawing point must multiply by 1000 first (see `timeframeTimeForPoint`).
+ * Returns `null` when no loaded candlestick contains the timestamp (empty list,
+ * or a timestamp before the first / after the last candlestick).
+ */
+export function containingCandleTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[]): number | null {
   if (!candles.length) return null;
   const ordered = [...candles].sort((a, b) => a.timestamp - b.timestamp);
   const fallbackStep = timeframeMs(timeframe);
