@@ -124,6 +124,19 @@ Required tests when changing this area:
 
 When changing chart drawing overlays, remember that SVG background clicks and drawing shape clicks share the same overlay surface. Shape and handle click handlers must stop propagation when they represent selecting or dragging a drawing; overlay blank-click handlers can then safely clear `selectedDrawingId`. Add or update an app-level regression test that asserts both sides: clicking a drawing selects/keeps it selected, and clicking blank chart overlay clears selection.
 
+### Drawing Magnet Snap (画线磁吸, 09/20)
+
+画线端点可吸附到 K 线的 `open/high/low/close`。语义照搬 klinecharts 的 magnet（考证：`09-20-drawing-magnet-snap/research/klinecharts-magnet.md`）：
+
+- 三态 `MagnetMode = 'off' | 'weak' | 'strong'`，**默认 `weak`**。工具栏按钮 `aria-label="磁吸模式"`、`aria-pressed` 表示是否非 off，点击按 `weak → strong → off` 循环（`nextMagnetMode`）。会话内 state，不持久化。
+- 几何逻辑独占 `src/ui/drawing-snap.ts`：**纯函数、不 import `lightweight-charts`**，像素换算通过注入的 `priceToY` 传入，所以可以在 Node 环境直接测。
+- 判定链：指针时间经 `containingCandleTimestamp` 归属到包含它的那根 K 线（**注意该函数毫秒进毫秒出，而画线点 `time` 是秒，必须 ×1000**）；价格在该柱四个 OHLC 里取**像素距离**最近的一个。`weak` 只在价格落在 `[low, high]` **外**时才要求距离 ≤ `DEFAULT_MAGNET_SENSITIVITY`（8px，klinecharts `modeSensitivity` 默认值）；落在区间**内无条件**吸。`strong` 无条件吸。`off`、时间归属失败、候选换算不全 → 一律返回输入原样（不得产出 `NaN`）。
+- 接线口径：落点、草稿预览、端点拖拽（`'start'`/`'end'`）吸；`dragRef` 必须存**吸附前**的原始点，`'body'` 整体平移用原始点算增量 —— 增量被量化后整条线会按 K 线柱/OHLC 台阶跳。两个面板（`TradeChart` / `FreeReplayChart`）各有一份画线逻辑，都要接。
+- **Free Replay 只能喂已揭示的 K 线**：`magnetCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime)`。`renderedCandles` 含为下次揭示预取的未来柱，直接喂会让游标右侧留白处的画线吸到**未来价位**（信息泄漏）。`TradeChart` 则用 `renderedCandlesRef.current`（该图更新数据不触发重渲染，用 ref 才拿得到当前值）。
+- 跨周期语义：吸附结果是**绝对价格 + 绝对时间**，只在落点/拖拽那一刻结算一次。画线仍按 instrument 共享（见下），切周期后照旧出现、价格不变，但**不重新对齐**当前周期的 OHLC（与 TradingView 一致）。不要把吸附目标（哪根柱、哪个字段）写进 `ChartPoint` 或服务端存储。
+
+Required tests: 纯函数用例 `tests/drawing-snap.test.ts`（必须覆盖"区间内无条件吸"，这是最容易被实现成统一阈值而漏掉的分支）；app 级用例 `tests/app-drawing-snap.test.tsx`（落点吸附、三态循环、以及 Free Replay 未来柱不得被吸的回归）。
+
 ### Common Mistake: Cursor advance without viewport scroll
 
 In `FreeReplayChart`, the render effect's `setVisibleRange` only runs on first initialization (guarded by `initializedRangeKeyRef`). After the user zooms or pans, subsequent cursor advances update data via `series.setData()` but leave the viewport unchanged. The cursor state advances correctly, but the user sees no visual change and thinks the button/keyboard doesn't work.
