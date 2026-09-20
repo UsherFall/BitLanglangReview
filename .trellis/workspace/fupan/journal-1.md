@@ -379,3 +379,44 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 ### Next Steps
 
 - 重启dev server使改动生效:app-plugin.ts随vite.config.ts加载,不参与热重载
+
+
+## Session 20: 画线磁吸:吸附到K线OHLC
+<!-- trellis-session: v=2 fp=6d66986f884af257 -->
+
+**Date**: 2026-09-20
+**Task**: 画线磁吸:吸附到K线OHLC
+**Branch**: `master`
+
+### Summary
+
+为图表画线加入吸附能力:指针时间归属到包含它的K线,价格在该柱open/high/low/close里取像素距离最近的一个。语义照搬klinecharts的magnet(三态,默认弱吸附,8px阈值)
+
+### Main Changes
+
+- 新增纯模块 src/ui/drawing-snap.ts(不import lightweight-charts,像素换算经priceToY注入),chart-time.ts 导出 containingCandleTimestamp
+- 接线在 pointFromClient 单一入口:落点/草稿预览/端点拖拽都吸;dragRef 改存吸附前的原始点,body 平移用原始增量(否则整条线按台阶跳);两个画线面板都接
+- 工具栏新增三态磁吸按钮(aria-label/aria-pressed),默认 weak,会话内 state 不持久化
+- 检查阶段修掉一个真实泄漏:Free Replay 会用 visibleCandlesForFreeReplay 过滤,否则游标右侧留白处的画线会吸到未揭示的未来柱价位
+- spec 同步:component-guidelines.md 记录磁吸语义、接线口径、Free Replay 只喂已揭示K线、跨周期不重新对齐
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f7f2748` | feat(draw): 画线磁吸吸附到K线OHLC(三态,默认弱吸附) |
+| `351d9c6` | docs(spec): 记录画线磁吸语义与FreeReplay未来柱不得被吸 |
+
+### Testing
+
+- [OK] npx vitest run tests/drawing-snap.test.ts tests/app-drawing-snap.test.tsx tests/app-drawings.test.tsx + 相邻回归 4 文件 -> 66 passed
+- [OK] npx tsc --noEmit 通过
+- [OK] 变异验证:去掉区间内无条件吸(AC2)、去掉毫秒换算(AC7)、恢复未来柱喂给吸附 -> 对应用例均变红
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 浏览器手感验证未做(jsdom测不了真实坐标换算):线身平移是否连续、切关是否恢复自由、两面板与跨周期各过一眼
