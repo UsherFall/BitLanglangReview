@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-20-drawing-magnet-snap/research/klinecharts-magnet.md", "reason": "要实现的就是这份语义:区间外用像素阈值、区间内无条件吸最近 OHLC、候选为四个 OHLC、按像素距离取最近;末尾还记录了本任务有意偏离 klinecharts 的那一条(平移不吸)的理由"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "画线覆盖层(SVG overlay)与 React 组件的写法约定,新增工具栏按钮与接线要遵守"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "画线/图表状态的放置约定,新增磁吸模式 state 要落在既有模式里"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "测试期望与已知坑:jsdom 不模拟 pointer-events、jest-dom 未注册 matcher、中文文案有 mojibake 需用结构化查询"}

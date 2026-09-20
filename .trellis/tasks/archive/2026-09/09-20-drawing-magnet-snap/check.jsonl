@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-20-drawing-magnet-snap/research/klinecharts-magnet.md", "reason": "核对实现语义是否与参考一致(尤其\"区间内无条件吸\"与\"阈值只作用于区间外\"这两条,最容易实现成统一阈值)"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核对测试是否用了可信方式:jsdom 不模拟 pointer-events 与 CSS 命中、jest-dom matcher 是否已注册、是否用结构化查询而不是中文 mojibake 文案;以及既有断言改动是否有正当理由"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核对画线覆盖层接线与工具栏控件是否符合前端组件约定"}
