@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import {
   CONVERGENCE_CONFIRMED_TAIL,
-  CONVERGENCE_SCORE_CALM_WEIGHT,
-  CONVERGENCE_SCORE_LENGTH_WEIGHT,
   DEFAULT_CONVERGENCE_FLAT_RATIO,
-  DEFAULT_CONVERGENCE_LENGTH_SCALE,
   DEFAULT_CONVERGENCE_MIN_RUN,
   DEFAULT_CONVERGENCE_RATIO,
   defaultStructureParams,
@@ -52,6 +49,29 @@ describe('detectConvergence (band vs preceding volatility)', () => {
     expect(result!.score).toBeGreaterThanOrEqual(0.7);
   });
 
+  it('scores the shrink depth alone, independent of how long the band is', () => {
+    // Same amplitude ratio, very different band length: the fixtures carry 5 quiet
+    // bars (A) vs 16 (B) after the identical 16-bar volatile lead (~6.38% bars,
+    // quiet bars ~1.005%). Every lead bar has the SAME volatility, so `preMed` is
+    // 6/94 for both. A's only usable band is 5 bars long — n = 21 caps runLen at
+    // 10, and every longer band drags the volatile lead into itself and is
+    // rejected (flatness at 6-9 bars, the shrink gate at 10). B's chosen band is
+    // 11 bars (the shortest band already at the maximal depth, and the first one
+    // the strict `>` scan meets). So the two results differ ONLY in duration and
+    // the score must be identical. (The removed length bonus made A ~0.68 and B
+    // ~0.89, so this test fails if a duration term ever comes back.)
+    const lead = Array.from({ length: 16 }, () => [94, 100] as const);
+    const quiet = [99.5, 100.5] as const;
+    const shortBand = detectConvergence(candles([...lead, ...Array.from({ length: 5 }, () => quiet)]), params);
+    const longBand = detectConvergence(candles([...lead, ...Array.from({ length: 16 }, () => quiet)]), params);
+    expect(shortBand).not.toBeNull();
+    expect(longBand).not.toBeNull();
+    expect(shortBand!.score).toBeCloseTo(longBand!.score, 10);
+    // The score IS the shrink depth: band median vol (1 / 99.5) over lead median
+    // vol (6 / 94).
+    expect(longBand!.score).toBeCloseTo(1 - 1 / 99.5 / (6 / 94), 10);
+  });
+
   it('rejects a band whose volatility matches the preceding stretch (no shrink)', () => {
     // Uniformly calm bars: every band's volatility equals its preceding stretch →
     // ratio ≈ 1 ≥ convergenceRatio → no convergence.
@@ -60,8 +80,8 @@ describe('detectConvergence (band vs preceding volatility)', () => {
   });
 
   it('scores a short band that is only mildly quieter below minScore', () => {
-    // 16 volatile bars then an 8-bar band that is only ~1.6× quieter: the calm
-    // term is modest and the short length contributes little → below 0.7.
+    // 16 volatile bars (~6.4%) then an 8-bar band only ~1.6× quieter (~4%): the
+    // shrink depth alone is ~0.36 → below 0.7.
     const result = detectConvergence(
       candles([
         ...Array.from({ length: 16 }, () => [94, 100] as const), // ~6.4% bars
@@ -204,10 +224,7 @@ describe('Coin Scan structure defaults and types', () => {
     expect(DEFAULT_CONVERGENCE_MIN_RUN).toBe(5);
     expect(DEFAULT_CONVERGENCE_RATIO).toBe(0.9);
     expect(DEFAULT_CONVERGENCE_FLAT_RATIO).toBe(2.0);
-    expect(DEFAULT_CONVERGENCE_LENGTH_SCALE).toBe(16);
     expect(CONVERGENCE_CONFIRMED_TAIL).toBe(1);
-    expect(CONVERGENCE_SCORE_CALM_WEIGHT).toBe(0.7);
-    expect(CONVERGENCE_SCORE_LENGTH_WEIGHT).toBe(0.3);
   });
 
   it('defaultStructureParams fills every threshold from the file-top defaults', () => {
@@ -216,7 +233,6 @@ describe('Coin Scan structure defaults and types', () => {
       minRun: DEFAULT_CONVERGENCE_MIN_RUN,
       convergenceRatio: DEFAULT_CONVERGENCE_RATIO,
       flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
-      lengthScale: DEFAULT_CONVERGENCE_LENGTH_SCALE,
     });
     expect(defaultStructureParams({ minRun: 7 }).minRun).toBe(7);
   });

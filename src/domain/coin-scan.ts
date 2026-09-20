@@ -28,7 +28,13 @@ export type StructureResult = {
    * by less than the tolerance reads as 0 or 1.
    */
   position: number;
-  /** Convergence strength score, larger = stronger. Sort key. */
+  /**
+   * Shrink depth: `clamp01(1 - runMed/preMed)`, i.e. how much quieter the band is
+   * than the same-length stretch before it. Larger = stronger. Sort key. This is
+   * the ONLY scored quantity — duration is deliberately unscored, so `minScore`
+   * reads directly as "the band's median amplitude must be at most
+   * `(1 - minScore)` of the preceding stretch's" (e.g. 0.6 → at most 40%).
+   */
   score: number;
   /** Touch count — always 0 now (no swing touches); kept for the row contract. */
   touchCount: number;
@@ -63,11 +69,6 @@ export type StructureParams = {
    * absolute. Absent → `DEFAULT_CONVERGENCE_FLAT_RATIO`.
    */
   flatRatio?: number;
-  /**
-   * Score length scale: the length contribution `clamp01(runLen / lengthScale)`
-   * reaches full marks at this many bars. Absent → `DEFAULT_CONVERGENCE_LENGTH_SCALE`.
-   */
-  lengthScale?: number;
 };
 
 /**
@@ -87,7 +88,12 @@ export type ShrinkScanParams = {
   minQuoteVolume24h: number;
   /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */
   anchor?: number;
-  /** 结构强度阈值主旋钮;调高 = 宁少勿滥. Timeframes with score < minScore don't count as converged. */
+  /**
+   * 结构强度阈值主旋钮;调高 = 宁少勿滥. A timeframe counts as converged only when
+   * its `score` (the shrink depth) is >= this. Because duration is unscored, the
+   * threshold is a direct statement about amplitude: 0.6 = the band's median
+   * per-bar amplitude is at most 40% of the preceding stretch's.
+   */
   minScore?: number;
 };
 
@@ -145,16 +151,10 @@ export const DEFAULT_CONVERGENCE_MIN_RUN = 5;
  * Volatility-shrink gate: a band qualifies as a convergence only when its own
  * median per-bar volatility is < this × the median volatility of the SAME-LENGTH
  * segment immediately before it — "波动率越来越小". 0.9 admits mild but real
- * shrinks (e.g. a band at 84% of its preceding stretch); the calm-dominant score
- * then ranks strength honestly. A band at ~1.0× (no shrink) is rejected.
+ * shrinks (e.g. a band at 84% of its preceding stretch); the score then ranks
+ * the shrink depth honestly. A band at ~1.0× (no shrink) is rejected.
  */
 export const DEFAULT_CONVERGENCE_RATIO = 0.9;
-/**
- * Score length scale for a convergence band: the length contribution
- * `clamp01(runLen / lengthScale)` reaches full marks at this many bars. 16 = a
- * ~1.3-hour 5m band scores full length marks.
- */
-export const DEFAULT_CONVERGENCE_LENGTH_SCALE = 16;
 /**
  * Flatness tolerance for a convergence band, scaled by the band's own median
  * bar volatility: an edge counts as flat when its total drift is <= this × runMed.
@@ -174,14 +174,6 @@ export const DEFAULT_CONVERGENCE_FLAT_RATIO = 2.0;
  * the `runLen - 1` bars before it.
  */
 export const CONVERGENCE_CONFIRMED_TAIL = 1;
-/**
- * Score calm weight: how much the band's quietness relative to the preceding
- * stretch drives the score. Calm dominates length (0.7/0.3): a mild shrink (band
- * only ~1.2× quieter than before) scores low, a strong shrink scores high.
- */
-export const CONVERGENCE_SCORE_CALM_WEIGHT = 0.7;
-/** Score length weight for a convergence band (maturity bonus). Calm dominates. */
-export const CONVERGENCE_SCORE_LENGTH_WEIGHT = 0.3;
 
 function clamp01(value: number): number {
   if (value < 0) return 0;
@@ -251,8 +243,15 @@ function edgeDrift(prices: readonly number[], startIndex: number): number {
  *   true. Together with flatness it separates "the band is sloped" from "the
  *   price left the band".
  *
- * The best band is scored **calm-dominant**: `0.7 × relativeCalm + 0.3 × length`,
- * where `relativeCalm = 1 - runMed/preMed` and `length = runLen / lengthScale`.
+ * The best band is scored by its **shrink depth alone**: `score = relativeCalm`
+ * (`1 - runMed/preMed`). Duration deliberately does NOT enter the score. A
+ * length bonus was removed on 09/20: it was `clamp01(runLen / lengthScale)`,
+ * which saturates at `lengthScale`, so it could never rank two long bands
+ * against each other — its only observable effect was to push SHORT bands down,
+ * i.e. to penalise exactly the early-stage convergences the scan is meant to
+ * surface. `minRun` is therefore load-bearing now: the best band tends to be
+ * short, which is accepted (user decision — what a convergence is worth is
+ * decided by WHERE it happens, not how long it lasted).
  *
  * Known consequence: a crash-then-pause band (a big dump followed by a calm
  * stretch) IS detected as a strong shrink, because its band is far quieter than
@@ -269,7 +268,6 @@ export function detectConvergence(candles: readonly Candlestick[], params: Struc
   const vol = sorted.map((candle) => (candle.high - candle.low) / candle.low);
   const convergenceRatio = params.convergenceRatio ?? DEFAULT_CONVERGENCE_RATIO;
   const flatRatio = params.flatRatio ?? DEFAULT_CONVERGENCE_FLAT_RATIO;
-  const lengthScale = params.lengthScale ?? DEFAULT_CONVERGENCE_LENGTH_SCALE;
   const last = sorted.length - 1;
   const lastPrice = sorted[last].close;
 
@@ -304,13 +302,11 @@ export function detectConvergence(candles: readonly Candlestick[], params: Struc
     const rangeHigh = Math.max(...confirmed.map((c) => c.high));
     const tolerance = 0.1 * (rangeHigh - rangeLow);
     if (lastPrice < rangeLow - tolerance || lastPrice > rangeHigh + tolerance) continue;
-    // ---- score: calm-dominant (shrinking degree + length maturity) ----
+    // ---- score: the shrink depth, and nothing else. Duration is deliberately
+    // NOT scored (see the doc comment): it cannot rank long bands against each
+    // other anyway, and scoring it only penalises short/early bands. ----
     const relativeCalm = clamp01(1 - runMed / preMed);
-    const lengthContribution = clamp01(runLen / lengthScale);
-    const score = clamp01(
-      CONVERGENCE_SCORE_CALM_WEIGHT * relativeCalm +
-        CONVERGENCE_SCORE_LENGTH_WEIGHT * lengthContribution,
-    );
+    const score = relativeCalm;
     if (best === null || score > best.score) {
       best = { score, runLen, rangeLow, rangeHigh };
     }
@@ -339,7 +335,6 @@ export function defaultStructureParams(overrides?: Partial<StructureParams>): St
     minRun: DEFAULT_CONVERGENCE_MIN_RUN,
     convergenceRatio: DEFAULT_CONVERGENCE_RATIO,
     flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
-    lengthScale: DEFAULT_CONVERGENCE_LENGTH_SCALE,
     ...overrides,
   };
 }

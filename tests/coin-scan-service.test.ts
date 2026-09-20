@@ -14,14 +14,14 @@ import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-d
 // ---------------------------------------------------------------------------
 
 // Strong convergence: 16 volatile bars (~6.9% per bar) then 16 flat calm bars
-// (~1%) → the band is far quieter than the stretch before it (score ≈ 0.9).
+// (~1%) → the band is far quieter than the stretch before it (shrink depth ≈ 0.86).
 const strongBars: ReadonlyArray<readonly [number, number]> = [
   ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
   ...Array.from({ length: 16 }, () => [99.5, 100.5] as const),
 ];
 
 // Weak convergence: same volatile lead, but a band only ~1.7× quieter → detected
-// but scored below the default minScore 0.6.
+// but scored below the default minScore 0.6 (shrink depth ≈ 0.415).
 const weakBars: ReadonlyArray<readonly [number, number]> = [
   ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
   ...Array.from({ length: 16 }, () => [98, 102] as const),
@@ -125,7 +125,7 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
         expect(row.structures[timeframe].structure).toBe('convergence');
         expect(row.structures[timeframe].qualified).toBe(true);
         // The strong fixture's band is far quieter than its preceding stretch →
-        // calm-dominant score (0.7×calm + 0.3×length) ≈ 0.9.
+        // the score IS that shrink depth (band ~1.0% vs lead ~6.4%) ≈ 0.86.
         expect(row.structures[timeframe].score).toBeGreaterThan(0.85);
       }
     }
@@ -224,13 +224,13 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
   });
 
   it('applies the minScore gate: weaker convergences are filtered out when the knob is raised', async () => {
-    // BTC converges strongly (score ≈ 0.9), ETH weakly (score ≈ 0.6).
-    // minScore 0.5 admits both; 0.7 filters out the weak one.
+    // BTC converges strongly (shrink depth ≈ 0.86), ETH weakly (≈ 0.415).
+    // minScore 0.4 admits both; 0.7 filters out the weak one.
     const source = buildSource((instrument, timeframe) =>
       instrument === 'BTC-USDT-SWAP' ? 'strong' : timeframe === '5m' ? 'weak' : 'uptrend',
     );
     const service = serviceFrom(source);
-    const permissive = await service.scanShrink({ ...params, minScore: 0.5 });
+    const permissive = await service.scanShrink({ ...params, minScore: 0.4 });
     expect(permissive.qualifiedCount).toBe(2);
     const strict = await service.scanShrink({ ...params, minScore: 0.7 });
     expect(strict.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP']);
