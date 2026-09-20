@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "校验改动后 domain 层仍无 I/O 依赖，且纯函数行为可被单测覆盖"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "校验测试夹具的 Candlestick 合法性（AC2 要求全仓无 close 越出 [low, high] 的构造）"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "position 口径变化属于跨层契约；需确认没有泄漏到 API 载荷、UI 或缓存（本任务不改前端与接口字段）"}
+{"file": ".trellis/tasks/09-20-shrink-containment-breakout/research/containment-baseline.md", "reason": "用其中的实测数字对照验收 AC4，判断行为变更幅度是否落在预期区间"}

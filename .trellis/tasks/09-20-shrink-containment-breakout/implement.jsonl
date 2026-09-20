@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/domain/index.md", "reason": "本次唯一的生产代码改动落在 src/domain/coin-scan.ts；该规范界定 domain 层边界（纯确定性变换，禁止 React/Vite/fs/SQLite/fetch）"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "定义 Candlestick 与 ReviewTimeframe 契约；构造测试夹具时必须生成合法 OHLC（low <= close <= high），且用词需避开 CONTEXT.md 点名的 coin/ticker/K line"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "改动要新增一个常量并统一区间计算，需先确认没有既有 helper，避免出现第二套 rangeLow/rangeHigh 口径（AC6）"}
+{"file": ".trellis/tasks/09-20-shrink-containment-breakout/research/containment-baseline.md", "reason": "改动前基线与 AC4 的目标区间：包含性拒绝 0/28200 次、excludeTail=1 时在榜币数 27±1 / 合格(币×周期) 44±2"}
