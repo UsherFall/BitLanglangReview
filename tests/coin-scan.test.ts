@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import {
+  CONVERGENCE_CONFIRMED_TAIL,
   CONVERGENCE_SCORE_CALM_WEIGHT,
   CONVERGENCE_SCORE_LENGTH_WEIGHT,
   DEFAULT_CONVERGENCE_FLAT_RATIO,
@@ -73,15 +74,40 @@ describe('detectConvergence (band vs preceding volatility)', () => {
     expect(result!.score).toBeLessThan(0.7);
   });
 
-  it('rejects a band whose price has broken out (containment gate)', () => {
-    // The band is quiet vs its preceding stretch, but the current close is a gap
-    // far above the band's range → the price broke out, no longer 蓄力.
+  it('rejects a band only when its newest bar has broken out of the confirmed range', () => {
+    // 16 volatile bars, then 15 quiet bars, then ONE more bar. The band always
+    // ends at the newest bar, so the confirmed range must be built from the bars
+    // BEFORE it — with the newest bar included the range would contain the price
+    // being tested and the check would be vacuously true.
+    const lead = [
+      ...Array.from({ length: 16 }, () => [94, 100] as const),
+      ...Array.from({ length: 15 }, () => [99.5, 100.5] as const),
+    ];
+    // Control: the newest bar is quiet like the rest → the band survives.
+    expect(detectConvergence(candles([...lead, [99.5, 100.5] as const]), params)).not.toBeNull();
+    // Breakout: the newest bar closes above the 15 quiet bars' high (100.5) by
+    // more than the 10% range tolerance (0.1) — still a legal candle, because
+    // its close (100.75) sits inside its own [100, 101.5]. Flatness is NOT the
+    // gate that rejects this: for the longest band (runLen 16) drift(low) 0.0017
+    // and drift(high) 0.0033 both stay under flatTol = 2 × runMed 0.0201, and the
+    // shrink gate passes as well (runMed 0.0101 < 0.9 × preMed, with preMed 0.0638
+    // → threshold 0.0574), so containment is the only gate that can fire on it.
+    expect(detectConvergence(candles([...lead, [100, 101.5] as const]), params)).toBeNull();
+  });
+
+  it('reads position off the confirmed range, not the whole band', () => {
+    // The newest bar dips just below the 15 quiet bars' low (99.5) but stays
+    // within the 10% tolerance, so the band survives. Its close (100.1) sits at
+    // 0.6 of the CONFIRMED range [99.5, 100.5]; measuring against the whole band
+    // instead would give (100.1 - 99.3) / (100.9 - 99.3) = 0.5.
     const bars = candles([
       ...Array.from({ length: 16 }, () => [94, 100] as const),
-      ...Array.from({ length: 16 }, () => [99.5, 100.5] as const),
+      ...Array.from({ length: 15 }, () => [99.5, 100.5] as const),
+      [99.3, 100.9] as const,
     ]);
-    bars[bars.length - 1] = { ...bars[bars.length - 1], close: 130 };
-    expect(detectConvergence(bars, params)).toBeNull();
+    const result = detectConvergence(bars, params);
+    expect(result).not.toBeNull();
+    expect(result!.position).toBeCloseTo(0.6, 5);
   });
 
   it('returns null with fewer than 2×minRun bars (no preceding stretch)', () => {
@@ -93,7 +119,9 @@ describe('detectConvergence (band vs preceding volatility)', () => {
       ...Array.from({ length: 16 }, () => [94, 100] as const),
       ...Array.from({ length: 16 }, () => [99.5, 100.5] as const),
     ]);
-    bars[2] = { ...bars[2], low: 0, high: 0 };
+    // An all-zero bar: a non-positive price, and still a consistent OHLC shape
+    // (low <= open/close <= high), so the guard is the only thing under test here.
+    bars[2] = { ...bars[2], open: 0, low: 0, high: 0, close: 0 };
     expect(detectConvergence(bars, params)).toBeNull();
   });
 
@@ -177,6 +205,7 @@ describe('Coin Scan structure defaults and types', () => {
     expect(DEFAULT_CONVERGENCE_RATIO).toBe(0.9);
     expect(DEFAULT_CONVERGENCE_FLAT_RATIO).toBe(2.0);
     expect(DEFAULT_CONVERGENCE_LENGTH_SCALE).toBe(16);
+    expect(CONVERGENCE_CONFIRMED_TAIL).toBe(1);
     expect(CONVERGENCE_SCORE_CALM_WEIGHT).toBe(0.7);
     expect(CONVERGENCE_SCORE_LENGTH_WEIGHT).toBe(0.3);
   });

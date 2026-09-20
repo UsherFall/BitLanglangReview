@@ -20,13 +20,19 @@ export type ConvergenceStructure = 'convergence';
 export type StructureResult = {
   /** Structure type; null = this timeframe has no convergence. */
   structure: ConvergenceStructure | null;
-  /** Position inside the band, 0..1: (lastPrice - rangeLow) / (rangeHigh - rangeLow). */
+  /**
+   * Position inside the band's CONFIRMED range, 0..1:
+   * `(lastPrice - rangeLow) / (rangeHigh - rangeLow)`, where the range comes from
+   * the band's first `runLen - CONVERGENCE_CONFIRMED_TAIL` bars (the same range
+   * the containment gate tests against). Clamped, so a price that left the range
+   * by less than the tolerance reads as 0 or 1.
+   */
   position: number;
   /** Convergence strength score, larger = stronger. Sort key. */
   score: number;
   /** Touch count — always 0 now (no swing touches); kept for the row contract. */
   touchCount: number;
-  /** True when the band passed the volatility-shrink + containment gates. */
+  /** True when the band passed all three gates: flatness, volatility shrink, containment. */
   qualified: boolean;
 };
 
@@ -157,6 +163,18 @@ export const DEFAULT_CONVERGENCE_LENGTH_SCALE = 16;
  */
 export const DEFAULT_CONVERGENCE_FLAT_RATIO = 2.0;
 /**
+ * Bars at the tail of a band that are EXCLUDED from the band's "confirmed
+ * range" — the range the containment gate tests the newest bar against.
+ *
+ * This is a structural rule, not a calibration knob: a range built from bars
+ * that include the bar being tested is vacuously satisfied, because a real
+ * candle's close always lies inside its own `[low, high]`. Leaving the tail out
+ * is what lets the gate detect that the newest bar has actually left the range
+ * the band was built at. `1` = test the newest bar against the range formed by
+ * the `runLen - 1` bars before it.
+ */
+export const CONVERGENCE_CONFIRMED_TAIL = 1;
+/**
  * Score calm weight: how much the band's quietness relative to the preceding
  * stretch drives the score. Calm dominates length (0.7/0.3): a mild shrink (band
  * only ~1.2× quieter than before) scores low, a strong shrink scores high.
@@ -219,8 +237,19 @@ function edgeDrift(prices: readonly number[], startIndex: number): number {
  *   `< convergenceRatio × preMed`, where `preMed` is the median volatility of the
  *   SAME-LENGTH segment immediately before the band — the price is meaningfully
  *   quieter than it was. Internal spikes are absorbed by the median.
- * - **Containment**: the current price is inside the band's `[min low, max high]`
- *   range (with a small tolerance) — a price that has broken out is no longer 蓄力.
+ * - **Flatness** (see `flatRatio`): both the band's low and high edges must be
+ *   roughly horizontal. A trend shrinks its own relative amplitude as price
+ *   climbs, which would otherwise fake a "volatility shrink". This gate is
+ *   independent of containment: it asks whether the band is SLOPED.
+ * - **Containment**: the newest bar's close must still be inside the range the
+ *   band was CONFIRMED at — that range is built from the band's first
+ *   `runLen - CONVERGENCE_CONFIRMED_TAIL` bars, deliberately EXCLUDING the newest
+ *   bar, so an actual breakout (up or down) moves the price outside it and
+ *   rejects the band: a price that has left the range is no longer 蓄力. This
+ *   cannot be tested against the full band's `[min low, max high]`, because the
+ *   newest bar is always a member of that range and the check would be vacuously
+ *   true. Together with flatness it separates "the band is sloped" from "the
+ *   price left the band".
  *
  * The best band is scored **calm-dominant**: `0.7 × relativeCalm + 0.3 × length`,
  * where `relativeCalm = 1 - runMed/preMed` and `length = runLen / lengthScale`.
@@ -260,9 +289,19 @@ export function detectConvergence(candles: readonly Candlestick[], params: Struc
     const preMed = median(vol.slice(preStart, start));
     // ---- volatility shrink: band quieter than the same-length stretch before ----
     if (runMed >= convergenceRatio * preMed) continue;
-    // ---- containment: current price inside the band's [min low, max high] ----
-    const rangeLow = Math.min(...band.map((c) => c.low));
-    const rangeHigh = Math.max(...band.map((c) => c.high));
+    // ---- containment: the newest bar must still sit inside the range the band
+    // was CONFIRMED at. That range comes from the band's first `runLen -
+    // CONVERGENCE_CONFIRMED_TAIL` bars — i.e. WITHOUT the newest bar, which is
+    // the bar being tested. Including it would make this gate vacuous (a real
+    // candle's close always lies inside its own [low, high]), and the whole
+    // breakout protection would silently fall through to the flatness gate.
+    // The 10% tolerance is relative to the confirmed range's own height, so it
+    // scales with the band instead of imposing an absolute distance. Both the
+    // gate and `position` read this single range.
+    // ----
+    const confirmed = band.slice(0, band.length - CONVERGENCE_CONFIRMED_TAIL);
+    const rangeLow = Math.min(...confirmed.map((c) => c.low));
+    const rangeHigh = Math.max(...confirmed.map((c) => c.high));
     const tolerance = 0.1 * (rangeHigh - rangeLow);
     if (lastPrice < rangeLow - tolerance || lastPrice > rangeHigh + tolerance) continue;
     // ---- score: calm-dominant (shrinking degree + length maturity) ----
