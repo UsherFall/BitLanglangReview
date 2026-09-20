@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
-- **Last Active**: 2026-09-15
+- **Total Sessions**: 19
+- **Last Active**: 2026-09-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~341 | Active |
+| `journal-1.md` | ~381 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-09-20 | K线缓存只存已收盘bar(BTC 9-17断线修复) | `3e25fd5`, `c1f24e1` | `master` |
 | 18 | 2026-09-15 | Trellis 0.6.16 升级 + 币安权重可观测埋点,并定位测试环境全量失败 | `b752d6b`, `59518de` | `master` |
 | 17 | 2026-09-10 | 修复个人交割单复盘标签计数与K线跳空 | `da261a2`, `cdd960e`, `8c41d49` | `master` |
 | 7 | 2026-07-15 | Free Replay timeframe cursor anchoring | `da99c91` | `master` |

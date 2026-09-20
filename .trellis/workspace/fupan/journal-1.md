@@ -339,3 +339,43 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 
 - 另开任务处理测试环境问题(vitest 4.1.9 + vite 8.1.1 + Node 24.16 + Windows),候选方案:降 vite 到 ^7 或 vitest 到 ^3
 - 其余 6 个 in_progress 任务(09-04、09-06、09-07 系列)待逐个 finish
+
+
+## Session 19: K线缓存只存已收盘bar(BTC 9-17断线修复)
+<!-- trellis-session: v=2 fp=999c162e00713be0 -->
+
+**Date**: 2026-09-20
+**Task**: K线缓存只存已收盘bar(BTC 9-17断线修复)
+**Branch**: `master`
+
+### Summary
+
+定位并修复K线缓存写入未收盘半成品bar、被历史锚点新鲜度判定永久复用导致图表断线;清理BTCUSDT 2026-09-17的5根脏数据
+
+### Main Changes
+
+- 两个K线源只在bar已收盘时落库:Binance用kline行closeTime(row[6]),OKX用confirm(row[8],只有显式0才丢弃),不用timestamp+名义步长(1M月天数不固定)
+- BinanceCandleSource.coversAnchorBar比较基准改为min(anchor, now-step),否则未收盘bar缺席会造成live锚点每次请求都回源
+- 清理BTCUSDT 2026-09-17的5根脏数据(15m/1Hx2/4H/1D)并重拉为真值
+- spec同步:market-data.md补缓存只存已收盘bar的不变量与coversAnchorBar适配说明
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3e25fd5` | fix(candles): K线缓存只存已收盘bar,修复半成品bar永久卡缓存 |
+| `c1f24e1` | docs(spec): 记录缓存只存已收盘bar的不变量与coversAnchorBar适配 |
+
+### Testing
+
+- [OK] npx vitest run tests/binance-candles.test.ts tests/candlestick-cache.test.ts 等6个文件 -> 71 passed
+- [OK] npx tsc --noEmit 通过
+- [OK] 全库粗/细周期聚合交叉校验:修复前5根不一致(BTCUSDT),修复后0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 重启dev server使改动生效:app-plugin.ts随vite.config.ts加载,不参与热重载
