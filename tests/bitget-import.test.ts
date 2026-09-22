@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import type { BitgetOrder } from '../src/domain/bitget-order';
 import { bitgetSymbolToOkxInstrument, historyPositionRowKey, type BitgetHistoryPosition } from '../src/domain/bitget-position';
-import { historyPositionToTrade, makeBitgetTradeId } from '../src/server/bitget-import';
+import { attachRoundOrders, historyPositionToTrade, makeBitgetTradeId, toClosedRound } from '../src/server/bitget-import';
+
+function order(overrides: Partial<BitgetOrder> & { orderId: string; tradedAt: number }): BitgetOrder {
+  return {
+    symbol: 'XRPUSDT',
+    posSide: 'long',
+    side: 'open',
+    qty: 1,
+    price: 0.65,
+    fee: -0.004,
+    profit: 0,
+    source: 'market',
+    leverage: 10,
+    placedAt: null,
+    ...overrides,
+  };
+}
 
 const sampleRow: BitgetHistoryPosition = {
   symbol: 'XRPUSDT',
@@ -99,5 +116,51 @@ describe('historyPositionToTrade', () => {
     expect(historyPositionToTrade({ ...sampleRow, openAvgPrice: '' }, 1)).toBeNull();
     expect(historyPositionToTrade({ ...sampleRow, holdSide: 'flat' as BitgetHistoryPosition['holdSide'] }, 1)).toBeNull();
     expect(historyPositionToTrade({ ...sampleRow, symbol: 'BTCUSDC' }, 1)).toBeNull();
+  });
+});
+
+describe('toClosedRound', () => {
+  it('converts the exchange string fields into the numbers the matcher needs', () => {
+    expect(toClosedRound(sampleRow)).toEqual({
+      symbol: 'XRPUSDT',
+      holdSide: 'long',
+      ctime: 1709590322199,
+      utime: 1709667583395,
+      openTotalPos: 10,
+      closeTotalPos: 10,
+    });
+  });
+});
+
+describe('attachRoundOrders', () => {
+  const baseTrade = historyPositionToTrade(sampleRow, 1)!;
+
+  it('attaches one point per order and takes leverage from the first open', () => {
+    const trade = attachRoundOrders(baseTrade, [
+      // Deliberately out of order: the mapper must sort by traded time.
+      order({ orderId: 'o2', tradedAt: 1709590322299, qty: 4, price: 0.66, source: 'normal', leverage: 12 }),
+      order({ orderId: 'o1', tradedAt: 1709590322199, qty: 6, price: 0.64967, leverage: 10 }),
+      order({ orderId: 'o3', tradedAt: 1709667583395, side: 'close', qty: 10, price: 0.58799, source: 'loss_market', profit: -0.63 }),
+    ]);
+
+    expect(trade.leverage).toBe(10);
+    expect(trade.points?.map((point) => [point.kind, point.timeMs])).toEqual([
+      ['open', 1709590322199],
+      ['open', 1709590322299],
+      ['close', 1709667583395],
+    ]);
+    // Opens realize nothing yet; closes carry the order's own pnl.
+    expect(trade.points?.[0].profit).toBeNull();
+    expect(trade.points?.[2].profit).toBe(-0.63);
+    // Fees become positive costs, matching the Trade.fee convention.
+    expect(trade.points?.[0].fee).toBe(0.004);
+    expect(trade.points?.[2].source).toBe('loss_market');
+    expect(trade.points?.[0].time).toMatch(/\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$/);
+  });
+
+  it('leaves the trade untouched when no orders matched', () => {
+    expect(attachRoundOrders(baseTrade, [])).toBe(baseTrade);
+    expect(baseTrade.points).toBeUndefined();
+    expect(baseTrade.leverage).toBeNull();
   });
 });

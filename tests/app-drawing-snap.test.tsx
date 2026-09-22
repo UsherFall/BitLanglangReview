@@ -26,11 +26,13 @@ vi.mock('lightweight-charts', () => ({
         chartMock.setData.push(data);
       },
       priceToCoordinate: (price: number) => (200 - price) * 2,
+      attachPrimitive: vi.fn(),
       coordinateToPrice: (y: number) => 200 - y / 2,
     }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: vi.fn(),
+    unsubscribeCrosshairMove: vi.fn(),
     timeScale: () => ({
       coordinateToTime: vi.fn((x: number) => 1716256800 + x),
       getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),

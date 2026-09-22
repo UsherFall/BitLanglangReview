@@ -77,6 +77,76 @@ describe('Bitget Client', () => {
     await expect(client.fetchHistoryPositionsPage({ startTime: 1, endTime: 2 })).rejects.toThrow(/Invalid ACCESS_KEY/);
   });
 
+  it('normalizes filled orders and drops cancelled or unfilled-price rows', async () => {
+    const fetchJson: BitgetFetchJson = async (url) => {
+      if (url.includes('/public/time')) return { code: '00000', data: { serverTime: FIXED_SERVER_TIME } };
+      return {
+        code: '00000',
+        data: {
+          entrustedList: [
+            {
+              orderId: 'o-1',
+              symbol: 'BTCUSDT',
+              posSide: 'long',
+              tradeSide: 'open',
+              status: 'filled',
+              baseVolume: '0.0029',
+              priceAvg: '80400.1',
+              fee: '-0.14',
+              totalProfits: '0',
+              orderSource: 'market',
+              leverage: '30',
+              cTime: '1789972881477',
+              uTime: '1789972881497',
+            },
+            // cancelled opens carry an empty priceAvg and are dropped
+            { orderId: 'o-2', symbol: 'BTCUSDT', posSide: 'long', tradeSide: 'open', status: 'canceled', baseVolume: '0', priceAvg: '', cTime: '1', uTime: '2' },
+            // a filled row without a price cannot be plotted
+            { orderId: 'o-3', symbol: 'BTCUSDT', posSide: 'long', tradeSide: 'close', status: 'filled', baseVolume: '1', priceAvg: '', cTime: '1', uTime: '2' },
+          ],
+        },
+      };
+    };
+    const client = new BitgetClient({ apiKey: 'key', secret: SECRET, passphrase: 'pass', fetchJson });
+
+    const orders = await client.fetchOrdersPage({ startTime: 1, endTime: 2 });
+
+    expect(orders).toEqual([
+      {
+        orderId: 'o-1',
+        symbol: 'BTCUSDT',
+        posSide: 'long',
+        side: 'open',
+        qty: 0.0029,
+        price: 80400.1,
+        fee: -0.14,
+        profit: 0,
+        source: 'market',
+        leverage: 30,
+        tradedAt: 1789972881497,
+        placedAt: 1789972881477,
+      },
+    ]);
+  });
+
+  it('passes the page cursor as a signed idLessThan parameter', async () => {
+    const urls: string[] = [];
+    const fetchJson: BitgetFetchJson = async (url) => {
+      urls.push(url);
+      if (url.includes('/public/time')) return { code: '00000', data: { serverTime: FIXED_SERVER_TIME } };
+      return { code: '00000', data: { entrustedList: [] } };
+    };
+    const client = new BitgetClient({ apiKey: 'key', secret: SECRET, passphrase: 'pass', fetchJson });
+
+    await client.fetchOrdersPage({ startTime: 1, endTime: 2, idLessThan: 'o-99' });
+
+    const request = urls.find((url) => url.includes('orders-history'));
+    expect(request).toBeDefined();
+    expect(request).toContain(`${BASE}/api/v2/mix/order/orders-history?`);
+    expect(request).toContain('idLessThan=o-99');
+    expect(request).toContain('productType=USDT-FUTURES');
+  });
+
   it('skips rows whose holdSide is missing', async () => {
     const fetchJson: BitgetFetchJson = async (url) => {
       if (url.includes('/public/time')) return { code: '00000', data: { serverTime: FIXED_SERVER_TIME } };

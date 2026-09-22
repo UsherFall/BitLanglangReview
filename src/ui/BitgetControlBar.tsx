@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
-type SyncResult = { fetchedRows?: number; uniqueRows?: number };
+type SyncResult = { fetchedRows?: number; uniqueRows?: number; ordersFetched?: number; ordersError?: string | null };
 
 type Props = {
   /** Called after a successful sync so the trade queue refetches. */
@@ -81,7 +81,11 @@ export function BitgetControlBar({ onDataChanged }: Props) {
         return;
       }
       const count = body.uniqueRows ?? body.fetchedRows ?? 0;
-      setNotice(`同步完成：拉取 ${body.fetchedRows ?? 0} 条，新增/更新 ${count} 笔已平仓仓位`);
+      // Per-order points are supplementary: report them (and any failure)
+      // without hiding the position sync that did succeed.
+      const orders = body.ordersFetched ? `，逐笔订单 ${body.ordersFetched} 条` : '';
+      const ordersFailure = body.ordersError ? `（订单明细拉取失败：${body.ordersError}）` : '';
+      setNotice(`同步完成：拉取 ${body.fetchedRows ?? 0} 条，新增/更新 ${count} 笔已平仓仓位${orders}${ordersFailure}`);
       onDataChanged();
     } catch {
       setError('同步请求失败');

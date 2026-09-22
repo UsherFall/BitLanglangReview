@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
+import type { BitgetOrder } from '../domain/bitget-order';
 import { bitgetSymbolToOkxInstrument, historyPositionRowKey, type BitgetHistoryPosition } from '../domain/bitget-position';
+import type { ClosedRound } from '../domain/bitget-round-orders';
 import { epochMsToShanghaiIso } from '../domain/shanghai-time';
-import type { Direction, Trade } from '../domain/trade';
+import type { Direction, Trade, TradePoint } from '../domain/trade';
 
 /**
  * Converts one Bitget history-position row (a fully closed position cycle) into
@@ -49,6 +51,53 @@ export function historyPositionToTrade(row: BitgetHistoryPosition, sequence: num
     holdingMinutes: Math.max(0, Math.round((utime - ctime) / 60000)),
     amplitude: null,
     sourceNote: 'bitget:history-position',
+  };
+}
+
+/** The round shape `ordersForRound` matches orders against. */
+export function toClosedRound(row: BitgetHistoryPosition): ClosedRound {
+  return {
+    symbol: row.symbol,
+    holdSide: row.holdSide,
+    ctime: Number(row.ctime),
+    utime: Number(row.utime),
+    openTotalPos: Number(row.openTotalPos),
+    closeTotalPos: Number(row.closeTotalPos),
+  };
+}
+
+/**
+ * Adds the round's individual orders to an already-mapped Trade: one point per
+ * action, plus the leverage the orders carry (history-position has none).
+ * Leverage comes from the round's **first open** — measured constant per symbol
+ * in this account, and an open is what sets the position's leverage.
+ *
+ * `margin`, `maxPositionValue`, and `returnRate` stay null: the exchange does
+ * not report them and approximations would not match the workbook's meaning.
+ */
+export function attachRoundOrders(trade: Trade, matched: readonly BitgetOrder[]): Trade {
+  if (matched.length === 0) return trade;
+  const ordered = matched.slice().sort((a, b) => a.tradedAt - b.tradedAt);
+  const firstOpen = ordered.find((order) => order.side === 'open');
+  return {
+    ...trade,
+    leverage: firstOpen?.leverage ?? trade.leverage,
+    points: ordered.map(orderToPoint),
+  };
+}
+
+function orderToPoint(order: BitgetOrder): TradePoint {
+  return {
+    kind: order.side,
+    time: epochMsToShanghaiIso(order.tradedAt),
+    timeMs: order.tradedAt,
+    price: order.price,
+    qty: order.qty,
+    // Bitget reports fees as negatives; Trade.fee is a positive cost.
+    fee: Math.abs(order.fee),
+    profit: order.side === 'close' ? order.profit : null,
+    source: order.source,
+    leverage: order.leverage,
   };
 }
 

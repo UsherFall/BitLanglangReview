@@ -11,6 +11,11 @@ const chartMocks = vi.hoisted(() => ({
   setVisibleRange: vi.fn(),
   timeToIndex: vi.fn(() => 150),
   getVisibleRange: vi.fn(() => ({ from: 1000, to: 2000 })),
+  /** Trade-marker primitives attached to the candlestick series. */
+  primitives: [] as { currentPoints: () => readonly unknown[] }[],
+  attachPrimitive: vi.fn((primitive: { currentPoints: () => readonly unknown[] }) => {
+    chartMocks.primitives.push(primitive);
+  }),
 }));
 
 vi.mock('lightweight-charts', () => ({
@@ -19,10 +24,11 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn() }),
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), attachPrimitive: chartMocks.attachPrimitive }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: vi.fn() }),
     subscribeCrosshairMove: vi.fn(),
+    unsubscribeCrosshairMove: vi.fn(),
     timeScale: () => ({
       coordinateToTime: vi.fn(),
       getVisibleLogicalRange: chartMocks.getVisibleLogicalRange,
@@ -41,9 +47,16 @@ vi.mock('lightweight-charts', () => ({
   createSeriesMarkers: () => ({ setMarkers: chartMocks.setMarkers }),
 }));
 
+/** Points currently drawn by the newest mounted chart's marker primitive. */
+function markerPoints(): readonly unknown[] {
+  const primitive = chartMocks.primitives[chartMocks.primitives.length - 1];
+  return primitive ? primitive.currentPoints() : [];
+}
+
 describe('App Review Progress', () => {
   beforeEach(() => {
     Element.prototype.scrollIntoView = vi.fn();
+    chartMocks.primitives.length = 0;
     chartMocks.setVisibleRange.mockClear();
     chartMocks.getVisibleLogicalRange.mockClear();
     chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 160 });
@@ -102,23 +115,16 @@ describe('App Review Progress', () => {
     render(<App />);
 
     await progressPanel();
-    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-    ])));
+    // A workbook trade has no orders, so the chart draws the entry/exit pair.
+    await waitFor(() => expect(markerPoints()).toHaveLength(2));
 
-    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('隐藏开平仓标记'));
 
-    expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
+    expect(markerPoints()).toHaveLength(0);
 
-    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('显示开平仓标记'));
 
-    expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-      expect.objectContaining({ text: expect.stringContaining('1') }),
-    ]));
+    expect(markerPoints()).toHaveLength(2);
   });
 
   it('moves the Trade Review chart to the entry center when switching timeframe', async () => {

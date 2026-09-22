@@ -11,7 +11,8 @@ import { resolveDataPath } from './data-root';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
 import { BitgetClient } from './bitget-client';
-import { historyPositionToTrade } from './bitget-import';
+import { ordersForRound } from '../domain/bitget-round-orders';
+import { attachRoundOrders, historyPositionToTrade, toClosedRound } from './bitget-import';
 import { clearBitgetKeys, loadBitgetKeys, saveBitgetKeys } from './bitget-keys';
 import { BitgetPositionStore } from './bitget-position-store';
 import { BitgetSyncService } from './bitget-sync';
@@ -364,10 +365,20 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         const reviews = reviewStore.listReviews();
         const configured = loadBitgetKeys() !== null;
         try {
+          // Read every cached order once, grouped by symbol, instead of one
+          // query per round.
+          const ordersBySymbol = bitgetPositionStore.listOrdersBySymbol();
           const trades = configured
             ? bitgetPositionStore
                 .listAll()
-                .map((cached, sequence) => historyPositionToTrade(cached.row, sequence))
+                .map((cached, sequence) => ({ cached, trade: historyPositionToTrade(cached.row, sequence) }))
+                .map(({ cached, trade }) => {
+                  if (!trade) return null;
+                  // Attach the individual orders when they can be proven to
+                  // belong to this round; otherwise the chart shows entry/exit.
+                  const matched = ordersForRound(toClosedRound(cached.row), ordersBySymbol.get(cached.row.symbol) ?? []);
+                  return matched ? attachRoundOrders(trade, matched) : trade;
+                })
                 .filter((trade): trade is NonNullable<ReturnType<typeof historyPositionToTrade>> => trade !== null)
             : [];
           const queue = buildReviewQueue(trades, reviews, options);

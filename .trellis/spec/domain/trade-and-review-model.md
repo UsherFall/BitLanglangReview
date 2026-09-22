@@ -12,7 +12,9 @@ Avoid terms called out in `CONTEXT.md`, especially order, transaction, row, coin
 
 A Trade ID is a stable SHA-256 identifier. Workbook-sourced IDs are created by `src/server/trade-import.ts` from source sequence plus core trade fields; Bitget-sourced IDs (`bg-` prefix) come from `src/server/bitget-import.ts` over the history-position content key (`historyPositionRowKey`). Do not switch review persistence to row numbers or workbook indexes.
 
-`Trade.leverage`, `Trade.margin`, `Trade.maxPositionValue`, `Trade.returnRate`, and `Trade.turnover` are `number | null`: the xlsx importer always fills numbers, but the Bitget source cannot supply those (it reports a closed cycle's average prices/sizes/pnl/fees only). Consumers must render `null` as "—" and never fabricate approximations (e.g. price return is NOT the workbook-style leverage-inclusive ROE). Queue sorting treats `null` as always-last via `compareNullableNumbers` in `build-review-queue.ts`.
+`Trade.leverage`, `Trade.margin`, `Trade.maxPositionValue`, `Trade.returnRate`, and `Trade.turnover` are `number | null`. The xlsx importer always fills numbers. The Bitget source fills `leverage` from the round's first open order (Bitget's `order/orders-history` reports it per order; see `attachRoundOrders` in `src/server/bitget-import.ts`) and leaves it `null` when the round's orders could not be matched; `margin`, `maxPositionValue`, and `returnRate` stay `null` because Bitget does not report them. Consumers must render `null` as "—" and never fabricate approximations (e.g. price return is NOT the workbook-style leverage-inclusive ROE). Queue sorting treats `null` as always-last via `compareNullableNumbers` in `build-review-queue.ts`.
+
+`Trade.points` is optional per-action detail (`TradePoint[]`): Bitget rounds carry one entry per filled order (open/add/reduce/close), which the chart plots as individual points and shows on hover; workbook trades and unmatched Bitget rounds omit it, and the chart falls back to the entry/exit pair. Point timestamps come from the order's `uTime` (fill time), never `cTime` — limit orders can be placed minutes before they fill.
 
 ## Review Contract
 

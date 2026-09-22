@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Trade 字段与可空约定，新增 TradePoint 必须与其口径一致"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "SQLite store 风格、导入映射与幂等约定"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "/api/bitget/* 路由的响应与错误处理约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TradeChart 标记/whitespace/图表 ref 与开关的既有约定"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "前端状态与数据源切换约定"}

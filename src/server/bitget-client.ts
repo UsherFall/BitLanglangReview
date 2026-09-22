@@ -1,4 +1,5 @@
 import { createHmac } from 'node:crypto';
+import type { BitgetOrder } from '../domain/bitget-order';
 import type { BitgetHistoryPosition } from '../domain/bitget-position';
 import { defaultBitgetFetchJson } from './http';
 
@@ -8,10 +9,16 @@ export type BitgetFetchJson = (url: string, headers: Record<string, string>) => 
 
 const BITGET_BASE_URL = 'https://api.bitget.com';
 const HISTORY_POSITION_PATH = '/api/v2/mix/position/history-position';
+const ORDER_HISTORY_PATH = '/api/v2/mix/order/orders-history';
 const PUBLIC_TIME_PATH = '/api/v2/public/time';
 const PRODUCT_TYPE = 'USDT-FUTURES';
 const MAX_PAGE_LIMIT = 100;
 const CLOCK_SYNC_TTL_MS = 10 * 60 * 1000;
+
+/** Bitget rejects any orders-history window wider than this (measured
+ * `code=00001 "startTime and endTime interval cannot be greater than 7 days"`),
+ * far tighter than the 90 days history-position allows. */
+export const ORDER_HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type BitgetClientConfig = {
   apiKey: string;
@@ -25,6 +32,14 @@ export type HistoryPositionsPageRequest = {
   startTime: number;
   endTime: number;
   limit?: number;
+};
+
+export type OrderHistoryPageRequest = {
+  startTime: number;
+  endTime: number;
+  limit?: number;
+  /** Cursor: return orders older than this order id (the page's last id). */
+  idLessThan?: string;
 };
 
 /** A Bitget private-API business error; `code` is the exchange code when known. */
@@ -77,6 +92,27 @@ export class BitgetClient {
     return rows
       .map(normalizeHistoryPositionRow)
       .filter((row): row is BitgetHistoryPosition => row !== null);
+  }
+
+  /**
+   * Fetches one page of filled orders. Windows are capped at 7 days by the
+   * exchange, and a busy week exceeds the 100-row page limit (measured 144
+   * orders in 7 days), so callers must page with `idLessThan` until a short
+   * page comes back.
+   */
+  async fetchOrdersPage(input: OrderHistoryPageRequest): Promise<BitgetOrder[]> {
+    const limit = Math.min(input.limit ?? MAX_PAGE_LIMIT, MAX_PAGE_LIMIT);
+    const params: Record<string, string | number> = {
+      productType: PRODUCT_TYPE,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      limit,
+    };
+    if (input.idLessThan) params.idLessThan = input.idLessThan;
+    const payload = await this.get(`${ORDER_HISTORY_PATH}?${buildQuery(params)}`);
+    return extractList(payload.data, 'entrustedList')
+      .map(normalizeOrderRow)
+      .filter((row): row is BitgetOrder => row !== null);
   }
 
   private async get(requestPath: string): Promise<{ code?: unknown; msg?: unknown; data?: unknown }> {
@@ -139,12 +175,58 @@ function buildQuery(params: Record<string, string | number>): string {
     .join('&');
 }
 
-function extractList(data: unknown): unknown[] {
+function extractList(data: unknown, key = 'list'): unknown[] {
   if (Array.isArray(data)) return data;
-  if (data && typeof data === 'object' && Array.isArray((data as { list?: unknown }).list)) {
-    return (data as { list: unknown[] }).list;
+  if (data && typeof data === 'object') {
+    const value = (data as Record<string, unknown>)[key];
+    if (Array.isArray(value)) return value;
   }
   return [];
+}
+
+/**
+ * Normalizes one orders-history row. Only filled orders with a usable average
+ * price are kept: cancelled orders carry an empty `priceAvg` (measured 19 of
+ * 144 rows in a week), and a point cannot be plotted without a fill price.
+ */
+function normalizeOrderRow(raw: unknown): BitgetOrder | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Record<string, unknown>;
+  if (stringValue(row.status) !== 'filled') return null;
+
+  const orderId = stringValue(row.orderId);
+  const symbol = stringValue(row.symbol);
+  const side = row.tradeSide === 'open' ? 'open' : row.tradeSide === 'close' ? 'close' : null;
+  const posSide = row.posSide === 'long' || row.posSide === 'short' ? row.posSide : null;
+  const qty = numberValue(row.baseVolume);
+  const price = numberValue(row.priceAvg);
+  const tradedAt = numberValue(row.uTime);
+  if (!orderId || !symbol || !side || !posSide) return null;
+  if (qty === null || qty <= 0 || price === null || price <= 0 || tradedAt === null) return null;
+
+  return {
+    orderId,
+    symbol,
+    posSide,
+    side,
+    qty,
+    price,
+    fee: numberValue(row.fee) ?? 0,
+    profit: numberValue(row.totalProfits) ?? 0,
+    source: stringValue(row.orderSource),
+    leverage: numberValue(row.leverage),
+    tradedAt,
+    placedAt: numberValue(row.cTime),
+  };
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function normalizeHistoryPositionRow(raw: unknown): BitgetHistoryPosition | null {

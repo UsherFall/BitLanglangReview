@@ -1,53 +1,69 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import type { ReviewedTrade } from '../src/domain/review-queue';
-import { allTradeMarkers, tradeMarkers } from '../src/ui/trade-markers';
+import type { TradePoint } from '../src/domain/trade';
+import { allTradeChartPoints, tradeChartPoints } from '../src/ui/trade-markers';
 
-describe('Trade Markers', () => {
-  it('places entry and exit markers on existing review timeframe candlesticks', () => {
-    const candles = [
-      makeCandle('2024-05-21T00:00:00+08:00'),
-      makeCandle('2024-05-21T04:00:00+08:00'),
-      makeCandle('2024-05-21T08:00:00+08:00'),
-    ];
+describe('Trade chart points', () => {
+  it('falls back to an entry/exit pair when the source has no orders', () => {
+    const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T04:00:00+08:00'), makeCandle('2024-05-21T08:00:00+08:00')];
 
-    const markers = tradeMarkers(makeTrade(), '4H', candles);
+    const points = tradeChartPoints(makeTrade(), '4H', candles);
 
-    expect(markers.map((marker) => marker.time)).toEqual([
+    expect(points.map((point) => point.kind)).toEqual(['open', 'close']);
+    expect(points.map((point) => point.time)).toEqual([
       Date.parse('2024-05-21T00:00:00+08:00') / 1000,
       Date.parse('2024-05-21T04:00:00+08:00') / 1000,
     ]);
-    expect(candles.map((candle) => candle.timestamp / 1000)).toEqual(expect.arrayContaining(markers.map((marker) => marker.time)));
+    expect(points.map((point) => point.price)).toEqual([3100, 3500]);
+    // No per-action detail: the tooltip falls back to the round's own figures.
+    expect(points.map((point) => point.detail)).toEqual([null, null]);
+    expect(points.every((point) => !point.muted)).toBe(true);
   });
 
-  it('renders all trades entry and exit markers with the active trade highlighted', () => {
-    const candles = [
-      makeCandle('2024-05-21T00:00:00+08:00'),
-      makeCandle('2024-05-21T04:00:00+08:00'),
-      makeCandle('2024-05-21T08:00:00+08:00'),
-    ];
+  it('expands a Bitget round into one point per order, snapped like the old markers', () => {
+    const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T04:00:00+08:00')];
+    const trade = makeTrade({
+      id: 'bg-1',
+      points: [
+        makePoint('open', '2024-05-21T00:30:00+08:00', 80400.1),
+        makePoint('open', '2024-05-21T01:00:00+08:00', 81508.3),
+        makePoint('close', '2024-05-21T02:30:00+08:00', 81145.2, { source: 'loss_market', profit: 0.3176 }),
+        makePoint('open', '2024-05-21T04:30:00+08:00', 81543.7),
+        makePoint('close', '2024-05-21T04:45:00+08:00', 81390, { source: 'loss_market', profit: -1.15 }),
+      ],
+    });
+
+    const points = tradeChartPoints(trade, '4H', candles);
+
+    expect(points.map((point) => point.kind)).toEqual(['open', 'open', 'close', 'open', 'close']);
+    // Points snap to the containing candlestick, exactly like the old markers.
+    expect(points.map((point) => point.time)).toEqual([
+      Date.parse('2024-05-21T00:00:00+08:00') / 1000,
+      Date.parse('2024-05-21T00:00:00+08:00') / 1000,
+      Date.parse('2024-05-21T00:00:00+08:00') / 1000,
+      Date.parse('2024-05-21T04:00:00+08:00') / 1000,
+      Date.parse('2024-05-21T04:00:00+08:00') / 1000,
+    ]);
+    expect(points[2].detail?.source).toBe('loss_market');
+    expect(points[2].detail?.profit).toBe(0.3176);
+    expect(points[0].detail?.profit).toBeNull();
+    expect(new Set(points.map((point) => point.key)).size).toBe(5);
+    expect(points.every((point) => point.tradeId === 'bg-1')).toBe(true);
+  });
+
+  it('mutes every trade except the active one in the all-trades mode', () => {
+    const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T04:00:00+08:00'), makeCandle('2024-05-21T08:00:00+08:00')];
     const trades = [
       makeTrade({ id: 't1' }),
       makeTrade({ id: 't2', entryTime: '2024-05-21T04:10:00.000+08:00', exitTime: '2024-05-21T08:20:00.000+08:00', entryPrice: 3200, exitPrice: 3300, direction: '空' }),
     ];
 
-    const markers = allTradeMarkers(trades, 't1', '4H', candles);
+    const points = allTradeChartPoints(trades, 't1', '4H', candles);
 
-    expect(markers).toHaveLength(4);
-    expect(markers.map((marker) => marker.time)).toEqual([
-      Date.parse('2024-05-21T00:00:00+08:00') / 1000,
-      Date.parse('2024-05-21T04:00:00+08:00') / 1000,
-      Date.parse('2024-05-21T04:00:00+08:00') / 1000,
-      Date.parse('2024-05-21T08:00:00+08:00') / 1000,
-    ]);
-    const activeEntry = markers.find((marker) => marker.text?.startsWith('开 3100'));
-    const activeExit = markers.find((marker) => marker.text?.startsWith('平 3500'));
-    const otherEntry = markers.find((marker) => marker.text?.startsWith('开 3200'));
-    const otherExit = markers.find((marker) => marker.text?.startsWith('平 3300'));
-    expect(activeEntry?.color).toBe('#FACC15');
-    expect(activeExit?.color).toBe('#38BDF8');
-    expect(otherEntry?.color).toBe('#FACC15');
-    expect(otherExit?.color).toBe('#38BDF8');
+    expect(points).toHaveLength(4);
+    expect(points.filter((point) => !point.muted).map((point) => point.tradeId)).toEqual(['t1', 't1']);
+    expect(points.filter((point) => point.muted).map((point) => point.tradeId)).toEqual(['t2', 't2']);
   });
 });
 
@@ -61,6 +77,21 @@ function makeCandle(time: string): Candlestick {
     low: 1,
     close: 1,
     volume: 1,
+  };
+}
+
+function makePoint(kind: 'open' | 'close', time: string, price: number, overrides: Partial<TradePoint> = {}): TradePoint {
+  return {
+    kind,
+    time,
+    timeMs: Date.parse(time),
+    price,
+    qty: 0.0029,
+    fee: 0.14,
+    profit: null,
+    source: 'market',
+    leverage: 30,
+    ...overrides,
   };
 }
 

@@ -24,11 +24,13 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), attachPrimitive: vi.fn(), coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
     subscribeCrosshairMove: vi.fn(),
+    unsubscribeCrosshairMove: vi.fn(),
     timeScale: () => ({
+      timeToCoordinate: vi.fn(() => null),
       coordinateToTime: vi.fn(),
       getVisibleLogicalRange: chartMocks.getVisibleLogicalRange,
       getVisibleRange: chartMocks.getVisibleRange,
