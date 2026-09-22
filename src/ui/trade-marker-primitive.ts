@@ -175,7 +175,8 @@ function layoutPoints(
   if (!chart || !series) return [];
   const timeScale = chart.timeScale();
   const drawn: DrawnPoint[] = [];
-  const occupied: Record<'above' | 'below', number[]> = { above: [], below: [] };
+  /** Dots already placed on the same candle and side, in point order. */
+  const stacked = new Map<string, number>();
 
   for (const point of points) {
     const x = timeScale.timeToCoordinate(point.time as UTCTimestamp);
@@ -192,18 +193,17 @@ function layoutPoints(
     if (anchorY === null) continue;
 
     const radius = (point.muted ? MUTED_DIAMETER : ACTIVE_DIAMETER) / 2;
-    const side = point.kind === 'open' ? 'below' : 'above';
-    const direction = point.kind === 'open' ? 1 : -1;
-    let y = point.kind === 'open' ? anchorY + GAP + radius : anchorY - GAP - radius;
-
-    // Nudge dots apart when several actions land on the same candle side.
-    const minGap = radius * 2 + MIN_STACK_GAP;
-    for (let guard = 0; guard < 24; guard += 1) {
-      const clashes = occupied[side].some((used) => Math.abs(used - y) < minGap);
-      if (!clashes) break;
-      y += direction * minGap;
-    }
-    occupied[side].push(y);
+    // Several actions can share one candle and side (e.g. two adds 3 minutes
+    // apart on 5m). Fan them out by their ORDER on that candle with a fixed
+    // pixel step. Measuring clashes by absolute pixel distance instead made a
+    // dot's offset depend on the zoom level, so dots drifted up and down while
+    // zooming; keeping the offset a pure function of the data fixes that.
+    const stackKey = `${point.kind}#${point.time}`;
+    const stackIndex = stacked.get(stackKey) ?? 0;
+    stacked.set(stackKey, stackIndex + 1);
+    const step = radius * 2 + MIN_STACK_GAP;
+    const offset = GAP + radius + stackIndex * step;
+    const y = point.kind === 'open' ? anchorY + offset : anchorY - offset;
 
     drawn.push({ point, x, y, radius });
   }

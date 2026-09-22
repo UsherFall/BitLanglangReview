@@ -32,13 +32,19 @@ function makePoint(): MarkerPoint {
   };
 }
 
-/** Attaches the primitive to a fake chart whose x coordinate is shiftable. */
-function attachWith(shift: () => number) {
+/**
+ * Attaches the primitive to a fake chart whose x coordinate is shiftable and
+ * whose price scale is zoomable (`scale`), so tests can drive both pan and
+ * zoom the way the real chart does.
+ */
+function attachWith(shift: () => number, scale: () => number = () => 1) {
   const primitive = new TradeMarkerPrimitive([], []);
   const chart = {
     timeScale: () => ({ timeToCoordinate: (time: number) => time - CHART_TIME + shift() }),
   } as unknown as IChartApi;
-  const series = { priceToCoordinate: () => 200 } as unknown as ISeriesApi<'Candlestick'>;
+  const series = {
+    priceToCoordinate: (price: number) => 200 + (price - 100) * scale(),
+  } as unknown as ISeriesApi<'Candlestick'>;
   primitive.attached({ chart, series, requestUpdate: () => undefined } as unknown as SeriesAttachedParameter<Time>);
   return primitive;
 }
@@ -72,6 +78,30 @@ describe('TradeMarkerPrimitive', () => {
     // Opens hang below the candle's low (90) plus the fixed gap and radius.
     expect(drawn.y).toBeGreaterThan(200);
     expect(drawn.radius).toBe(5.5);
+  });
+
+  it('fans out dots that share a candle by an offset zooming cannot change', () => {
+    // Two adds on the same candle and side: they must stack, and the stacking
+    // gap must stay put while the price scale zooms. Deriving the gap from
+    // measured pixel distances made it change with the zoom level, which is
+    // what made dots visibly drift up and down.
+    let scale = 1;
+    const primitive = attachWith(() => 0, () => scale);
+    const candle = makeCandle();
+    const first: MarkerPoint = { ...makePoint(), key: 'bg-1#a' };
+    const second: MarkerPoint = { ...makePoint(), key: 'bg-1#b' };
+
+    primitive.setPoints([first, second], [candle]);
+    const drawn = primitive.drawnPoints();
+    expect(drawn).toHaveLength(2);
+    const gapAtOneToOne = drawn[1].y - drawn[0].y;
+    expect(gapAtOneToOne).toBeGreaterThan(0);
+
+    scale = 4;
+    primitive.updateAllViews();
+
+    const zoomed = primitive.drawnPoints();
+    expect(zoomed[1].y - zoomed[0].y).toBeCloseTo(gapAtOneToOne, 6);
   });
 
   it('hit-tests the newest dot positions', () => {
