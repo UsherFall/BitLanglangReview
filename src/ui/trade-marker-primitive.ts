@@ -73,8 +73,15 @@ export class TradeMarkerPrimitive implements ISeriesPrimitive<Time> {
     return [this.view];
   }
 
+  /**
+   * The chart calls this before every repaint (pan, zoom, resize, data
+   * change). Dot positions are pixel coordinates, so they MUST be recomputed
+   * here — refreshing the data alone leaves the dots frozen where they were
+   * while the candles scroll underneath them.
+   */
   updateAllViews(): void {
     this.view.setData(this.points, this.candles, this.showText);
+    this.view.update();
   }
 
   /** Replaces the drawn points (marker toggle, mode switch, new candles) and
