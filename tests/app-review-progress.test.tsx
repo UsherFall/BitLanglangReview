@@ -300,10 +300,28 @@ function makeFetch(options: { savedReview?: { tradeId: string; tags: string[]; n
       return new Response(JSON.stringify({ review, tags: review?.tags ?? [], tagCounts: {} }));
     }
     if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP'] }));
-    if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [] }));
+    if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: mockCandles() }));
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
     return new Response(JSON.stringify({}));
   });
+}
+
+/**
+ * Candles covering the mock trades' entry/exit. Marker points are only drawn
+ * when a loaded candle contains their time, so an empty candle list would mean
+ * "no markers" rather than "markers with no data behind them".
+ */
+function mockCandles() {
+  return ['2024-05-21T09:00:00+08:00', '2024-05-21T10:00:00+08:00', '2024-05-21T10:15:00+08:00', '2024-05-21T11:00:00+08:00'].map((time) => ({
+    instrument: 'BTC-USDT-SWAP',
+    timeframe: '5m',
+    timestamp: Date.parse(time),
+    open: 1,
+    high: 1.2,
+    low: 0.8,
+    close: 1,
+    volume: 1,
+  }));
 }
 
 function makeTrade(id: string, tags: string[], note: string) {

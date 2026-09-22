@@ -52,6 +52,37 @@ describe('Trade chart points', () => {
     expect(points.every((point) => point.tradeId === 'bg-1')).toBe(true);
   });
 
+  it('drops actions outside the loaded candles instead of flooring them onto empty slots', () => {
+    // The renderer anchors a point's price to the candlestick behind its chart
+    // time. A floored time (onto a slot no candle occupies) would pair that
+    // time with some other candle's low/high and draw the point in mid-air —
+    // the drift this guards against.
+    const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T04:00:00+08:00')];
+    const trade = makeTrade({
+      id: 'bg-out-of-range',
+      points: [
+        makePoint('open', '2024-05-21T00:30:00+08:00', 100),
+        makePoint('close', '2024-05-21T08:30:00+08:00', 200),
+      ],
+    });
+
+    const points = tradeChartPoints(trade, '4H', candles);
+
+    expect(points).toHaveLength(1);
+    expect(points[0].kind).toBe('open');
+  });
+
+  it('snaps an action inside a data gap onto the candle before the gap', () => {
+    const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T08:00:00+08:00')];
+    const trade = makeTrade({ id: 'bg-gap', points: [makePoint('close', '2024-05-21T05:00:00+08:00', 150)] });
+
+    const points = tradeChartPoints(trade, '4H', candles);
+
+    expect(points).toHaveLength(1);
+    expect(points[0].time).toBe(Date.parse('2024-05-21T00:00:00+08:00') / 1000);
+    expect(points[0].price).toBe(150);
+  });
+
   it('mutes every trade except the active one in the all-trades mode', () => {
     const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T04:00:00+08:00'), makeCandle('2024-05-21T08:00:00+08:00')];
     const trades = [

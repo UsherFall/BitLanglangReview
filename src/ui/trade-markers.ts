@@ -1,7 +1,7 @@
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewedTrade } from '../domain/review-queue';
 import type { ReviewTimeframe, TradePoint } from '../domain/trade';
-import { markerTimeForEvent } from './chart-time';
+import { containingCandleTimestamp } from './chart-time';
 
 /**
  * One point to draw on the chart. A Bitget round expands to one point per
@@ -50,23 +50,27 @@ function pointsForTrade(
 ): MarkerPoint[] {
   if (trade.points?.length) {
     return trade.points
-      .map((point) => ({
-        key: `${trade.id}#${point.timeMs}#${point.kind}`,
-        tradeId: trade.id,
-        time: Number(markerTimeForEvent(point.time, timeframe, candles)),
-        timeMs: point.timeMs,
-        price: point.price,
-        kind: point.kind,
-        muted,
-        detail: point,
-      }))
-      .filter((point) => point.time > 0);
+      .map((point): MarkerPoint | null => {
+        const time = snapToLoadedCandle(point.timeMs, timeframe, candles);
+        if (time === null) return null;
+        return {
+          key: `${trade.id}#${point.timeMs}#${point.kind}`,
+          tradeId: trade.id,
+          time,
+          timeMs: point.timeMs,
+          price: point.price,
+          kind: point.kind,
+          muted,
+          detail: point,
+        };
+      })
+      .filter((point): point is MarkerPoint => point !== null);
   }
 
   return [
     fallbackPoint(trade, 'open', trade.entryTime, trade.entryPrice, timeframe, candles, muted),
     fallbackPoint(trade, 'close', trade.exitTime, trade.exitPrice, timeframe, candles, muted),
-  ].filter((point) => point.time > 0);
+  ].filter((point): point is MarkerPoint => point !== null);
 }
 
 function fallbackPoint(
@@ -77,15 +81,33 @@ function fallbackPoint(
   timeframe: ReviewTimeframe,
   candles: Candlestick[],
   muted: boolean,
-): MarkerPoint {
+): MarkerPoint | null {
+  const time = snapToLoadedCandle(Date.parse(eventTime), timeframe, candles);
+  if (time === null) return null;
   return {
     key: `${trade.id}#${kind}`,
     tradeId: trade.id,
-    time: Number(markerTimeForEvent(eventTime, timeframe, candles)),
+    time,
     timeMs: Date.parse(eventTime),
     price,
     kind,
     muted,
     detail: null,
   };
+}
+
+/**
+ * Chart time (seconds) of the loaded candlestick that contains `timeMs`, or
+ * `null` when no loaded candlestick does.
+ *
+ * Returning `null` instead of a floored grid time is deliberate: the renderer
+ * anchors a point's price to that same candlestick's low/high, so a point whose
+ * time was floored onto an unloaded slot would end up drawn at one time and
+ * another candle's price — the drift this guards against. Actions outside the
+ * loaded range simply appear once the reviewer scrolls that range into view.
+ */
+function snapToLoadedCandle(timeMs: number, timeframe: ReviewTimeframe, candles: Candlestick[]): number | null {
+  if (!Number.isFinite(timeMs)) return null;
+  const containing = containingCandleTimestamp(timeMs, timeframe, candles);
+  return containing === null ? null : Math.floor(containing / 1000);
 }

@@ -1707,6 +1707,15 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
     const params = new URLSearchParams({ instrument: trade.instrument, timeframe, entryTime: trade.entryTime, mode: 'initial', source: candleSource });
     fetchCandles(params)
+      .then((candles) =>
+        extendCandlesForLateActions(candles, {
+          instrument: trade.instrument,
+          timeframe,
+          entryTime: trade.entryTime,
+          source: candleSource,
+          latestTimeMs: latestTradeTimeMs(trade),
+        }),
+      )
       .then((candles) => {
         if (activeKeyRef.current !== key) return;
         const series = seriesRef.current;
@@ -2172,6 +2181,43 @@ function renderCandles(timeframe: ReviewTimeframe, candles: Candlestick[], serie
   // action is never clipped away by an empty range.
   series.setData(chartDataWithWhitespace(candles, nextPoints.map((point) => point.timeMs)));
   primitive?.setPoints(markersVisible ? nextPoints : [], candles);
+}
+
+/** The latest moment this trade touches: its exit and every action. */
+function latestTradeTimeMs(trade: ReviewedTrade): number | null {
+  const times = [Date.parse(trade.exitTime), ...(trade.points ?? []).map((point) => point.timeMs)].filter((value) => Number.isFinite(value));
+  return times.length ? Math.max(...times) : null;
+}
+
+/**
+ * The initial candle window spans 150 bars either side of the entry. A round
+ * that runs longer than that (overnight holds, later adds) leaves its later
+ * actions without a candlestick to anchor to, so they cannot be drawn. Pull one
+ * extra window after what was loaded; anything beyond that arrives through the
+ * normal scroll-loading.
+ */
+async function extendCandlesForLateActions(
+  candles: Candlestick[],
+  input: { instrument: string; timeframe: ReviewTimeframe; entryTime: string; source: CandleSourceId; latestTimeMs: number | null },
+): Promise<Candlestick[]> {
+  const lastLoaded = candles[candles.length - 1]?.timestamp;
+  if (input.latestTimeMs === null || lastLoaded === undefined || input.latestTimeMs <= lastLoaded) return candles;
+  try {
+    const extra = await fetchCandles(
+      new URLSearchParams({
+        instrument: input.instrument,
+        timeframe: input.timeframe,
+        entryTime: input.entryTime,
+        mode: 'later',
+        anchor: String(lastLoaded),
+        source: input.source,
+      }),
+    );
+    return extra.length ? mergeCandles([...candles, ...extra]) : candles;
+  } catch {
+    // Supplementary window: a failure here must not sink the primary load.
+    return candles;
+  }
 }
 
 /** Hover-card payload: per-action detail when the source has orders, else the

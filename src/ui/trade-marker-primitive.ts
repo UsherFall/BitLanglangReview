@@ -173,7 +173,11 @@ function layoutPoints(
   for (const point of points) {
     const x = timeScale.timeToCoordinate(point.time as UTCTimestamp);
     if (x === null) continue;
-    const candle = candleAt(point.timeMs, candles);
+    // Look the candle up by the point's chart time, never by its raw timestamp:
+    // the x coordinate and the price anchor must come from the SAME candlestick,
+    // otherwise a point whose time snapped onto one candle would be drawn at
+    // another candle's price level.
+    const candle = candleByChartTime(point.time, candles);
     // Opens hang under the candle's low, closes above its high, so a dot never
     // covers the price action it refers to.
     const anchor = candle ? (point.kind === 'open' ? candle.low : candle.high) : point.price;
@@ -200,9 +204,10 @@ function layoutPoints(
   return drawn;
 }
 
-function candleAt(timeMs: number, candles: readonly Candlestick[]): Candlestick | null {
-  for (let index = candles.length - 1; index >= 0; index -= 1) {
-    if (candles[index].timestamp <= timeMs) return candles[index];
+/** The loaded candlestick whose chart time (seconds) equals `chartTime`. */
+function candleByChartTime(chartTime: number, candles: readonly Candlestick[]): Candlestick | null {
+  for (const candle of candles) {
+    if (Math.floor(candle.timestamp / 1000) === chartTime) return candle;
   }
   return null;
 }
