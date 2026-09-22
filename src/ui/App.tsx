@@ -2177,9 +2177,12 @@ function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'
 }
 
 function renderCandles(timeframe: ReviewTimeframe, candles: Candlestick[], series: ISeriesApi<'Candlestick'>, primitive: TradeMarkerPrimitive | null, markersVisible: boolean, nextPoints: MarkerPoint[]) {
-  // Pad the time scale for points that fall outside the loaded candles, so an
-  // action is never clipped away by an empty range.
-  series.setData(chartDataWithWhitespace(candles, nextPoints.map((point) => point.timeMs)));
+  // No time-axis padding for points: a point is only produced when a loaded
+  // candlestick already contains its time (`tradeChartPoints` drops the rest),
+  // so every point already sits on a real candle. Padding with anything else —
+  // e.g. a raw fill timestamp that is not one of the candles' times — inserts
+  // an extra slot between two candles and shoves the later one out of place.
+  series.setData(chartDataWithWhitespace(candles));
   primitive?.setPoints(markersVisible ? nextPoints : [], candles);
 }
 
