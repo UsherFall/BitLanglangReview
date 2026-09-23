@@ -1,7 +1,23 @@
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewedTrade } from '../domain/review-queue';
-import type { ReviewTimeframe, TradePoint } from '../domain/trade';
+import type { Direction, ReviewTimeframe, TradePoint } from '../domain/trade';
 import { containingCandleTimestamp } from './chart-time';
+
+/** Chart colours. Teal reads as the long side's colour, rose as the short
+ * side's. */
+export const LONG_COLOR = '#2DD4BF';
+export const SHORT_COLOR = '#FB7185';
+
+/**
+ * Colour of a point's dot and its hover badge. An entry wears its trade's
+ * direction colour and an exit the opposite one, so a long opens teal and
+ * closes rose, while a short opens rose and closes teal.
+ */
+export function pointColor(kind: 'open' | 'close', direction: Direction): string {
+  const own = direction === '空' ? SHORT_COLOR : LONG_COLOR;
+  const opposite = direction === '空' ? LONG_COLOR : SHORT_COLOR;
+  return kind === 'open' ? own : opposite;
+}
 
 /**
  * One point to draw on the chart. A Bitget round expands to one point per
@@ -17,6 +33,9 @@ export type MarkerPoint = {
   timeMs: number;
   price: number;
   kind: 'open' | 'close';
+  /** Direction of the trade this action belongs to. Decides which side of the
+   * candle the dot hangs on and the colour it is painted with. */
+  direction: Direction;
   /** Non-active trades are drawn smaller and translucent. */
   muted: boolean;
   /** Per-action detail when the source has orders; null → tooltip falls back
@@ -60,6 +79,7 @@ function pointsForTrade(
           timeMs: point.timeMs,
           price: point.price,
           kind: point.kind,
+          direction: trade.direction,
           muted,
           detail: point,
         };
@@ -91,6 +111,7 @@ function fallbackPoint(
     timeMs: Date.parse(eventTime),
     price,
     kind,
+    direction: trade.direction,
     muted,
     detail: null,
   };

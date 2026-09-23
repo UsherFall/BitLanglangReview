@@ -2229,6 +2229,7 @@ function tooltipDataFor(point: MarkerPoint, trade: ReviewedTrade): TooltipData {
   if (point.detail) {
     return {
       kind: point.detail.kind,
+      direction: point.direction,
       timeMs: point.detail.timeMs,
       price: point.detail.price,
       qty: point.detail.qty,
@@ -2240,6 +2241,7 @@ function tooltipDataFor(point: MarkerPoint, trade: ReviewedTrade): TooltipData {
   }
   return {
     kind: point.kind,
+    direction: point.direction,
     timeMs: point.timeMs,
     price: point.price,
     qty: trade.size,

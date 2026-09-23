@@ -2,9 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import type { ReviewedTrade } from '../src/domain/review-queue';
 import type { TradePoint } from '../src/domain/trade';
-import { allTradeChartPoints, tradeChartPoints } from '../src/ui/trade-markers';
+import { LONG_COLOR, SHORT_COLOR, allTradeChartPoints, pointColor, tradeChartPoints } from '../src/ui/trade-markers';
 
 describe('Trade chart points', () => {
+  it('colours an entry with its own direction and an exit with the opposite one', () => {
+    // 多单开青平红, 空单开红平青.
+    expect(pointColor('open', '多')).toBe(LONG_COLOR);
+    expect(pointColor('close', '多')).toBe(SHORT_COLOR);
+    expect(pointColor('open', '空')).toBe(SHORT_COLOR);
+    expect(pointColor('close', '空')).toBe(LONG_COLOR);
+  });
+
   it('falls back to an entry/exit pair when the source has no orders', () => {
     const candles = [makeCandle('2024-05-21T00:00:00+08:00'), makeCandle('2024-05-21T04:00:00+08:00'), makeCandle('2024-05-21T08:00:00+08:00')];
 
@@ -19,6 +27,9 @@ describe('Trade chart points', () => {
     // No per-action detail: the tooltip falls back to the round's own figures.
     expect(points.map((point) => point.detail)).toEqual([null, null]);
     expect(points.every((point) => !point.muted)).toBe(true);
+    // Direction rides along on every point: the renderer picks the dot's side
+    // and colour from it.
+    expect(points.every((point) => point.direction === '多')).toBe(true);
   });
 
   it('expands a Bitget round into one point per order, snapped like the old markers', () => {
@@ -95,6 +106,7 @@ describe('Trade chart points', () => {
     expect(points).toHaveLength(4);
     expect(points.filter((point) => !point.muted).map((point) => point.tradeId)).toEqual(['t1', 't1']);
     expect(points.filter((point) => point.muted).map((point) => point.tradeId)).toEqual(['t2', 't2']);
+    expect(points.map((point) => point.direction)).toEqual(['多', '多', '空', '空']);
   });
 });
 

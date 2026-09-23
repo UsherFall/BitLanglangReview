@@ -9,10 +9,7 @@ import type {
   UTCTimestamp,
 } from 'lightweight-charts';
 import type { Candlestick } from '../domain/candlestick';
-import type { MarkerPoint } from './trade-markers';
-
-export const OPEN_COLOR = '#2DD4BF';
-export const CLOSE_COLOR = '#FB7185';
+import { pointColor, type MarkerPoint } from './trade-markers';
 
 /** Matches the chart's own background so each dot can punch a small halo out
  * of the candles underneath it instead of sitting on top of them. */
@@ -186,9 +183,11 @@ function layoutPoints(
     // otherwise a point whose time snapped onto one candle would be drawn at
     // another candle's price level.
     const candle = candleByChartTime(point.time, candles);
-    // Opens hang under the candle's low, closes above its high, so a dot never
-    // covers the price action it refers to.
-    const anchor = candle ? (point.kind === 'open' ? candle.low : candle.high) : point.price;
+    // A long's entry hangs under the candle and its exit above it; a short is
+    // the mirror image, so its entry sits over the candle and its exit under.
+    // Either way the dot stays clear of the price action it refers to.
+    const above = point.direction === '空' ? point.kind === 'open' : point.kind === 'close';
+    const anchor = candle ? (above ? candle.high : candle.low) : point.price;
     const anchorY = series.priceToCoordinate(anchor);
     if (anchorY === null) continue;
 
@@ -198,12 +197,14 @@ function layoutPoints(
     // pixel step. Measuring clashes by absolute pixel distance instead made a
     // dot's offset depend on the zoom level, so dots drifted up and down while
     // zooming; keeping the offset a pure function of the data fixes that.
-    const stackKey = `${point.kind}#${point.time}`;
+    // Keying by side (not kind) keeps the two sides' stacks independent, so a
+    // dot on the opposite side of the same candle does not skip a slot.
+    const stackKey = `${above ? 'above' : 'below'}#${point.time}`;
     const stackIndex = stacked.get(stackKey) ?? 0;
     stacked.set(stackKey, stackIndex + 1);
     const step = radius * 2 + MIN_STACK_GAP;
     const offset = GAP + radius + stackIndex * step;
-    const y = point.kind === 'open' ? anchorY + offset : anchorY - offset;
+    const y = above ? anchorY - offset : anchorY + offset;
 
     drawn.push({ point, x, y, radius });
   }
@@ -219,8 +220,13 @@ function candleByChartTime(chartTime: number, candles: readonly Candlestick[]): 
   return null;
 }
 
+/** Dot colour, driven by the trade's direction and shared with the price label. */
+function dotColor(item: DrawnPoint): string {
+  return pointColor(item.point.kind, item.point.direction);
+}
+
 function drawDot(context: CanvasRenderingContext2D, item: DrawnPoint): void {
-  const color = item.point.kind === 'open' ? OPEN_COLOR : CLOSE_COLOR;
+  const color = dotColor(item);
   context.save();
   if (item.point.muted) context.globalAlpha = MUTED_ALPHA;
 
@@ -229,15 +235,26 @@ function drawDot(context: CanvasRenderingContext2D, item: DrawnPoint): void {
   context.fillStyle = CHART_BG;
   context.fill();
 
-  context.beginPath();
-  context.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
-  context.fillStyle = color;
-  context.fill();
+  if (item.point.kind === 'open') {
+    context.beginPath();
+    context.arc(item.x, item.y, item.radius, 0, Math.PI * 2);
+    context.fillStyle = color;
+    context.fill();
+  } else {
+    // The halo above already punched the candle out of the middle, so a stroke
+    // leaves a hollow ring — an exit's counterpart to an entry's solid disc.
+    const width = Math.max(1.5, item.radius * 0.42);
+    context.beginPath();
+    context.arc(item.x, item.y, item.radius - width / 2, 0, Math.PI * 2);
+    context.lineWidth = width;
+    context.strokeStyle = color;
+    context.stroke();
+  }
   context.restore();
 }
 
 function drawPrice(context: CanvasRenderingContext2D, item: DrawnPoint): void {
-  const color = item.point.kind === 'open' ? OPEN_COLOR : CLOSE_COLOR;
+  const color = dotColor(item);
   context.save();
   if (item.point.muted) context.globalAlpha = MUTED_ALPHA;
   context.font = '600 11px Inter, "Microsoft YaHei", Arial, sans-serif';

@@ -2035,13 +2035,7 @@ label,
   color: #06131f;
 }
 
-.trade-point-tip-open {
-  background: #2dd4bf;
-}
-
-.trade-point-tip-close {
-  background: #fb7185;
-}
+/* Badge colour is set inline from `pointColor()` so it always matches the dot. */
 
 .trade-point-tip dl {
   display: grid;

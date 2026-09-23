@@ -4,8 +4,13 @@
  * pointer movement would fight the chart for frames.
  */
 
+import type { Direction } from '../domain/trade';
+import { pointColor } from './trade-markers';
+
 export type TooltipData = {
   kind: 'open' | 'close';
+  /** Drives the badge colour, matching the dot on the chart. */
+  direction: Direction;
   timeMs: number;
   price: number;
   qty: number;
@@ -69,7 +74,7 @@ export function createTradeMarkerTooltip(container: HTMLElement): TradeMarkerToo
 function renderContent(data: TooltipData): string {
   const isOpen = data.kind === 'open';
   const label = isOpen ? '开仓' : '平仓';
-  const badgeClass = isOpen ? 'trade-point-tip-open' : 'trade-point-tip-close';
+  const badgeColor = pointColor(data.kind, data.direction);
   const rows: string[] = [
     `<div><dt>价格</dt><dd>${formatPrice(data.price)}</dd></div>`,
     `<div><dt>数量</dt><dd>${formatQty(data.qty)}</dd></div>`,
@@ -91,7 +96,7 @@ function renderContent(data: TooltipData): string {
     rows.push(`<div><dt>盈亏</dt><dd class="${tone}">${data.profit >= 0 ? '+' : ''}${data.profit.toFixed(4)}</dd></div>`);
   }
 
-  return `<div class="trade-point-tip-head"><span class="trade-point-tip-badge ${badgeClass}">${label}</span></div><dl>${rows.join('')}</dl>`;
+  return `<div class="trade-point-tip-head"><span class="trade-point-tip-badge" style="background:${badgeColor}">${label}</span></div><dl>${rows.join('')}</dl>`;
 }
 
 function formatPrice(price: number): string {
