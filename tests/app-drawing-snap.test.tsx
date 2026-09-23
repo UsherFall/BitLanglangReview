@@ -62,10 +62,13 @@ describe('App drawing magnet snap', () => {
     chartMock.setData = [];
     posted.length = 0;
     Element.prototype.scrollIntoView = vi.fn();
+    // jsdom has no pointer capture, so the drag handlers need these stubbed.
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
     vi.stubGlobal('fetch', makeFetch());
   });
 
-  it('AC8 saves segment endpoints snapped to an OHLC of the candlestick under the pointer', async () => {
+  it('AC8 saves ray endpoints snapped to an OHLC of the candlestick under the pointer', async () => {
     render(<App />);
 
     const overlay = await drawingOverlay();
@@ -79,7 +82,7 @@ describe('App drawing magnet snap', () => {
 
     await waitFor(() => expect(posted).toHaveLength(1));
     const drawing = posted[0];
-    expect(drawing.kind).toBe('segment');
+    expect(drawing.kind).toBe('ray');
     expect(drawing.points).toHaveLength(2);
 
     for (const point of drawing.points) {
@@ -118,10 +121,85 @@ describe('App drawing magnet snap', () => {
     expect(magnet()).toHaveAttribute('aria-pressed', 'true');
     expect(magnet()).toHaveTextContent('弱');
   });
+
+  it('renders a saved ray past its direction point, along the endpoint → direction point line', async () => {
+    render(<App />);
+
+    const overlay = await drawingOverlay();
+    fireEvent.click(document.querySelectorAll('.drawing-toolbar button')[1]);
+    // Two clicks in two different bars (x=0 / x=300 after snapping) and at two
+    // different snapped prices (y=8 / y=22), so the direction is genuinely
+    // diagonal: an implementation that only extends along x fails here.
+    fireEvent.click(overlay, { clientX: 10, clientY: 10 });
+    fireEvent.click(overlay, { clientX: 310, clientY: 30 });
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].kind).toBe('ray');
+
+    // Saving selects the drawing, so both handles are rendered: `points[0]`
+    // (the endpoint) first, then `points[1]` (the direction point).
+    await waitFor(() => expect(drawingHandles()).toHaveLength(2));
+    const [endpoint, directionPoint] = drawingHandles();
+
+    await waitFor(() => expect(document.querySelectorAll('line.drawing-shape')).toHaveLength(1));
+    const line = document.querySelector('line.drawing-shape') as SVGLineElement;
+    const start = { x: Number(line.getAttribute('x1')), y: Number(line.getAttribute('y1')) };
+    const end = { x: Number(line.getAttribute('x2')), y: Number(line.getAttribute('y2')) };
+
+    // The line starts on the endpoint handle: `points[0]` is the fixed endpoint,
+    // `points[1]` only steers the direction.
+    expect(start).toEqual(endpoint);
+    // ...and it keeps going past the direction point in both axes, i.e. it is a
+    // ray and not a segment ending on that handle.
+    const goesPast = (from: number, through: number, to: number) => (through - from) * (to - through) > 0;
+    expect(goesPast(start.x, directionPoint.x, end.x)).toBe(true);
+    expect(goesPast(start.y, directionPoint.y, end.y)).toBe(true);
+    expect(Math.abs(end.x - start.x)).toBeGreaterThan(Math.abs(directionPoint.x - start.x));
+    expect(Math.abs(end.y - start.y)).toBeGreaterThan(Math.abs(directionPoint.y - start.y));
+    // ...collinearly, i.e. the extension is normalized instead of skewed.
+    const slope = (end.y - start.y) / (end.x - start.x);
+    const handleSlope = (directionPoint.y - start.y) / (directionPoint.x - start.x);
+    expect(Math.abs(slope - handleSlope)).toBeLessThan(1e-6);
+  });
+
+  it('drags the endpoint from points[0] and the direction from points[1]', async () => {
+    render(<App />);
+
+    const overlay = await drawingOverlay();
+    fireEvent.click(document.querySelectorAll('.drawing-toolbar button')[1]);
+    fireEvent.click(overlay, { clientX: 10, clientY: 10 });
+    fireEvent.click(overlay, { clientX: 310, clientY: 30 });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    const drawn = posted[0].points;
+
+    // Handles are rendered in point order: index 0 is the endpoint, 1 the
+    // direction point.
+    await waitFor(() => expect(drawingHandles()).toHaveLength(2));
+
+    // Dragging the direction handle re-aims the ray but leaves the endpoint.
+    fireEvent.pointerDown(drawingHandleElements()[1], { pointerId: 1, clientX: 300, clientY: 22 });
+    fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 300, clientY: 40 });
+    fireEvent.pointerUp(overlay, { pointerId: 1, clientX: 300, clientY: 40 });
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1].points[0]).toEqual(drawn[0]);
+    expect(posted[1].points[1]).not.toEqual(drawn[1]);
+    expect([FIRST_BAR_OHLC.open, FIRST_BAR_OHLC.high, FIRST_BAR_OHLC.low, FIRST_BAR_OHLC.close]).toContain(posted[1].points[1].price);
+
+    // Dragging the endpoint handle moves the endpoint but leaves the direction.
+    fireEvent.pointerDown(drawingHandleElements()[0], { pointerId: 1, clientX: 0, clientY: 8 });
+    fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 0, clientY: 40 });
+    fireEvent.pointerUp(overlay, { pointerId: 1, clientX: 0, clientY: 40 });
+    await waitFor(() => expect(posted).toHaveLength(3));
+    expect(posted[2].points[1]).toEqual(posted[1].points[1]);
+    expect(posted[2].points[0]).not.toEqual(posted[1].points[0]);
+    expect([FIRST_BAR_OHLC.open, FIRST_BAR_OHLC.high, FIRST_BAR_OHLC.low, FIRST_BAR_OHLC.close]).toContain(posted[2].points[0].price);
+  });
 });
 
 describe('App drawing magnet snap in Free Replay', () => {
   beforeEach(() => {
+    chartMock.setData = [];
+    posted.length = 0;
     vi.stubGlobal('fetch', makeFreeReplayFetch());
   });
 
@@ -133,8 +211,11 @@ describe('App drawing magnet snap in Free Replay', () => {
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
-    const overlay = await drawingOverlay();
-    fireEvent.click(document.querySelectorAll('.drawing-toolbar button')[0]);
+    const overlay = await drawingOverlay(1);
+    const toolbarButtons = document.querySelectorAll('.drawing-toolbar button');
+    // Free Replay carries the same replaced toolbar as Trade Review.
+    expect(toolbarButtons[1]).toHaveAttribute('title', '射线');
+    fireEvent.click(toolbarButtons[0]);
 
     // x=310 maps to 10:05:10 — inside the 10:05 candlestick, which the cursor
     // (10:00) has not revealed. Snapping there would leak its OHLC levels, so the
@@ -148,17 +229,57 @@ describe('App drawing magnet snap in Free Replay', () => {
     expect(point.price).toBe(185);
     expect([HIDDEN_BAR_OHLC.open, HIDDEN_BAR_OHLC.high, HIDDEN_BAR_OHLC.low, HIDDEN_BAR_OHLC.close]).not.toContain(point.price);
   });
+
+  it('previews and commits a ray in Free Replay, like Trade Review', async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+
+    const overlay = await drawingOverlay(1);
+    fireEvent.click(document.querySelectorAll('.drawing-toolbar button')[1]);
+    fireEvent.click(overlay, { clientX: 10, clientY: 10 });
+    // x=310 is inside the still-hidden 10:05 candlestick, so this pointer only
+    // has to give the draft a direction.
+    fireEvent.pointerMove(overlay, { clientX: 310, clientY: 30 });
+
+    await waitFor(() => {
+      const draft = Array.from(document.querySelectorAll('line.drawing-shape')).at(-1) as SVGLineElement;
+      // The Free Replay draft must already be a ray: a segment preview would stop
+      // on the pointer at x2=310 instead of running to the overlay edge.
+      expect(Number(draft.getAttribute('x2'))).toBeGreaterThan(1000);
+    });
+
+    fireEvent.click(overlay, { clientX: 310, clientY: 30 });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].kind).toBe('ray');
+    expect(posted[0].points).toHaveLength(2);
+  });
 });
 
 /** Waits for the chart to exist AND for candlesticks to be applied to the series. */
-async function drawingOverlay(): Promise<SVGSVGElement> {
+async function drawingOverlay(minCandles = 2): Promise<SVGSVGElement> {
   const overlay = await waitFor(() => {
     const element = document.querySelector('svg.drawing-overlay');
     expect(element).not.toBeNull();
     return element as SVGSVGElement;
   });
-  await waitFor(() => expect(chartMock.setData.some((data) => data.length >= 2)).toBe(true));
+  await waitFor(() => expect(chartMock.setData.some((data) => data.length >= minCandles)).toBe(true));
   return overlay;
+}
+
+/** The selected drawing's handles, in `points` order: [endpoint, direction point]. */
+function drawingHandleElements(): Element[] {
+  return Array.from(document.querySelectorAll('circle.drawing-handle'));
+}
+
+function drawingHandles(): { x: number; y: number }[] {
+  return drawingHandleElements().map((handle) => ({
+    x: Number(handle.getAttribute('cx')),
+    y: Number(handle.getAttribute('cy')),
+  }));
 }
 
 function makeFetch() {

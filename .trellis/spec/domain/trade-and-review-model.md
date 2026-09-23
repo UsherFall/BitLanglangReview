@@ -78,8 +78,10 @@ reviewStore.saveReview({ tradeId, tags, note, starred: currentReview?.starred ??
 
 `src/domain/candlestick.ts` keeps market candles as millisecond timestamps with OHLCV fields and a `ReviewTimeframe`. Chart code converts to seconds only at the `lightweight-charts` boundary.
 
-`src/domain/drawing.ts` defines instrument-level Chart Drawings. Drawings have `horizontal` or `segment` kind and price/time points. A drawing may be created while reviewing a trade, but it is displayed by Instrument across trades and Review Timeframes.
+`src/domain/drawing.ts` defines instrument-level Chart Drawings. Drawings have `horizontal`, `ray`, or `segment` kind and price/time points. A drawing may be created while reviewing a trade, but it is displayed by Instrument across trades and Review Timeframes.
+
+The toolbar offers `horizontal` and `ray` only. `ray` is the two-point tool: `points[0]` is the endpoint, `points[1]` the direction point, and the drawn line runs from the endpoint past the direction point to the viewport edge. `segment` is no longer creatable — it stays in the union purely so drawings saved before the swap keep rendering as finite two-point lines.
 
 ## Verification
 
-When changing these contracts, update both server and UI callers and run `npm test`. High-signal tests include `tests/trade-import.test.ts`, `tests/drawing-store.test.ts`, `tests/trade-markers.test.ts`, and `tests/free-replay-chart.test.ts`.
+When changing these contracts, update both server and UI callers and run `npm test`. High-signal tests include `tests/trade-import.test.ts`, `tests/drawing-store.test.ts`, `tests/app-drawings.test.tsx` (drawing kinds and previews), `tests/app-drawing-snap.test.tsx` (drawing interaction), `tests/trade-markers.test.ts`, and `tests/free-replay-chart.test.ts`.

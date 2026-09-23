@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDollarSign, Eraser, Eye, EyeOff, Magnet, MapPin, Minus, RefreshCcw, Scale, Search, Slash, Star } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDollarSign, Eraser, Eye, EyeOff, Magnet, MapPin, Minus, MoveUpRight, RefreshCcw, Scale, Search, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
@@ -1461,7 +1461,16 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       setDraftEndPoint(point);
       return;
     }
-    void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: 'segment', points: [draftPoint, point] });
+    void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: drawingTool, points: [draftPoint, point] });
+    setDraftPoint(null);
+    setDraftEndPoint(null);
+  }
+
+  /** Picking a tool abandons any half-drawn point. Without this the leftover
+   * draft keeps rendering — in the NEW tool's shape, since the preview follows
+   * the active tool — as a line the user never drew and cannot click away. */
+  function selectDrawingTool(tool: ChartDrawingKind | null) {
+    setDrawingTool(tool);
     setDraftPoint(null);
     setDraftEndPoint(null);
   }
@@ -1485,7 +1494,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
     if (!snappedPoint || !rawPoint) return;
     if (!drag) {
-      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(snappedPoint);
+      if ((drawingTool === 'segment' || drawingTool === 'ray') && draftPoint) setDraftEndPoint(snappedPoint);
       return;
     }
     event.preventDefault();
@@ -1522,8 +1531,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
       <div className="drawing-toolbar">
-        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
-        <button className={drawingTool === 'segment' ? 'selected' : ''} title="线段" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
+        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => selectDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
+        <button className={drawingTool === 'ray' ? 'selected' : ''} title="射线" onClick={() => selectDrawingTool(drawingTool === 'ray' ? null : 'ray')}><MoveUpRight size={16} /></button>
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
@@ -1534,7 +1543,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
+        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} draftKind={drawingTool} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
     </div>
@@ -1967,7 +1976,16 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
       setDraftEndPoint(point);
       return;
     }
-    void saveDrawing({ tradeId: trade.id, instrument: trade.instrument, timeframe, kind: 'segment', points: [draftPoint, point] });
+    void saveDrawing({ tradeId: trade.id, instrument: trade.instrument, timeframe, kind: drawingTool, points: [draftPoint, point] });
+    setDraftPoint(null);
+    setDraftEndPoint(null);
+  }
+
+  /** Picking a tool abandons any half-drawn point. Without this the leftover
+   * draft keeps rendering — in the NEW tool's shape, since the preview follows
+   * the active tool — as a line the user never drew and cannot click away. */
+  function selectDrawingTool(tool: ChartDrawingKind | null) {
+    setDrawingTool(tool);
     setDraftPoint(null);
     setDraftEndPoint(null);
   }
@@ -1991,7 +2009,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
     if (!snappedPoint || !rawPoint) return;
     if (!drag) {
-      if (drawingTool === 'segment' && draftPoint) setDraftEndPoint(snappedPoint);
+      if ((drawingTool === 'segment' || drawingTool === 'ray') && draftPoint) setDraftEndPoint(snappedPoint);
       return;
     }
     event.preventDefault();
@@ -2018,8 +2036,8 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { pointerRef.current.inside = false; setActiveCandle(null); }}>
       <div className="drawing-toolbar">
-        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => setDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
-        <button className={drawingTool === 'segment' ? 'selected' : ''} title="线段" onClick={() => setDrawingTool(drawingTool === 'segment' ? null : 'segment')}><Slash size={16} /></button>
+        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => selectDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
+        <button className={drawingTool === 'ray' ? 'selected' : ''} title="射线" onClick={() => selectDrawingTool(drawingTool === 'ray' ? null : 'ray')}><MoveUpRight size={16} /></button>
         <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
         <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
@@ -2034,7 +2052,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
       <div ref={chartRef} className="chart" />
       <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
         {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
+        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} draftKind={drawingTool} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
       </svg>
       {status && <div className="chart-status">{status}</div>}
     </div>
@@ -2057,11 +2075,13 @@ function CandlestickReadout({ candle, timeframe }: { candle: Candlestick | null;
   );
 }
 
-function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
+function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint, draftKind, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
   drawings: ChartDrawing[];
   selectedDrawingId: string;
   draftPoint: ChartPoint | null;
   draftEndPoint: ChartPoint | null;
+  /** Kind of the in-progress drawing; the preview must render in the active tool's shape. */
+  draftKind: ChartDrawingKind | null;
   chart: IChartApi | null;
   series: ISeriesApi<'Candlestick'> | null;
   timeframe: ReviewTimeframe;
@@ -2075,7 +2095,7 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint
   return (
     <>
       {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} onPointerDown={onPointerDown} />)}
-      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
+      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: draftKind ?? 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
     </>
   );
 }
@@ -2096,13 +2116,41 @@ function DrawingShape({ drawing, selected, chart, series, timeframe, candles, on
   }
   const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
   if (points.some((point) => !point)) return null;
+  // A ray keeps its two handles on the real points (`'start'` = endpoint,
+  // `'end'` = direction point) and only the drawn line runs past `'end'`.
+  const start = points[0]!;
+  const directionPoint = points[1]!;
+  const end = drawing.kind === 'ray' ? rayEndPoint(start, directionPoint) : directionPoint;
   return (
     <g>
-      <line x1={points[0]!.x} y1={points[0]!.y} x2={points[1]!.x} y2={points[1]!.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
-      {selected && <circle cx={points[0]!.x} cy={points[0]!.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'start')} />}
-      {selected && <circle cx={points[1]!.x} cy={points[1]!.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'end')} />}
+      <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
+      {selected && <circle cx={start.x} cy={start.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'start')} />}
+      {selected && <circle cx={directionPoint.x} cy={directionPoint.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'end')} />}
     </g>
   );
+}
+
+/**
+ * How far, in pixels, a ray is projected past its direction point.
+ *
+ * The overlay is a root `<svg>` filling `.chart-wrap`, so the root viewport
+ * clips anything outside it (and `.chart-wrap` adds `overflow: hidden`). A
+ * constant this large therefore ends at the visible edge without needing the
+ * overlay's size — no size props and no `ResizeObserver`, and no dependency on
+ * `timeScale().width()` / `paneSize()`, which the chart test mocks do not
+ * provide.
+ */
+const RAY_LENGTH = 20000;
+
+/** `start` projected towards `direction`, `RAY_LENGTH` pixels away. */
+function rayEndPoint(start: { x: number; y: number }, direction: { x: number; y: number }): { x: number; y: number } {
+  const dx = direction.x - start.x;
+  const dy = direction.y - start.y;
+  const length = Math.hypot(dx, dy);
+  // Two clicks on the same spot leave no direction to extend along; fall back to
+  // the plain two-point shape instead of dividing by zero (`NaN` coordinates).
+  if (!Number.isFinite(length) || length === 0) return direction;
+  return { x: start.x + (dx / length) * RAY_LENGTH, y: start.y + (dy / length) * RAY_LENGTH };
 }
 
 function drawingStyleForTimeframe(timeframe: ReviewTimeframe): { strokeWidth: number; selectedStrokeWidth: number; handleRadius: number } {

@@ -98,7 +98,7 @@ The three review-detail floaters (其他币 `OtherCoinChart`, 龙头 `LeaderCoin
 
 ## Styling And Accessibility
 
-Use existing class names and extend `src/ui/styles.css`. Buttons that contain icons should use `lucide-react`, as shown by `Save`, `ChevronDown`, `ChevronUp`, `Minus`, `Slash`, and `Eraser`.
+Use existing class names and extend `src/ui/styles.css`. Buttons that contain icons should use `lucide-react`, as shown by `Save`, `ChevronDown`, `ChevronUp`, `Minus`, `MoveUpRight`, and `Eraser`.
 
 Inputs that do not have visible English text still need accessible labels. Existing examples include `aria-label` on review tag/note fields in `src/ui/ReviewEditor.tsx` and the Free Replay start input in `src/ui/FreeReplayPanel.tsx`.
 
@@ -137,6 +137,23 @@ When changing chart drawing overlays, remember that SVG background clicks and dr
 - 跨周期语义：吸附结果是**绝对价格 + 绝对时间**，只在落点/拖拽那一刻结算一次。画线仍按 instrument 共享（见下），切周期后照旧出现、价格不变，但**不重新对齐**当前周期的 OHLC（与 TradingView 一致）。不要把吸附目标（哪根柱、哪个字段）写进 `ChartPoint` 或服务端存储。
 
 Required tests: 纯函数用例 `tests/drawing-snap.test.ts`（必须覆盖"区间内无条件吸"，这是最容易被实现成统一阈值而漏掉的分支）；app 级用例 `tests/app-drawing-snap.test.tsx`（落点吸附、三态循环、以及 Free Replay 未来柱不得被吸的回归）。
+
+### Drawing Ray (画线射线, 09/23)
+
+工具栏的第二个工具由「线段」换成「射线」：`ChartDrawingKind` 增加 `'ray'`，`'segment'` 仅存量保留（见 domain 契约）。实现要点：
+
+- **数据语义**：`points[0]` 是端点（固定），`points[1]` 是方向点。线从端点沿「端点 → 方向点」方向无限延伸，因此倒着画就会向左延伸——这是刻意的标准射线语义，不是 bug。
+- **渲染**：复用 `DrawingShape` 已有的两点屏幕坐标换算（`timeframeTimeForPoint` 投影 + `pointToScreen`），把方向向量归一化后外推 `RAY_LENGTH = 20000` 像素常量。**不做精确矩形求交**：overlay 是铺满 `.chart-wrap` 的根 `<svg>`，根 SVG 视口与 `.chart-wrap` 的 `overflow: hidden` 都会裁剪超出部分，视觉上正好止于视口边缘。这样就不需要 overlay 尺寸 props 或 `ResizeObserver`，也不依赖 `timeScale().width()` / `paneSize()` —— 测试里的 chart mock 并不提供这两者，精确求交会波及多个测试文件的共用 mock。
+- **零向量保护**：两次点击落在同一根柱的同一价位时方向为零，必须退化为不加长，绝不能产出 `NaN` 坐标。
+- **手柄语义**：两个手柄仍落在真实点上 —— `'start'` 是端点、`'end'` 是方向点；只有画出的线越过 `'end'`。拖拽复用 `moveDrawing` 的默认分支，不需要新分支。
+- **裁剪一致性**：`horizontal` 用 `x1="0"/x2="100%"` 横穿整个 overlay（含右侧价格轴区域），射线同样延伸到 overlay 边界。
+- **面板一致性**：`TradeChart` 与 `FreeReplayChart` 各有一份同构画线接线（工具栏按钮、落点分支、草稿预览判断、`DrawingOverlay` 传参），改一处必须改另一处。测试按 `toolbarButtons[1]` 取第二个工具，所以这个工具只能**替换**、不能新增成第三个按钮。
+
+**不变量：草稿预览必须按「当前激活的工具」渲染**，因此切换工具时必须清掉未完成的草稿（`setDraftPoint(null)` + `setDraftEndPoint(null)`，统一走 `selectDrawingTool`）。否则残留草稿会以新工具的形状重新渲染 —— 例如射线落了第一点后切到 `horizontal`，会冒出一条通栏水平线，而它点不掉（`horizontal` 分支直接 return，不重置 `draftPoint`），只能切回原工具或刷新页面。
+
+Required tests: `tests/app-drawings.test.tsx` 必须覆盖「草稿预览已是射线而非线段」「端点来自第一次点击、方向点来自第二次点击」「零向量预览塌缩且无 NaN」「切换工具丢弃半途草稿」「存量 `segment` 仍渲染为有限两点线、持久化 `ray` 仍延伸」。
+
+> **Warning**: `tests/app-drawing-snap.test.tsx` 里画线拖拽的用例依赖 jsdom 没有的 `Element.prototype.setPointerCapture` / `releasePointerCapture`，setup 里必须 stub，否则拖拽路径直接 `TypeError` —— 这正是该路径长期零测试覆盖的原因。
 
 ### Common Mistake: Cursor advance without viewport scroll
 
