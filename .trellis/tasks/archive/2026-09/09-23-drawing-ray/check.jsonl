@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "画线 kind 契约(horizontal/segment),新增 ray 需同步"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "drawing overlay/shape 交互与磁吸语义,两个面板接线口径"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "新增联合类型成员后的穷尽性检查要求"}
