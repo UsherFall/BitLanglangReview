@@ -85,20 +85,21 @@ describe('App Chart Price', () => {
     expect(screen.getByLabelText('隐藏开平仓标记')).toBeInTheDocument();
   });
 
-  it('toggles log scale and resets the Trade Review price scale to normal autoscale', async () => {
+  it('defaults the Trade Review price scale to log and toggles back to normal', async () => {
     vi.stubGlobal('fetch', makeFetch());
 
     render(<App />);
 
     await waitFor(() => expect(chartMocks.createChartOptions).toHaveLength(1));
-    chartMocks.priceScaleApplyOptions.mockClear();
-
-    fireEvent.click(screen.getByLabelText('切换对数价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
 
     chartMocks.priceScaleApplyOptions.mockClear();
-    fireEvent.click(screen.getByLabelText('重置价格刻度'));
+    fireEvent.click(screen.getByLabelText('切换对数价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 0, autoScale: true })));
+
+    chartMocks.priceScaleApplyOptions.mockClear();
+    fireEvent.click(screen.getByLabelText('重置价格刻度'));
+    await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
   });
 });
 

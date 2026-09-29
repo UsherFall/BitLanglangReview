@@ -1132,7 +1132,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
   const [status, setStatus] = useState('加载 K 线');
-  const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Normal);
+  const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Logarithmic);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState('');
@@ -1213,7 +1213,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     historyBackfillKeyRef.current = '';
     previousRangeKeyRef.current = rangeKey;
     if (chart) resetChartPriceScale(chart);
-    setPriceScaleMode(PriceScaleMode.Normal);
+    setPriceScaleMode(PriceScaleMode.Logarithmic);
     setStatus('加载 K 线');
     setHoverPercentage(null);
     lastFutureLoadAnchorRef.current = null;
@@ -1425,7 +1425,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   function resetPriceScale() {
     const chart = chartApiRef.current;
     if (!chart) return;
-    setPriceScaleMode(PriceScaleMode.Normal);
+    setPriceScaleMode(PriceScaleMode.Logarithmic);
     resetChartPriceScale(chart);
   }
 
@@ -1570,7 +1570,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   const dragRef = useRef<DrawingDrag | null>(null);
   const markersVisibleRef = useRef(true);
   const [status, setStatus] = useState('加载 K 线');
-  const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Normal);
+  const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Logarithmic);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string>('');
@@ -1704,7 +1704,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     const key = `${trade.id}:${timeframe}`;
     const chart = chartApiRef.current;
     if (chart) resetChartPriceScale(chart);
-    setPriceScaleMode(PriceScaleMode.Normal);
+    setPriceScaleMode(PriceScaleMode.Logarithmic);
     activeKeyRef.current = key;
     candlesRef.current = [];
     renderedCandlesRef.current = [];
@@ -1952,7 +1952,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   function resetPriceScale() {
     const chart = chartApiRef.current;
     if (!chart) return;
-    setPriceScaleMode(PriceScaleMode.Normal);
+    setPriceScaleMode(PriceScaleMode.Logarithmic);
     resetChartPriceScale(chart);
   }
 

@@ -4,7 +4,7 @@ export type ChartPriceScaleMode = PriceScaleMode.Normal | PriceScaleMode.Logarit
 
 export const defaultChartPriceScaleOptions = {
   autoScale: true,
-  mode: PriceScaleMode.Normal,
+  mode: PriceScaleMode.Logarithmic,
   scaleMargins: { top: 0.12, bottom: 0.12 },
 };
 

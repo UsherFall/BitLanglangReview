@@ -381,7 +381,7 @@ describe('App Free Replay', () => {
     expect(screen.queryByText('+10.00%')).not.toBeInTheDocument();
   });
 
-  it('toggles log scale and resets the Free Replay price scale to normal autoscale', async () => {
+  it('defaults the Free Replay price scale to log and toggles back to normal', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
@@ -402,14 +402,15 @@ describe('App Free Replay', () => {
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
-    chartMocks.priceScaleApplyOptions.mockClear();
-
-    fireEvent.click(screen.getByLabelText('切换对数价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
 
     chartMocks.priceScaleApplyOptions.mockClear();
-    fireEvent.click(screen.getByLabelText('重置价格刻度'));
+    fireEvent.click(screen.getByLabelText('切换对数价格刻度'));
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 0, autoScale: true })));
+
+    chartMocks.priceScaleApplyOptions.mockClear();
+    fireEvent.click(screen.getByLabelText('重置价格刻度'));
+    await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
   });
 
   it('remaps Free Replay paper trade markers after switching timeframe', async () => {
