@@ -4,6 +4,7 @@ import 'flatpickr/dist/themes/dark.css';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import type { ReviewTimeframe } from '../domain/trade';
 import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
+import { FREE_REPLAY_CANDLE_GRID } from './free-replay-chart';
 import type { PaperTradingSession } from './free-replay-paper-trading';
 
 type InstrumentResponse = {
@@ -126,7 +127,7 @@ export function FreeReplayPanel({
       <button className="save-button" disabled={!selectedInstrument || !startTime} onClick={() => {
         if (!selectedInstrument || !startTime) return;
         const progressTime = freeReplayProgressTimeForStart(startTime);
-        const cursorTime = freeReplayCursorTimeForProgress(progressTime, timeframe);
+        const cursorTime = freeReplayCursorTimeForProgress(progressTime, timeframe, FREE_REPLAY_CANDLE_GRID);
         onStart?.({
           instrument: selectedInstrument,
           startTime,

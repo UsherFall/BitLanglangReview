@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "改动 OtherCoinChart 组件与 App.tsx 的模式分支，需遵守组件与图表 overlay 约定"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "新增预取 effect、调整初始加载 effect 依赖与 entryTime ref，依赖数组设计是本次核心风险点"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "回溯复盘的 cursorTime 驱动面板状态，需确认 state 归属与既有 free replay 约定一致"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "新增 tests/other-coin-chart.test.tsx，需按项目测试写法断言行为而非元素存在"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "新增测试文件，需确认命名与放置位置符合目录约定"}

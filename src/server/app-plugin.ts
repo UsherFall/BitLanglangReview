@@ -26,7 +26,7 @@ import { MarketHeatService } from './market-heat-service';
 import { OkxInstrumentService } from './okx-instrument-service';
 import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
-import { fetchReviewCandles, getCandlesForMode } from './review-candle-source';
+import { fetchBinanceOnlyCandles, fetchReviewCandles, getCandlesForMode } from './review-candle-source';
 import { loadTradesFromWorkbook } from './trade-import';
 
 const workbookPath = findSourceWorkbook();
@@ -66,7 +66,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));
-      const instrumentService = new OkxInstrumentService();
+      // OKX instruments back the Other Coin Panel when it reads OKX candles
+      // (交割单复盘); Free Replay lists Binance symbols instead.
+      const okxInstrumentService = new OkxInstrumentService();
 
       // Module-scoped reviews for tag payloads: 'trade' = xlsx universe,
       // 'bitget' = mapped bg- universe, absent = every review (legacy global).
@@ -135,8 +137,15 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
 
       server.middlewares.use('/api/free-replay/instruments', async (req, res) => {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        const url = new URL(req.url ?? '', 'http://local');
         try {
-          send(res, 200, await freeReplayInstrumentPayload(instrumentService));
+          // The Other Coin Panel reads from the same venue as the chart it sits
+          // beside, so the list has to be named in that venue's vocabulary.
+          const source = url.searchParams.get('source') === 'okx' ? 'okx' : 'binance';
+          const service = source === 'okx'
+            ? { listTradableUsdtSymbols: () => Promise.resolve([]), listSwapInstruments: () => okxInstrumentService.listSwapInstruments() }
+            : binanceInstrumentMetadata();
+          send(res, 200, await freeReplayInstrumentPayload(service, source));
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load instruments' });
         }
@@ -154,14 +163,19 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'instrument, timeframe, and entryTime are required' });
         }
         // Select the exchange whose candles to serve. Defaults to OKX so the
-        // existing callers (FreeReplay, workbook review, other-coin chart) are
-        // unchanged; the personal review mode passes source=binance, whose chart
-        // runs through the candidate chain (see `review-candle-source.ts`)
-        // because a Bitget symbol does not always have a tradable Binance
-        // counterpart and OKX is the fallback.
-        const useBinance = url.searchParams.get('source') === 'binance';
+        // workbook review and its other-coin panel are unchanged.
+        //
+        // `source=binance` is the personal review mode: a Bitget symbol does not
+        // always have a tradable Binance counterpart, so that chart runs through
+        // the candidate chain (see `review-candle-source.ts`) with OKX as the
+        // fallback. `source=binance-only` is Free Replay, which is bound to
+        // Binance and lists Binance symbols, so it needs neither a symbol
+        // translation nor a fallback — and must not silently get one, since a
+        // rate limit has to be visible rather than papered over with another
+        // venue's prices.
+        const source = url.searchParams.get('source');
         try {
-          const candles = useBinance
+          const candles = source === 'binance'
             ? await fetchReviewCandles({
                 binance: binanceCandleSource,
                 okx: candleService,
@@ -172,7 +186,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
                 anchor,
                 binanceStatuses: () => binanceInstrumentMetadata().symbolStatuses(),
               })
-            : await getCandlesForMode({ candleSource: candleService, instrument, timeframe, entryTime, mode, anchor });
+            : source === 'binance-only'
+              ? await fetchBinanceOnlyCandles({ binance: binanceCandleSource, instrument, timeframe, entryTime, mode, anchor })
+              : await getCandlesForMode({ candleSource: candleService, instrument, timeframe, entryTime, mode, anchor });
           send(res, 200, { candles });
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load candlesticks' });

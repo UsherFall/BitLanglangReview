@@ -1,26 +1,32 @@
 import { Search, Trash2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CandleSourceId } from '../domain/candlestick';
 
 type InstrumentResponse = {
   instruments: string[];
 };
 
-export function LeaderCoinPanel({ coins, onAdd, onRemove, onClose }: {
+export function LeaderCoinPanel({ coins, onAdd, onRemove, onClose, candleSource = 'okx' }: {
   coins: string[];
   onAdd: (instrument: string) => void;
   onRemove: (instrument: string) => void;
   onClose: () => void;
+  /**
+   * Venue whose symbols these leader coins are named in. They are opened in the
+   * Other Coin Panel, which reads the same venue, so the list has to match it.
+   */
+  candleSource?: CandleSourceId;
 }) {
   const [instruments, setInstruments] = useState<string[]>([]);
   const [query, setQuery] = useState('');
   const [showCandidates, setShowCandidates] = useState(false);
 
   useEffect(() => {
-    fetch('/api/free-replay/instruments')
+    fetch(`/api/free-replay/instruments?source=${candleSource}`)
       .then((response) => response.json())
       .then((data: InstrumentResponse) => setInstruments(Array.isArray(data.instruments) ? data.instruments : []))
       .catch(() => setInstruments([]));
-  }, []);
+  }, [candleSource]);
 
   const filteredInstruments = useMemo(() => {
     const keyword = query.trim().toLowerCase();

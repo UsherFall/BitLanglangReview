@@ -28,8 +28,10 @@ import type { MarketClass } from '../domain/market-class';
  */
 const EXCHANGE_INFO_URL = 'https://fapi.binance.com/fapi/v1/exchangeInfo';
 const METADATA_TTL_MS = 6 * 60 * 60 * 1000;
+/** The only `exchangeInfo.status` that means the contract can actually trade. */
+const TRADING_STATUS = 'TRADING';
 
-type BinanceSymbolMeta = { symbol?: string; underlyingType?: string; status?: string };
+type BinanceSymbolMeta = { symbol?: string; underlyingType?: string; status?: string; quoteAsset?: string; contractType?: string };
 type BinanceExchangeInfo = { symbols?: BinanceSymbolMeta[] };
 
 /** Both views of one exchangeInfo fetch, so `load()` and `symbolStatuses()` share a request. */
@@ -61,6 +63,8 @@ function mapUnderlyingType(underlyingType: string | undefined): MarketClass | nu
 export class BinanceInstrumentMetadataSource {
   private cache: { at: number; maps: MetadataMaps } | null = null;
   private inflight: Promise<MetadataMaps> | null = null;
+  /** Symbols quoted in USDT, from the same cached fetch. See `listTradableUsdtSymbols`. */
+  private usdtQuoted = new Set<string>();
 
   constructor(private readonly fetchJson: FetchJson = defaultBinanceFetchJson) {}
 
@@ -76,6 +80,32 @@ export class BinanceInstrumentMetadataSource {
    */
   async symbolStatuses(): Promise<Map<string, string>> {
     return (await this.loadMaps()).statuses;
+  }
+
+  /**
+   * Symbols of every USDT-quoted contract that is currently `TRADING`,
+   * sorted.
+   *
+   * `contractType` is deliberately NOT filtered: besides `PERPETUAL`, Binance
+   * lists `TRADIFI_PERPETUAL` (e.g. `QNTXUSDT`) and face-value contracts such as
+   * `1000SHIBUSDT`, and both are legitimately replayable — the review charts
+   * whatever venue the instrument names. Only `quoteAsset` and `status` narrow
+   * the list, so a delisted or non-USDT contract is excluded while every tradable
+   * USDT contract stays reachable.
+   *
+   * Throws when the metadata is unreadable. An empty list here would read as
+   * "no instrument is replayable" and silently strand the reviewer, so the
+   * outage is surfaced instead — unlike `load()`/`symbolStatuses()`, whose empty
+   * maps degrade to a documented "unknown" that other callers handle.
+   */
+  async listTradableUsdtSymbols(): Promise<string[]> {
+    const maps = await this.loadMaps();
+    if (maps.statuses.size === 0) throw new Error('币安合约信息不可用，暂时无法列出可复盘的交易对');
+    return [...maps.statuses.entries()]
+      .filter(([, status]) => status === TRADING_STATUS)
+      .map(([symbol]) => symbol)
+      .filter((symbol) => this.usdtQuoted.has(symbol))
+      .sort();
   }
 
   private loadMaps(): Promise<MetadataMaps> {
@@ -105,11 +135,13 @@ export class BinanceInstrumentMetadataSource {
     if (!Array.isArray(symbols)) return { classes: new Map(), statuses: new Map() };
     const classes = new Map<string, MarketClass>();
     const statuses = new Map<string, string>();
+    this.usdtQuoted = new Set();
     for (const symbolMeta of symbols) {
       if (typeof symbolMeta.symbol !== 'string') continue;
       const marketClass = mapUnderlyingType(symbolMeta.underlyingType);
       if (marketClass !== null) classes.set(symbolMeta.symbol, marketClass);
       if (typeof symbolMeta.status === 'string') statuses.set(symbolMeta.symbol, symbolMeta.status);
+      if (symbolMeta.quoteAsset === 'USDT') this.usdtQuoted.add(symbolMeta.symbol);
     }
     return { classes, statuses };
   }

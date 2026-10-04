@@ -49,8 +49,12 @@ The market time under the reviewer's active navigation point while dragging, scr
 _Avoid_: drifting chart position, unstable drag point, jumpy time axis
 
 **Market Data Source**:
-The external source used to obtain **Candlesticks**. This project uses OKX public market data for futures instruments, and Binance USDT-M perpetuals for the 选品 scan, 市场热度, and the 「个人交割单复盘」charts. A Bitget position's symbol does not always have a tradable Binance counterpart (Binance uses a `1000x` face value for some assets, and it renames or settles contracts), so the personal review chart resolves an ordered candidate chain — Binance symbol candidates first, then OKX on the instrument's own name — and reports "no market data" when neither has it, instead of charting a frozen price.
+The external source used to obtain **Candlesticks**. This project uses **Binance USDT-M perpetuals** for 选品, 市场热度, the 个人交割单复盘 charts, and **Free Replay**; OKX public market data serves the 交割单复盘 charts. A Bitget position's symbol does not always have a tradable Binance counterpart (Binance uses a `1000x` face value for some assets, and it renames or settles contracts), so the personal review chart resolves an ordered candidate chain — Binance symbol candidates first, then OKX on the instrument's own name — and reports "no market data" when neither has it, instead of charting a frozen price. Free Replay has no such fallback: it is bound to Binance, so a rate limit surfaces to the reviewer instead of being papered over with another venue's prices. The two venues also disagree on price for the same ticker — OKX `QNT-USDT-SWAP` trades near 46 on 4.7k USDT of daily volume while Binance `QNTUSDT` trades near 263 on 467M — so a review must name the venue it means.
 _Avoid_: quote provider, exchange data
+
+**Candle Grid**:
+Which exchange's day boundary a chart's `1D` / `1W` / `1M` candlesticks open on. The venues cut a day differently: **Binance** opens a day at 00:00 UTC = **08:00 Beijing**, **OKX** at 00:00 Beijing = 16:00Z the day before. The review charts follow their own source's grid, so a marker or reveal cursor is floored against the venue that produced its candlesticks — flooring against the other grid lands between candlesticks and shifts the review window 8 hours. Intraday timeframes (`1m`–`4H`) open on the same instant on both venues and are unaffected. A Free Replay `1M` bar therefore closes at the 1st 00:00Z, and an OKX one at the 1st 00:00 Beijing.
+_Avoid_: one global day boundary, timezone-free flooring
 
 **Source Workbook**:
 The read-only Excel workbook that provides the original **Trades**. Review work must not modify the **Source Workbook**.
@@ -97,7 +101,7 @@ A review mode for studying market movement from a reviewer-chosen **Instrument**
 _Avoid_: trade review, backtest, simulator
 
 **Free Replay Instrument List**:
-The selectable **Instruments** for **Free Replay**, loaded from OKX public SWAP instruments instead of only from the **Source Workbook**. The first version limits free replay selection to swap instruments so the instrument language stays consistent with `BTC-USDT-SWAP` style futures review.
+The selectable **Instruments** for **Free Replay**, loaded from Binance USDT-M `exchangeInfo` — matching the venue whose candlesticks the replay charts, so a listed instrument always resolves. The list covers every `TRADING` USDT-quoted contract regardless of `contractType`, which includes `TRADIFI_PERPETUAL` contracts (`QNTXUSDT`) and `1000x` face-value contracts (`1000SHIBUSDT`); no price scaling is applied, so such a contract charts at its own quoted scale. It does NOT cover instruments that exist only on OKX.
 _Avoid_: source workbook instruments only, futures expiry list, spot pair list
 
 **Trade Review**:
@@ -123,6 +127,10 @@ _Avoid_: hidden past, replay future, fixed preload
 **Free Replay Chart Context**:
 The chart content shown during a **Free Replay**: candlesticks and instrument-level **Chart Drawings**, but not **Trade** entry or exit markers. Trade markers belong to **Trade Review** because free replay should not reveal the reviewer's past trade decisions.
 _Avoid_: trade hints, entry marker, exit marker
+
+**Other Coin Panel** (其他币):
+A floating panel that shows the candlesticks of a reviewer-chosen **Instrument** alongside the review chart, so the reviewer can compare another coin's move at the same moment. It appears in **Trade Review**, **Bitget 复盘**, and **Free Replay**, and it always reads from the same **Market Data Source** as the chart it sits beside — 交割单复盘 on OKX, 个人交割单复盘 on the Binance candidate chain, Free Replay on Binance alone. A panel on a different venue than its host chart would contradict it (QNT trades near 263 on Binance and near 46 on OKX) and would cut the day on a different **Candle Grid**. In **Free Replay** it additionally follows the **Free Replay Cursor**: it renders nothing past the cursor, keeps later candlesticks loaded but hidden, refetches them as the cursor approaches the loaded edge, and re-anchors its window on the cursor when the reviewer switches instrument. Scrolling right of the cursor stays blank in that mode rather than pulling the future in. In **Trade Review** it is free to browse — the trade is already history, so the panel loads and shows whatever the reviewer scrolls to.
+_Avoid_: future leak, second replay cursor, panel on a different venue than its chart
 
 **Free Replay Session**:
 The saved state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, **Free Replay Cursor**, and paper trading session. Free Replay sessions auto-save as history and can be restored so the reviewer resumes from where they left off.

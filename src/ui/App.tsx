@@ -24,7 +24,7 @@ import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload,
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
-import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
+import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, FREE_REPLAY_CANDLE_GRID, FREE_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
 import {
   availableMargin,
   cancelPendingOrder,
@@ -485,8 +485,8 @@ export function App() {
     setFreeReplay((current) => current ? {
       ...current,
       dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
-      startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe),
-      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe),
+      startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe, FREE_REPLAY_CANDLE_GRID),
+      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe, FREE_REPLAY_CANDLE_GRID),
     } : current);
   }
 
@@ -632,6 +632,12 @@ export function App() {
   useEffect(() => {
     selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
   }, [selectedId]);
+
+  // The other-coin panel is rendered inside each mode's own workspace, so a
+  // stale `true` would reopen it as a stray panel in the next mode.
+  useEffect(() => {
+    setOtherCoinOpen(false);
+  }, [reviewMode]);
 
   const freeReplayCurrentCandle = freeReplay ? currentCursorCandle(freeReplayCandles, freeReplay.cursorTime) : null;
   const paperStats = paperTradingStats(paperTrading, freeReplayCurrentCandle);
@@ -797,6 +803,7 @@ export function App() {
               </div>
               <div className="timeframes">
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => switchFreeReplayTimeframe(item)}>{item}</button>)}
+                <button type="button" className={otherCoinOpen ? 'selected' : ''} onClick={() => setOtherCoinOpen((current) => !current)}>其他币</button>
               </div>
             </header>
             <div className="free-replay-workspace">
@@ -816,6 +823,19 @@ export function App() {
                 onCancelStopLoss={(legId) => setPaperTrading((current) => cancelStopLoss(current, legId))}
               />
             </div>
+            {otherCoinOpen && (
+              // The other-coin panel follows the replay cursor and hides the
+              // future, so it needs the cursor time as its anchor. ISO(UTC)
+              // because the server parses this string as an instant.
+              <div className="chart-float-stack free-replay-float-stack">
+                <OtherCoinChart
+                  entryTime={new Date(freeReplay.cursorTime * 1000).toISOString()}
+                  timeframe={timeframe}
+                  cursorTime={freeReplay.cursorTime}
+                  onClose={() => setOtherCoinOpen(false)}
+                />
+              </div>
+            )}
           </>
         ) : (
           <div className="empty-state">选择交易对和开始时间，开始回溯复盘</div>
@@ -842,8 +862,8 @@ export function App() {
             <TradeChart trade={selectedTrade} timeframe={timeframe} candleSource={reviewCandleSource(reviewMode)} tradesEndpoint={tradeReviewEndpoint(reviewMode)} />
             {(otherCoinOpen || leaderCoinOpen || heatOpen) && (
               <div className="chart-float-stack">
-                {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} onClose={() => setOtherCoinOpen(false)} />}
-                {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} />}
+                {otherCoinOpen && <OtherCoinChart entryTime={selectedTrade.entryTime} timeframe={timeframe} candleSource={reviewCandleSource(reviewMode)} onClose={() => setOtherCoinOpen(false)} />}
+                {leaderCoinOpen && <LeaderCoinPanel coins={leaderCoins} onAdd={addLeaderCoin} onRemove={removeLeaderCoin} onClose={() => setLeaderCoinOpen(false)} candleSource={reviewCandleSource(reviewMode)} />}
                 {heatOpen && <MarketHeatPanel instrument={selectedTrade.instrument} entryTime={selectedTrade.entryTime} onClose={() => setHeatOpen(false)} />}
               </div>
             )}
@@ -1219,7 +1239,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
     initializedRangeKeyRef.current = '';
-    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial' });
+    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: FREE_REPLAY_CANDLE_SOURCE });
     fetchCandles(params)
       .then((candles) => {
         const merged = mergeCandles(candles);
@@ -1336,6 +1356,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       entryTime: replay.startTime,
       mode: 'later',
       anchor: String(last.timestamp),
+      source: FREE_REPLAY_CANDLE_SOURCE,
     });
     fetchCandles(params)
       .then((candles) => {
@@ -1373,6 +1394,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
       entryTime: replay.startTime,
       mode: 'earlier',
       anchor: String(anchor),
+      source: FREE_REPLAY_CANDLE_SOURCE,
     });
     try {
       const candles = await fetchCandles(params);

@@ -594,6 +594,13 @@ textarea {
   pointer-events: auto;
 }
 
+/* Free Replay reserves a 340px paper-trading column on the right, so the
+   default `right: 18px` would drop the panel on top of it. Shift the stack
+   left of that column; the chart column keeps its own full width underneath. */
+.free-replay-float-stack {
+  right: 358px;
+}
+
 .other-coin-panel {
   position: relative;
   width: 100%;

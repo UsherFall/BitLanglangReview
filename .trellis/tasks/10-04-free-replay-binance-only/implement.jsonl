@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/index.md", "reason": "新增币安 K 线服务入口与 instrument service，需遵守 server 层约定"}
+{"file": ".trellis/spec/domain/index.md", "reason": "符号映射与时间轴网格属领域规则，instrument-symbol 的既有约束必须遵守"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "改 chart-time 网格会影响回溯复盘全部时间定位与揭示逻辑"}
+{"file": ".trellis/spec/guides/index.md", "reason": "确认跨层改动（前后端网格一致性）需要遵守的通用指南"}

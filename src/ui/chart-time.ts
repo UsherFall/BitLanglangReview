@@ -2,15 +2,31 @@ import type { Time, UTCTimestamp } from 'lightweight-charts';
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 
-export function markerTimeForEvent(eventTime: string, timeframe: ReviewTimeframe, candles: Candlestick[]): UTCTimestamp {
+/**
+ * Which exchange's daily boundary the review timeframes follow.
+ *
+ * The two venues cut a day differently, and intraday timeframes do not care
+ * (`5m` opens on the same instant either way), so this only moves `1D` / `1W` /
+ * `1M`:
+ *
+ * - `utc` — Binance USDT-M. A day starts at 00:00Z = 08:00 Beijing.
+ * - `shanghai` — OKX. A day starts at 00:00 Beijing = 16:00Z the day before.
+ *
+ * Callers must pass the grid of the source that produced their candlesticks;
+ * flooring against the wrong grid puts markers between bars and shifts the
+ * review window by 8 hours.
+ */
+export type CandleGrid = 'utc' | 'shanghai';
+
+export function markerTimeForEvent(eventTime: string, timeframe: ReviewTimeframe, candles: Candlestick[], grid: CandleGrid = 'shanghai'): UTCTimestamp {
   const timestamp = Date.parse(eventTime);
   if (!Number.isFinite(timestamp)) return 0 as UTCTimestamp;
 
-  return timeframeTimeForTimestamp(timestamp, timeframe, candles);
+  return timeframeTimeForTimestamp(timestamp, timeframe, candles, grid);
 }
 
-export function timeframeTimeForPoint(pointTime: number, timeframe: ReviewTimeframe, candles: Candlestick[]): UTCTimestamp {
-  return timeframeTimeForTimestamp(pointTime * 1000, timeframe, candles);
+export function timeframeTimeForPoint(pointTime: number, timeframe: ReviewTimeframe, candles: Candlestick[], grid: CandleGrid = 'shanghai'): UTCTimestamp {
+  return timeframeTimeForTimestamp(pointTime * 1000, timeframe, candles, grid);
 }
 
 export function freeReplayProgressTimeForStart(startTime: string): UTCTimestamp {
@@ -19,43 +35,48 @@ export function freeReplayProgressTimeForStart(startTime: string): UTCTimestamp 
   return Math.floor(timestamp / 1000) as UTCTimestamp;
 }
 
-export function freeReplayCursorTimeForStart(startTime: string, timeframe: ReviewTimeframe): UTCTimestamp {
+export function freeReplayCursorTimeForStart(startTime: string, timeframe: ReviewTimeframe, grid: CandleGrid = 'shanghai'): UTCTimestamp {
   const timestamp = parseReviewInputTime(startTime);
   if (!Number.isFinite(timestamp)) return 0 as UTCTimestamp;
-  return freeReplayCursorTimeForProgress(Math.floor(timestamp / 1000), timeframe);
+  return freeReplayCursorTimeForProgress(Math.floor(timestamp / 1000), timeframe, grid);
 }
 
-export function freeReplayCursorTimeForTimeframeSwitch(previousCursorTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
-  return freeReplayCursorTimeForProgress(previousCursorTime, timeframe);
+export function freeReplayCursorTimeForTimeframeSwitch(previousCursorTime: number, timeframe: ReviewTimeframe, grid: CandleGrid = 'shanghai'): UTCTimestamp {
+  return freeReplayCursorTimeForProgress(previousCursorTime, timeframe, grid);
 }
 
-export function freeReplayCursorTimeForProgress(progressTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
+export function freeReplayCursorTimeForProgress(progressTime: number, timeframe: ReviewTimeframe, grid: CandleGrid = 'shanghai'): UTCTimestamp {
   const progressTimestamp = progressTime * 1000;
   if (!Number.isFinite(progressTimestamp)) return 0 as UTCTimestamp;
-  const containingStart = floorTimestamp(progressTimestamp, timeframe);
-  return Math.floor(floorTimestamp(containingStart - 1, timeframe) / 1000) as UTCTimestamp;
+  const containingStart = floorTimestamp(progressTimestamp, timeframe, grid);
+  return Math.floor(floorTimestamp(containingStart - 1, timeframe, grid) / 1000) as UTCTimestamp;
 }
 
-export function freeReplayCandleCompletionTime(cursorTime: number, timeframe: ReviewTimeframe): UTCTimestamp {
+export function freeReplayCandleCompletionTime(cursorTime: number, timeframe: ReviewTimeframe, grid: CandleGrid = 'shanghai'): UTCTimestamp {
   const cursorTimestamp = cursorTime * 1000;
   if (!Number.isFinite(cursorTimestamp)) return 0 as UTCTimestamp;
   if (timeframe === '1M') {
+    // A monthly bar closes at the next month's 1st, on whichever grid it opened
+    // on — 00:00Z for Binance, 00:00 Beijing for OKX.
     const parts = shanghaiParts(new Date(cursorTimestamp));
-    const year = Number(parts.year);
-    const month = Number(parts.month);
-    return Math.floor((Date.UTC(year, month, 1) - 8 * 60 * 60_000) / 1000) as UTCTimestamp;
+    const year = grid === 'utc' ? new Date(cursorTimestamp).getUTCFullYear() : Number(parts.year);
+    const month = grid === 'utc' ? new Date(cursorTimestamp).getUTCMonth() + 1 : Number(parts.month);
+    const close = grid === 'utc'
+      ? Date.UTC(year, month, 1)
+      : Date.UTC(year, month, 1) - 8 * 60 * 60_000;
+    return Math.floor(close / 1000) as UTCTimestamp;
   }
   return Math.floor((cursorTimestamp + timeframeMs(timeframe)) / 1000) as UTCTimestamp;
 }
 
-function timeframeTimeForTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[]): UTCTimestamp {
+function timeframeTimeForTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[], grid: CandleGrid): UTCTimestamp {
   const containing = containingCandleTimestamp(timestamp, timeframe, candles);
   if (containing !== null) return Math.floor(containing / 1000) as UTCTimestamp;
 
-  return Math.floor(floorTimestamp(timestamp, timeframe) / 1000) as UTCTimestamp;
+  return Math.floor(floorTimestamp(timestamp, timeframe, grid) / 1000) as UTCTimestamp;
 }
 
-export function entryVisibleRange(entryTime: string, timeframe: ReviewTimeframe): { from: UTCTimestamp; to: UTCTimestamp } {
+export function entryVisibleRange(entryTime: string, timeframe: ReviewTimeframe, grid: CandleGrid = 'shanghai'): { from: UTCTimestamp; to: UTCTimestamp } {
   const entry = Date.parse(entryTime);
   // Snap the entry to the candle grid before computing the window. The raw
   // entry minute (e.g. 16:31 for a 5m chart) is usually off-grid, and
@@ -63,7 +84,7 @@ export function entryVisibleRange(entryTime: string, timeframe: ReviewTimeframe)
   // to the NEXT index (timeToIndex lowerBound), which would turn
   // entry ± 150 bars into "first candle .. last candle" — i.e. the whole
   // dataset — instead of a window centered on the trade.
-  const snappedEntry = floorTimestamp(entry, timeframe);
+  const snappedEntry = floorTimestamp(entry, timeframe, grid);
   return {
     from: Math.floor((snappedEntry - timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
     to: Math.floor((snappedEntry + timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
@@ -128,23 +149,60 @@ export function containingCandleTimestamp(timestamp: number, timeframe: ReviewTi
   return null;
 }
 
-function floorTimestamp(timestamp: number, timeframe: ReviewTimeframe): number {
-  const date = new Date(timestamp);
-  const parts = shanghaiParts(date);
-  const year = Number(parts.year);
-  const month = Number(parts.month);
-  const day = Number(parts.day);
-  const hour = Number(parts.hour);
-  const minute = Number(parts.minute);
+function floorTimestamp(timestamp: number, timeframe: ReviewTimeframe, grid: CandleGrid): number {
+  // Intraday timeframes share one grid on both venues, so only `1D` / `1W` /
+  // `1M` branch. Binance cuts the day at 00:00Z (08:00 Beijing, the boundary
+  // the reviewer reads as "a new day"); OKX cuts it at 00:00 Beijing.
+  if (timeframe === '1D' || timeframe === '1W' || timeframe === '1M') {
+    if (grid === 'utc') {
+      if (timeframe === '1D') {
+        const date = new Date(timestamp);
+        return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+      }
+      if (timeframe === '1W') return weekStartUtc(timestamp);
+      const date = new Date(timestamp);
+      return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+    }
+    const parts = shanghaiParts(new Date(timestamp));
+    const year = Number(parts.year);
+    if (timeframe === '1M') return Date.UTC(year, Number(parts.month) - 1, 1) - 8 * 60 * 60_000;
+    if (timeframe === '1W') return weekStartShanghai(Number(parts.year), Number(parts.month), Number(parts.day));
+    return Date.UTC(year, Number(parts.month) - 1, Number(parts.day)) - 8 * 60 * 60_000;
+  }
 
-  if (timeframe === '1M') return Date.UTC(year, month - 1, 1) - 8 * 60 * 60_000;
-  if (timeframe === '1W') return timestamp - (timestamp % timeframeMs(timeframe));
-  if (timeframe === '1D') return Date.UTC(year, month - 1, day) - 8 * 60 * 60_000;
-
+  // Intraday: floor within the day. The Shanghai grid only matters for the day
+  // boundary, which the modulo already respects.
   const stepMinutes = timeframeMs(timeframe) / 60_000;
-  const totalMinutes = hour * 60 + minute;
+  if (grid === 'shanghai') {
+    const parts = shanghaiParts(new Date(timestamp));
+    const totalMinutes = Number(parts.hour) * 60 + Number(parts.minute);
+    const flooredMinutes = Math.floor(totalMinutes / stepMinutes) * stepMinutes;
+    return Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Math.floor(flooredMinutes / 60), flooredMinutes % 60) - 8 * 60 * 60_000;
+  }
+  const date = new Date(timestamp);
+  const totalMinutes = date.getUTCHours() * 60 + date.getUTCMinutes();
   const flooredMinutes = Math.floor(totalMinutes / stepMinutes) * stepMinutes;
-  return Date.UTC(year, month - 1, day, Math.floor(flooredMinutes / 60), flooredMinutes % 60) - 8 * 60 * 60_000;
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), Math.floor(flooredMinutes / 60), flooredMinutes % 60);
+}
+
+/**
+ * Open time of the UTC calendar week (Monday 00:00Z) containing `timestamp`.
+ *
+ * Computed from the calendar rather than by flooring a nominal 7-day step: a
+ * floor like `timestamp - timestamp % 7d` lands on whichever weekday the epoch
+ * happened to fall on, so it can miss the Monday grid by days.
+ */
+function weekStartUtc(timestamp: number): number {
+  const date = new Date(timestamp);
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - daysSinceMonday * 24 * 60 * 60_000;
+}
+
+/** Open time of the Shanghai calendar week (Monday 00:00 Beijing) containing the given Shanghai date. */
+function weekStartShanghai(year: number, month: number, day: number): number {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  return Date.UTC(year, month - 1, day - daysSinceMonday) - 8 * 60 * 60_000;
 }
 
 function timeToTimestamp(time: Time): number {

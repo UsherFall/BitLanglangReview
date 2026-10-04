@@ -1025,6 +1025,101 @@ describe('App Free Replay', () => {
 
     await waitFor(() => expect(screen.getByText(serverError)).toBeInTheDocument());
   });
+
+  it('requests every Free Replay candle window from Binance, never OKX', async () => {
+    const candleRequests: string[] = [];
+    let laterCalls = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'later') {
+          laterCalls += 1;
+          return new Response(JSON.stringify({ candles: laterCalls === 1 ? [makeCandle('2024-05-21T10:05:00+08:00')] : [] }));
+        }
+        if (mode === 'earlier') return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:50:00+08:00')] }));
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:50:00+08:00'),
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(laterCalls).toBeGreaterThanOrEqual(1));
+
+    // Without `source=binance-only` the server falls through to OKX, which
+    // charts a different price scale for the same instrument — the QNT case
+    // (OKX 46.5 vs Binance 263.5) that motivated this binding.
+    expect(candleRequests.length).toBeGreaterThan(0);
+    for (const request of candleRequests) {
+      const params = new URL(`http://localhost${request}`).searchParams;
+      expect(params.get('source')).toBe('binance-only');
+      expect(params.get('instrument')).toBe('BTCUSDT');
+    }
+    expect(candleRequests.map((r) => new URL(`http://localhost${r}`).searchParams.get('mode'))).toContain('initial');
+  });
+
+  it('opens the other-coin panel on the Binance source inside Free Replay', async () => {
+    const panelOpens: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTCUSDT', 'ETHUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        const params = new URL(`http://localhost${url}`).searchParams;
+        // Both the main chart and the panel open BTCUSDT, so requests are
+        // counted per source instead: the panel must never reach for OKX.
+        panelOpens.push(`${params.get('source') ?? 'okx'}:${params.get('mode')}`);
+        return new Response(JSON.stringify({
+          candles: [makeCandle('2024-05-21T09:55:00+08:00'), makeCandle('2024-05-21T10:00:00+08:00')],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
+    const beforePanel = panelOpens.length;
+
+    fireEvent.click(screen.getByRole('button', { name: '其他币' }));
+
+    // The panel issues its own initial load; those requests must be Binance too.
+    await waitFor(() => expect(panelOpens.length).toBeGreaterThan(beforePanel));
+    for (const request of panelOpens) {
+      expect(request.split(':')[0]).toBe('binance-only');
+    }
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {

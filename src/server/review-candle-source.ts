@@ -72,6 +72,28 @@ export async function fetchReviewCandles(request: ReviewCandleRequest): Promise<
 }
 
 /**
+ * Fetches candlesticks for a chart that is bound to Binance alone, with no OKX
+ * fallback: the instrument must already be a native Binance symbol.
+ *
+ * Used by Free Replay, whose instrument list comes from Binance
+ * `exchangeInfo`, so no symbol translation is needed. A Binance failure (429 /
+ * 418) propagates unchanged for the same reason as in `fetchReviewCandles`: a
+ * rate limit must be visible rather than silently replaced by another venue's
+ * prices, which do not share a scale.
+ */
+export async function fetchBinanceOnlyCandles(input: {
+  binance: CandleSource;
+  instrument: string;
+  timeframe: ReviewTimeframe;
+  entryTime: string;
+  mode: string;
+  anchor: number;
+}): Promise<Candlestick[]> {
+  const { binance, ...rest } = input;
+  return getCandlesForMode({ candleSource: binance, ...rest });
+}
+
+/**
  * Resolves `mode` into candle requests for one source: `earlier`/`later` are a
  * single 150-bar window at the anchor, `initial` is the 150 bars before the
  * entry merged with the 150 after it. Shared with the OKX-only chart callers

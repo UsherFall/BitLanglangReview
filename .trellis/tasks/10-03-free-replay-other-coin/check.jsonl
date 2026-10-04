@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验收阶段需按项目质量约定核对测试断言强度与 tsc/vitest 门禁"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "复查光标推进是否引发重复初始加载、预取守卫是否会被永久拦住"}
+{"file": ".trellis/spec/domain/index.md", "reason": "确认回溯复盘 reveal 语义与 Free Replay Chart Context 的领域约束未被破坏"}

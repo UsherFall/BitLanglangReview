@@ -1,6 +1,19 @@
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
+import type { CandleGrid } from './chart-time';
 import { freeReplayCandleCompletionTime } from './chart-time';
+
+/**
+ * The candle source and day boundary Free Replay charts against.
+ *
+ * Free Replay is bound to Binance (`/api/free-replay/instruments` lists Binance
+ * symbols), and Binance opens a day at 00:00Z = 08:00 Beijing, so every grid
+ * lookup in this mode must use `utc`. These two travel together on purpose: the
+ * source decides the grid, and a request sent to one venue while flooring times
+ * on the other's grid puts the reveal cursor between candlesticks.
+ */
+export const FREE_REPLAY_CANDLE_SOURCE = 'binance-only';
+export const FREE_REPLAY_CANDLE_GRID: CandleGrid = 'utc';
 
 export function visibleCandlesForFreeReplay(candles: Candlestick[], cursorTime: number): Candlestick[] {
   const cursorTimestamp = cursorTime * 1000;

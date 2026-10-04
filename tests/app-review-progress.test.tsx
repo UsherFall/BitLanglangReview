@@ -299,7 +299,16 @@ function makeFetch(options: { savedReview?: { tradeId: string; tags: string[]; n
       const review = options.savedReview;
       return new Response(JSON.stringify({ review, tags: review?.tags ?? [], tagCounts: {} }));
     }
-    if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP'] }));
+    // The app asks per source (`?source=okx|binance`) because the list is named
+    // in the vocabulary of the venue that will load it.
+    if (url.startsWith('/api/free-replay/instruments')) {
+      const source = new URL(`http://localhost${url}`).searchParams.get('source');
+      return new Response(JSON.stringify({
+        instruments: source === 'binance'
+          ? ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
+          : ['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP'],
+      }));
+    }
     if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: mockCandles() }));
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
     return new Response(JSON.stringify({}));
