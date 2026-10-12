@@ -5,7 +5,14 @@ import { buildReviewQueue } from '../domain/build-review-queue';
 import { scopeReviewsToTrades, type TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
-import { DEFAULT_SCAN_PARAMS, isScanScope, type ScanScope } from '../domain/scan-scope';
+import {
+  DEFAULT_MARKET_DATA_SOURCE,
+  defaultScanParams,
+  isMarketDataSource,
+  isScanScope,
+  type MarketDataSource,
+  type ScanScope,
+} from '../domain/scan-scope';
 import { BinanceCandleSource } from './binance-candles';
 import { BitgetCandleSource } from './bitget-candles';
 import { bitgetInstrumentMetadata } from './bitget-instrument-metadata';
@@ -31,13 +38,14 @@ import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
 import { fetchBinanceOnlyCandles, fetchReviewCandles, getCandlesForMode } from './review-candle-source';
 import { loadTradesFromWorkbook } from './trade-import';
-import { binanceRateGate, bitgetMarketRateGate } from './http';
+import { binanceRateGate, bitgetMarketRateGate, type RateGate } from './http';
+import type { CandleSource, TickerSource } from './market-data';
 
 const workbookPath = findSourceWorkbook();
 
 export type TradingReviewApiPluginOptions = {
-  /** Coin-scan ticker + candle data source. Defaults to Binance. */
-  marketDataSource?: 'binance' | 'okx' | 'bitget';
+  /** Coin-scan ticker + candle data source. Defaults to `MARKET_DATA_SOURCE`, then Bitget. */
+  marketDataSource?: MarketDataSource;
 };
 
 export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = {}): Plugin {
@@ -55,12 +63,17 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // would have empty intraday charts. The source parameter decides which
       // CandleSource a request hits.
       const candleService = new CandlestickService(candleStore);
-      // The coin scan uses the switchable market-data source: plugin option,
-      // then process.env (vite.config injects MARKET_DATA_SOURCE from `.env`
-      // when the shell has none), then Bitget. The equity scope works on every
-      // source now — Bitget classifies via the contracts endpoint's isRwa flag
-      // (two buckets: CRYPTO vs US_EQUITY) — so `.env` is purely a preference.
-      const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'bitget';
+      // The coin scan runs against the switchable market-data source: the plugin
+      // option, then process.env (vite.config injects MARKET_DATA_SOURCE from
+      // `.env` when the shell has none), then Bitget. That value is the DEFAULT
+      // SELECTION only — `/api/scan` re-resolves the source per request, so the
+      // panel can switch venues without a restart. The equity scope works on
+      // every source now — Bitget classifies via the contracts endpoint's isRwa
+      // flag (two buckets: CRYPTO vs US_EQUITY) — so `.env` is purely a
+      // preference. An ILLEGAL value degrades to the Bitget default rather than
+      // to the old Binance one, keeping "no source" and "bad source" identical.
+      const requestedSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE;
+      const defaultSource: MarketDataSource = isMarketDataSource(requestedSource) ? requestedSource : DEFAULT_MARKET_DATA_SOURCE;
       // Market heat (市场热度) follows the SAME source as the scan (10/12): the
       // whole 选品 module moves together, and in Binance mode the instances are
       // still shared with the scan so the 30s ticker TTL / 6h metadata cache
@@ -74,23 +87,27 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // Binance rows sharing the same base+USDT vocabulary.
       const bitgetTickerSource = new BitgetTickerSource(undefined, bitgetInstrumentMetadata());
       const bitgetCandleSource = new BitgetCandleSource(candleStore);
-      const tickerSource =
-        marketDataSource === 'okx'
-          ? new OkxTickerSource()
-          : marketDataSource === 'bitget'
-            ? bitgetTickerSource
-            : binanceTickerSource;
-      const scanCandleSource =
-        marketDataSource === 'okx'
-          ? candleService
-          : marketDataSource === 'bitget'
-            ? bitgetCandleSource
-            : binanceCandleSource;
-      // The scan surfaces rate-limit warnings from its gate, so the gate must
-      // belong to the source that is actually running.
-      const scanRateGate = marketDataSource === 'bitget' ? bitgetMarketRateGate : binanceRateGate;
-      const coinScanService = new CoinScanService(tickerSource, scanCandleSource, scanRateGate);
-      const marketHeatService = new MarketHeatService(tickerSource, scanCandleSource);
+      const okxTickerSource = new OkxTickerSource();
+      // One trio per source. The scan surfaces rate-limit warnings from its
+      // gate, so the gate must belong to the venue actually being hit (OKX has
+      // no gate of its own — it shares the Binance one, matching the pre-10/12
+      // behaviour of that path; OKX candles are additionally unpaced).
+      const marketSources: Record<MarketDataSource, { tickerSource: TickerSource; candleSource: CandleSource; gate: RateGate }> = {
+        binance: { tickerSource: binanceTickerSource, candleSource: binanceCandleSource, gate: binanceRateGate },
+        okx: { tickerSource: okxTickerSource, candleSource: candleService, gate: binanceRateGate },
+        bitget: { tickerSource: bitgetTickerSource, candleSource: bitgetCandleSource, gate: bitgetMarketRateGate },
+      };
+      // Both services are stateless across requests, so one instance per source
+      // is enough — and `MarketHeatService`'s anchor cache is per source by
+      // construction, which is the isolation the scan's source switching needs.
+      const coinScanServices = buildPerSource((source) => {
+        const { tickerSource, candleSource, gate } = marketSources[source];
+        return new CoinScanService(tickerSource, candleSource, gate);
+      });
+      const marketHeatServices = buildPerSource((source) => {
+        const { tickerSource, candleSource } = marketSources[source];
+        return new MarketHeatService(tickerSource, candleSource);
+      });
       const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));
@@ -269,6 +286,15 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         return send(res, 405, { error: 'Method not allowed' });
       });
 
+      // Bootstrap for the panel's 行情源 selector: the server's startup source.
+      // MUST stay registered BEFORE `/api/scan` — connect matches middlewares by
+      // path PREFIX, so `/api/scan` would otherwise swallow `/api/scan/config`.
+      server.middlewares.use('/api/scan/config', async (req, res) => {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        // Answers from config only — never touches the network.
+        send(res, 200, { source: defaultSource });
+      });
+
       server.middlewares.use('/api/scan', async (req, res) => {
         if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
         const url = new URL(req.url ?? '', 'http://local');
@@ -281,19 +307,24 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         const scope: ScanScope = scopeParam === null || scopeParam.trim() === '' ? 'crypto' : (scopeParam as ScanScope);
+        // 行情源 (10/12): resolved PER REQUEST so the panel can switch venues.
+        // Absent or illegal → the server's startup source, so every pre-10/12
+        // caller keeps hitting exactly the source it used to.
+        const sourceParam = url.searchParams.get('source');
+        const source: MarketDataSource = isMarketDataSource(sourceParam) ? sourceParam : defaultSource;
         if (method === 'heat') {
           // 热度 reads the crypto 场子 (crypto + indices + commodities); the equity
           // sub-module deliberately has no heat reading.
           if (scope !== 'crypto') {
             return send(res, 400, { error: 'Invalid scan parameters' });
           }
-          // 选品「热度」: 复用复盘的市场热度能力(恒 Binance、固定 Top80), 展示整体场子读数。
+          // 选品「热度」: 复用复盘的市场热度能力(固定 Top80 + 池子策略), 展示整体场子读数。
           const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
           if (anchor !== undefined && anchor <= 0) {
             return send(res, 400, { error: 'Invalid scan parameters' });
           }
           try {
-            send(res, 200, await marketHeatService.computeHeat({ anchor: anchor ?? Date.now() }));
+            send(res, 200, await marketHeatServices[source].computeHeat({ anchor: anchor ?? Date.now() }));
           } catch (error) {
             send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
           }
@@ -302,9 +333,11 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (method !== 'shrink') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
-        // Parameter defaults depend on the scope; an absent or unparsable value
-        // falls back to that scope's default (never to 0, which would 400).
-        const scopeDefaults = DEFAULT_SCAN_PARAMS[scope];
+        // Parameter defaults depend on the source AND the scope (the volume floor
+        // has to sit below the source's own topN cutoff, see
+        // `SCAN_PARAM_DEFAULTS`); an absent or unparsable value falls back to
+        // that pair's default (never to 0, which would 400).
+        const scopeDefaults = defaultScanParams(source, scope);
         const topN = parseOptionalNumber(url.searchParams.get('topN')) ?? scopeDefaults.topN;
         const minQuoteVolume24h = parseOptionalNumber(url.searchParams.get('minQuoteVolume24h')) ?? scopeDefaults.minQuoteVolume24h;
         // anchor/minScore are optional: parse them with the optional parser that
@@ -322,9 +355,10 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         try {
-          const result = await coinScanService.scanShrink({
+          const result = await coinScanServices[source].scanShrink({
             method: 'shrink',
             scope,
+            source,
             topN,
             minQuoteVolume24h,
             anchor,
@@ -349,7 +383,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           return send(res, 400, { error: 'instrument is required' });
         }
         try {
-          const result = await marketHeatService.computeHeat({ anchor, reviewInstrument: instrument });
+          const result = await marketHeatServices[defaultSource].computeHeat({ anchor, reviewInstrument: instrument });
           send(res, 200, result);
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Market heat failed' });
@@ -443,6 +477,19 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
 
 function trimOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Builds one value per market-data source. The object literal is what keeps the
+ * keys exhaustive: adding a fourth source to `MarketDataSource` fails the return
+ * type here instead of silently leaving a route without a service.
+ */
+function buildPerSource<T>(build: (source: MarketDataSource) => T): Record<MarketDataSource, T> {
+  return {
+    binance: build('binance'),
+    okx: build('okx'),
+    bitget: build('bitget'),
+  };
 }
 
 function parseOptionalNumber(value: string | null): number | undefined {

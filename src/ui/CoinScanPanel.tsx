@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   scanTimeframes,
   type ConvergenceStructure,
@@ -6,7 +6,15 @@ import {
   type ScanRow,
 } from '../domain/coin-scan';
 import type { MarketHeatResult } from '../domain/market-heat';
-import { DEFAULT_SCAN_PARAMS, SCAN_SCOPES, type ScanScope } from '../domain/scan-scope';
+import {
+  DEFAULT_MARKET_DATA_SOURCE,
+  MARKET_DATA_SOURCES,
+  SCAN_SCOPES,
+  defaultScanParams,
+  isMarketDataSource,
+  type MarketDataSource,
+  type ScanScope,
+} from '../domain/scan-scope';
 import { orderScanRows } from './coin-scan-rows';
 
 /** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显。 */
@@ -24,6 +32,8 @@ export type CoinScanPanelProps = {
 
 const SCOPE_LABELS: Record<ScanScope, string> = { crypto: '加密', equity: '股票' };
 
+const SOURCE_LABELS: Record<MarketDataSource, string> = { binance: '币安', okx: 'OKX', bitget: 'Bitget' };
+
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }
@@ -39,8 +49,11 @@ function anchorScanLabel(anchorEpoch: number | null): string {
 
 export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanelProps) {
   const [method, setMethod] = useState<'shrink' | 'heat'>('shrink');
-  const [topN, setTopN] = useState(String(DEFAULT_SCAN_PARAMS[scope].topN));
-  const [minQuoteVolume24h, setMinQuoteVolume24h] = useState(String(DEFAULT_SCAN_PARAMS[scope].minQuoteVolume24h));
+  // 行情源: 初值 = 共享默认源, 挂载后由服务端启动源校正(见下)。
+  const [source, setSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
+  // 参数默认值按「源 × 品种」推导(下限分级: 各源成交额体量不同)。
+  const [topN, setTopN] = useState(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).topN));
+  const [minQuoteVolume24h, setMinQuoteVolume24h] = useState(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).minQuoteVolume24h));
   // 结构强度阈值主旋钮:调高 = 宁少勿滥.
   const [minScore, setMinScore] = useState('0.6');
   // Optional scan anchor (local datetime); empty = scan "now".
@@ -49,13 +62,54 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
   const [error, setError] = useState<string | null>(null);
   const [scanWarnings, setScanWarnings] = useState<string[]>([]);
 
+  // 配置返回时要用「当时」的品种重算默认值: 挂载 effect 的闭包只会捕获首帧的
+  // scope, 用户在配置返回前切了品种就会用过期 scope 覆盖两个输入框。
+  const scopeRef = useRef(scope);
+  useEffect(() => {
+    scopeRef.current = scope;
+  }, [scope]);
+
+  // 服务端的启动源才是选择器的正确初值(.env / MARKET_DATA_SOURCE)。取值失败 —
+  // 离线、接口缺失、或测试环境没有 fetch(那是同步抛出,不是 rejected promise,
+  // 所以先包一层 Promise.resolve) — 一律保留默认源, 选源只是可用性增强。
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve()
+      .then(() => fetch('/api/scan/config'))
+      .then((response) => response.json() as Promise<{ source?: unknown }>)
+      .then((body) => {
+        if (cancelled || !isMarketDataSource(body?.source) || body.source === DEFAULT_MARKET_DATA_SOURCE) return;
+        applyDefaults(body.source, scopeRef.current);
+        setSource(body.source);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // 只在挂载时校正一次; 之后由用户点击决定。
+  }, []);
+
+  /** 换源/换品种都要重算默认值, 因为下限是「源 × 品种」的二维表。 */
+  function applyDefaults(nextSource: MarketDataSource, nextScope: ScanScope) {
+    const defaults = defaultScanParams(nextSource, nextScope);
+    setTopN(String(defaults.topN));
+    setMinQuoteVolume24h(String(defaults.minQuoteVolume24h));
+  }
+
   /** Switching sub-module resets the scope-specific params and drops 热度 (crypto-only). */
   function changeScope(next: ScanScope) {
     if (next === scope) return;
     onScopeChange(next);
-    setTopN(String(DEFAULT_SCAN_PARAMS[next].topN));
-    setMinQuoteVolume24h(String(DEFAULT_SCAN_PARAMS[next].minQuoteVolume24h));
+    applyDefaults(source, next);
     if (next === 'equity' && method === 'heat') setMethod('shrink');
+    setError(null);
+  }
+
+  /** 换行情源: 扫描请求带 source, 默认参数随之重新推导。 */
+  function changeSource(next: MarketDataSource) {
+    if (next === source) return;
+    setSource(next);
+    applyDefaults(next, scope);
     setError(null);
   }
 
@@ -76,7 +130,7 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
     setError(null);
     setScanWarnings([]);
     try {
-      const query = new URLSearchParams({ method, scope });
+      const query = new URLSearchParams({ method, scope, source });
       if (method === 'shrink') {
         query.set('topN', topN);
         query.set('minQuoteVolume24h', minQuoteVolume24h);
@@ -115,6 +169,21 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
               onClick={() => changeScope(candidate)}
             >
               {SCOPE_LABELS[candidate]}
+            </button>
+          ))}
+        </span>
+      </div>
+      <div className="coin-scan-scope-row">
+        <span>行情源</span>
+        <span className="coin-scan-scope">
+          {MARKET_DATA_SOURCES.map((candidate) => (
+            <button
+              key={candidate}
+              type="button"
+              className={candidate === source ? 'selected' : ''}
+              onClick={() => changeSource(candidate)}
+            >
+              {SOURCE_LABELS[candidate]}
             </button>
           ))}
         </span>

@@ -1,5 +1,5 @@
 import type { Candlestick } from './candlestick';
-import type { ScanScope } from './scan-scope';
+import type { MarketDataSource, ScanScope } from './scan-scope';
 import type { ReviewTimeframe } from './trade';
 
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
@@ -116,6 +116,15 @@ export type ShrinkScanParams = {
    * which keeps every pre-09/16 caller unchanged.
    */
   scope?: ScanScope;
+  /**
+   * Market-data source the scan ran against. ECHOED ONLY — the route resolves
+   * and validates it (`isMarketDataSource`, absent/illegal → the server's
+   * default source) and picks the matching ticker/candle/gate trio; the service
+   * itself is source-agnostic. It rides along in `params` so the UI can label a
+   * result with the venue it came from (and so results from different sources
+   * are not silently compared).
+   */
+  source?: MarketDataSource;
   topN: number;
   minQuoteVolume24h: number;
   /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */

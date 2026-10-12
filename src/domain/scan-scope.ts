@@ -31,16 +31,62 @@ export function scanScopeOf(marketClass: MarketClass | undefined): ScanScope {
 }
 
 /**
- * Per-scope defaults for the shrink method's parameters, used when a request
- * omits them and mirrored by the panel's inputs. The equity pool is far smaller
- * than the crypto one (measured: ~45 equity contracts clear the volume floor
- * against 700+ crypto ones), so a smaller `topN` covers it without changing the
- * liquidity floor. The crypto pool is 150 (raised from 60): 60 slots let the
- * mid-cap tier that only converges on 4H/1D fall out of the scan entirely, and
- * 150 is the compromise that reaches that tier while keeping a cold scan's
- * klines budget (150 × 5 timeframes) inside the shared Binance rate budget.
+ * The market-data sources the coin scan can run against, and the default when
+ * neither a request nor the server config picks one. Each source is wired with
+ * its own tickers/candles/gate in `app-plugin.ts`; the scan picks one per
+ * REQUEST (`/api/scan?source=…`), so the startup value is only the default
+ * selection — not a hard binding.
  */
-export const DEFAULT_SCAN_PARAMS: Readonly<Record<ScanScope, { topN: number; minQuoteVolume24h: number }>> = {
-  crypto: { topN: 150, minQuoteVolume24h: 10_000_000 },
-  equity: { topN: 30, minQuoteVolume24h: 10_000_000 },
+export const MARKET_DATA_SOURCES = ['binance', 'okx', 'bitget'] as const;
+
+export type MarketDataSource = (typeof MARKET_DATA_SOURCES)[number];
+
+export const DEFAULT_MARKET_DATA_SOURCE: MarketDataSource = 'bitget';
+
+/** Narrows an untrusted value (query param / server config) to a `MarketDataSource`. */
+export function isMarketDataSource(v: unknown): v is MarketDataSource {
+  return (MARKET_DATA_SOURCES as readonly unknown[]).includes(v);
+}
+
+export type ScanParams = { topN: number; minQuoteVolume24h: number };
+
+/**
+ * Per-`source × scope` defaults for the shrink method's parameters, used when a
+ * request omits them and mirrored by the panel's inputs.
+ *
+ * `topN` is the HARD gate (the pool is simply the top N by 24h volume); the
+ * volume floor is a guard rail, so it must stay BELOW that source's topN cutoff
+ * — otherwise the floor, not `topN`, decides the pool size. The floor therefore
+ * has to follow the venue's own scale: measured 2026-10-12, Bitget/Binance
+ * overlapping instruments sit at ≈0.10 of Binance's 24h volume, so Binance's 10M
+ * floor left Bitget with only 33 crypto instruments (vs 189 on Binance) and made
+ * the raised `topN` a no-op.
+ *
+ * The equity pool is far smaller than the crypto one (measured: ~45 equity
+ * contracts clear the volume floor against 700+ crypto ones), so a smaller
+ * `topN` covers it without changing the liquidity floor. The crypto pool is 150
+ * (raised from 60 on 10/11): 60 slots let the mid-cap tier that only converges
+ * on 4H/1D fall out of the scan entirely, and 150 is the compromise that reaches
+ * that tier while keeping a cold scan's klines budget (150 × 5 timeframes)
+ * inside the shared rate budget. OKX does not classify instruments, so its
+ * equity scope is a placeholder for symmetry.
+ */
+const SCAN_PARAM_DEFAULTS: Readonly<Record<MarketDataSource, Readonly<Record<ScanScope, ScanParams>>>> = {
+  binance: {
+    crypto: { topN: 150, minQuoteVolume24h: 10_000_000 },
+    equity: { topN: 30, minQuoteVolume24h: 10_000_000 },
+  },
+  bitget: {
+    crypto: { topN: 150, minQuoteVolume24h: 500_000 },
+    equity: { topN: 30, minQuoteVolume24h: 3_000_000 },
+  },
+  okx: {
+    crypto: { topN: 150, minQuoteVolume24h: 1_000_000 },
+    equity: { topN: 30, minQuoteVolume24h: 1_000_000 },
+  },
 };
+
+/** The defaults one `source × scope` pair runs with (see `SCAN_PARAM_DEFAULTS`). */
+export function defaultScanParams(source: MarketDataSource, scope: ScanScope): ScanParams {
+  return SCAN_PARAM_DEFAULTS[source][scope];
+}

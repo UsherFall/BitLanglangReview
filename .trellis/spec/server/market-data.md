@@ -9,31 +9,29 @@
 - `TickerSource.metadataAvailable?(): boolean` — optional: whether the last snapshot could attach classes. `false` means session gating was effectively off for that snapshot.
 - `CandleRequest { instrument, timeframe, anchor, direction: 'earlier' | 'later', limit }` and `CandleSource.getCandlesticks(request): Promise<Candlestick[]>` — same contract as `CandlestickService`.
 
-`app-plugin.ts` wires the selected source via `marketDataSource` option, then `process.env.MARKET_DATA_SOURCE`, then the `'bitget'` default. `vite.config.ts` loads `.env` (via `loadEnv`) into `process.env.MARKET_DATA_SOURCE` when the shell has none, so `.env` is the local config file for the switch — precedence is **shell env > `.env` > `'bitget'`** (10/12; the default flipped from Binance to Bitget because the scan's China-network Binance path kept hitting 429/418):
+`app-plugin.ts` derives a **startup default source** from the `marketDataSource` option, then `process.env.MARKET_DATA_SOURCE`, then `'bitget'`; anything not in `MARKET_DATA_SOURCES` degrades to `DEFAULT_MARKET_DATA_SOURCE` (`'bitget'`) — so "no source" and "bad source" are the same (10/12; the default flipped from Binance to Bitget because the scan's China-network Binance path kept hitting 429/418). `vite.config.ts` loads `.env` (via `loadEnv`) into `process.env.MARKET_DATA_SOURCE` when the shell has none — precedence is **shell env > `.env` > `'bitget'`**.
+
+**That value is only the DEFAULT.** Since 10/12 the source is resolved **per request**: `/api/scan?source=…` (the panel's 行情源 selector) picks one of three pre-built trios and each source's own `CoinScanService` / `MarketHeatService`. `GET /api/scan/config` returns the startup source so the panel can seed its selector; it never touches the network.
 
 ```ts
-const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'bitget';
-const bitgetTickerSource = new BitgetTickerSource(undefined, bitgetInstrumentMetadata());
-const bitgetCandleSource = new BitgetCandleSource(candleStore);
-const tickerSource =
-  marketDataSource === 'okx' ? new OkxTickerSource()
-  : marketDataSource === 'bitget' ? bitgetTickerSource
-  : new BinanceTickerSource(undefined, binanceInstrumentMetadata());
-const scanCandleSource =
-  marketDataSource === 'okx' ? candleService
-  : marketDataSource === 'bitget' ? bitgetCandleSource
-  : new BinanceCandleSource(candleStore);
-// The scan surfaces rate-limit warnings from its gate, so the gate belongs to the running source.
-const coinScanService = new CoinScanService(tickerSource, scanCandleSource, marketDataSource === 'bitget' ? bitgetMarketRateGate : binanceRateGate);
-// Market heat follows the SAME source as the scan (10/12; see market-heat.md).
-const marketHeatService = new MarketHeatService(tickerSource, scanCandleSource);
+const requestedSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE;
+const defaultSource: MarketDataSource = isMarketDataSource(requestedSource) ? requestedSource : DEFAULT_MARKET_DATA_SOURCE;
+const marketSources: Record<MarketDataSource, { tickerSource: TickerSource; candleSource: CandleSource; gate: RateGate }> = {
+  binance: { tickerSource: binanceTickerSource, candleSource: binanceCandleSource, gate: binanceRateGate },
+  okx:     { tickerSource: okxTickerSource,     candleSource: candleService,     gate: binanceRateGate },   // OKX shares the Binance gate
+  bitget:  { tickerSource: bitgetTickerSource,  candleSource: bitgetCandleSource, gate: bitgetMarketRateGate },
+};
+// One stateless service per source (MarketHeatService's anchor cache is per-source by construction).
+const coinScanServices  = buildPerSource((s) => new CoinScanService(marketSources[s].tickerSource, marketSources[s].candleSource, marketSources[s].gate));
+const marketHeatServices = buildPerSource((s) => new MarketHeatService(marketSources[s].tickerSource, marketSources[s].candleSource));
+// Route: source = isMarketDataSource(url.searchParams.get('source')) ? that : defaultSource.
 ```
 
-The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source").
+The coin scan and the market-heat service consume the REQUEST-selected `tickerSource`; the scan also consumes `scanCandleSource`. `/api/market-heat` (the review 市场热度 popover) stays on `defaultSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source").
 
-### Market heat follows `MARKET_DATA_SOURCE` (flipped from always-Binance on 10/12)
+### Market heat follows the scan's source (flipped from always-Binance on 10/12)
 
-`MarketHeatService` (see `market-heat.md`) is wired in `app-plugin.ts` with the SAME instances the coin scan uses (`MarketHeatService(tickerSource, scanCandleSource)`), so the whole 选品 module moves together and the default is Bitget. In Binance mode the instances are shared with the scan so the 30s ticker TTL and 6h metadata cache stay shared. The flip superseded the 09/07 "always Binance" rule: Bitget's `isRwa` classification now gates RWA contracts the same way Binance's `exchangeInfo` metadata gates TradFi perps, and OKX-mode heat reads OKX (a deliberate module-consistency change).
+`MarketHeatService` (see `market-heat.md`) is wired in `app-plugin.ts` per source with the SAME ticker/candle instances the coin scan uses, so the whole 选品 module moves together. The 选品「热度」 method reads the **request-selected** source; the separate `/api/market-heat` route (the review 市场热度 popover) stays on `defaultSource`. Within one source the scan and heat share the instance, so the 30s ticker TTL and 6h metadata cache stay shared. The flip superseded the 09/07 "always Binance" rule: Bitget's `isRwa` classification now gates RWA contracts the same way Binance's `exchangeInfo` metadata gates TradFi perps, and OKX-mode heat reads OKX (a deliberate module-consistency change).
 
 ## OKX Instrument List
 
@@ -59,7 +57,7 @@ Coverage is in `tests/candlestick-cache.test.ts`.
 
 ## Binance Candles (Coin Scan)
 
-`src/server/binance-candles.ts` provides `BinanceCandleSource implements CandleSource`, backed by `fapi/v1/klines`, used by the coin scan when the data source is Binance (the default).
+`src/server/binance-candles.ts` provides `BinanceCandleSource implements CandleSource`, backed by `fapi/v1/klines`, used by the coin scan when the requested source is Binance (the default until 10/12; now one of the selectable sources).
 
 - `timestamp = openTime` — Binance klines open at **UTC 0:00** boundaries, which aligns daily candles with the user's chart view. **No OKX-style -8h offset** is applied (unlike `CandlestickService.boundaryAnchor`).
 - Interval mapping: `5m/15m/1H→1h/4H→4h/1D→1d/...` (see `toBinanceInterval`).
@@ -114,9 +112,9 @@ Do not preload all history. The product contract is On-Demand Candlestick Loadin
 
 OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins), not USDT. The 24h quote-volume in USDT is therefore `volCcy24h * last`; the scan uses that product for both ranking and the liquidity floor. `lastPrice` comes from ticker `last`; `change24h` is `(last - open24h) / open24h * 100`.
 
-## Binance Tickers (Shared, Default)
+## Binance Tickers (Selectable Source)
 
-`src/server/binance-tickers.ts` provides `BinanceTickerSource implements TickerSource`, the default source for the coin scan and the market-heat pool. `listTickers()` calls `fapi/v1/ticker/24hr` once (no pagination), maps every USDT-M perpetual symbol (ends with `USDT`), excludes stablecoin pairs, and sorts by `quoteVolume` descending:
+`src/server/binance-tickers.ts` provides `BinanceTickerSource implements TickerSource`, one of the selectable sources for the coin scan and the market-heat pool (no longer the default since 10/12). `listTickers()` calls `fapi/v1/ticker/24hr` once (no pagination), maps every USDT-M perpetual symbol (ends with `USDT`), excludes stablecoin pairs, and sorts by `quoteVolume` descending:
 
 - `quoteVolume24h = Number(quoteVolume)` — Binance already reports USDT-denominated quote volume, so no `volCcy * last` conversion (unlike OKX).
 - `change24h = Number(priceChangePercent)` — already a percent.
@@ -136,7 +134,7 @@ Coverage is in `tests/binance-tickers.test.ts`.
 
 ## Bitget (Coin Scan)
 
-`src/server/bitget-tickers.ts` (`BitgetTickerSource`) and `src/server/bitget-candles.ts` (`BitgetCandleSource`) are the `MARKET_DATA_SOURCE=bitget` option for the coin scan, backed by Bitget's public v2 mix API (no API key). Endpoints and behaviour measured 2026-10-12 (probe notes in `.trellis/tasks/10-12-coin-scan-bitget-source/research/bitget-api-probes.md`); Bitget's official doc pages are JS-rendered and unreadable to fetchers, so the measured facts are the source of truth.
+`src/server/bitget-tickers.ts` (`BitgetTickerSource`) and `src/server/bitget-candles.ts` (`BitgetCandleSource`) are the `source=bitget` option (the DEFAULT since 10/12) for the coin scan, backed by Bitget's public v2 mix API (no API key). Endpoints and behaviour measured 2026-10-12 (probe notes in `.trellis/tasks/10-12-coin-scan-bitget-source/research/bitget-api-probes.md`); Bitget's official doc pages are JS-rendered and unreadable to fetchers, so the measured facts are the source of truth.
 
 - Tickers: `GET api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES` — one request returns the whole USDT-FUTURES market. `quoteVolume24h = Number(usdtVolume)` (USDT-denominated, like Binance); `lastPrice = Number(lastPr)`; **`change24h = Number(change24h) * 100`** — Bitget reports a FRACTION (0.00744), the `Ticker` contract is a percent. USDT-quote + stablecoin-pair filtering (`STABLECOIN_QUOTE_PAIRS`, shared with Binance via `src/domain/stablecoin-quotes.ts`) and volume-descending sorting match the Binance source. 30s TTL + in-flight dedupe (the full-market response is ~400KB). Measured: the list is perpetuals only (no delivery rows) and carries no stablecoin pairs besides `USDCUSDT`.
 - Candles: `GET api.bitget.com/api/v2/mix/market/candles?productType=USDT-FUTURES&symbol=X&granularity=<tf>&limit=N`, rows `[ts, open, high, low, close, baseVolume, quoteVolume]` (no exchange-side completion flag, so the closed-bar judgement is time-based: `timestamp + step <= anchor` for `earlier`). `granularity` passes `ReviewTimeframe` through unchanged — Bitget mix tokens are identical (`1m/5m/15m/1H/4H/1D/1W/1M`, CAPITAL H/D; the SPOT API uses lowercase `1h/1day`). `earlier` uses `endTime = anchor - 1` (the endpoint returns the newest `limit` bars at or before `endTime`); `later` sets `startTime = anchor + 1` and clamps `endTime` to the **90-day span cap**. Store keys are namespaced with `bitget:` (see the cache-key rule above); returned candles carry the caller's own instrument.

@@ -18,6 +18,8 @@
 - 池 = 24h 成交额 ≥ `minQuoteVolume24h` → 池政策/scope → 休市剔除 → `slice(0, topN)`;真正的硬门槛是 `topN` 切片。`src/server/coin-scan-service.ts:78-88`
 - 默认(crypto):`topN=60`,`minQuoteVolume24h=10_000_000`。`src/domain/scan-scope.ts:40-43`
 - 池用的是**当前**实时 24h 成交额,与锚点无关。`src/server/coin-scan-service.ts:69`、`src/server/binance-tickers.ts:89`
+- **换源后的池规模塌陷(2026-10-12 实测,24h 成交额)**:Bitget/Binance 重叠标的成交额比中位数 ≈ **0.10**。当前下限 10M 在 Bitget 上先于 `topN` 卡住 —— Bitget crypto 只剩 **33** 个(≥10M)、equity 只剩 **12** 个,`topN=150/30` 形同虚设;Binance 侧 189 个 ≥10M,`topN` 先卡,**下限是 no-op**。
+- **源是启动期常量**:`MARKET_DATA_SOURCE` 在 `app-plugin` 构造时解析一次,选品 UI 无法换源。`src/server/app-plugin.ts:63`
 
 **限流(与 418)**
 - klines(limit=100)权重 2/请求;IP 限额 2400 权重/min。`src/server/http.ts:152-158`
@@ -38,6 +40,12 @@
 - **R2 放宽扫描池**:`DEFAULT_SCAN_PARAMS.crypto.topN` **60 → 150**(equity 仍 30);`minQuoteVolume24h` 不变。不改选池口径(仍用当前实时成交额)。
 - **R3 分周期阈值预设**:保留 UI **单一**"结构强度阈值"旋钮(默认 0.6),内部按周期偏移:4H **−0.05**、1D **−0.10**、5m/15m/1H **0**。有效阈值 = `max(0, minScore + offset)`,即默认下 5m/15m/1H=0.60、4H=0.55、**1D=0.50**。`minScore=0`(service 缺省)时全部退化为 0,行为与改动前逐字节一致。
 - **R4 约束**:不得改变 `detectConvergence`/`score` 公式;不得引入 418 风险;pacer/gate 不动;单次冷扫时长(~82s)可接受。
+- **R5 分源下限(默认值)**:`minQuoteVolume24h` 默认值改为按 `source × scope` 分级,使下限始终**低于该源的 topN 门槛**、让 `topN` 成为唯一硬门槛:
+  - binance:crypto 10M / equity 10M(不变)
+  - bitget:crypto **0.5M** / equity **3M**
+  - okx:crypto 1M / equity 1M(OKX 无股票类标的,equity 仅占位)
+  `topN` 保持 crypto 150 / equity 30。
+- **R6 UI 选源**:选品面板新增"行情源"选择(币安/OKX/Bitget),默认取服务端启动源;`/api/scan` 按请求的 `source` 参数解析数据源(缺省/非法 → 启动源);切换源时参数默认值按 R5 重新推导。
 
 ## Acceptance Criteria
 
@@ -47,6 +55,9 @@
 - [x] **AC4** `DEFAULT_SCAN_PARAMS.crypto.topN === 150`,`equity.topN === 30`。
 - [x] **AC5**(联网验收)以锚点 `2026-09-29T12:00:00Z` 扫描,STRKUSDT 进榜且 **1D(0.5522 ≥ 0.50)合格**、4H(0.4424 < 0.55)不合格,`convergedTimeframes=["1D"]`。
 - [x] **AC6** UI 仍为单旋钮(无新增输入框);相关 6 个测试文件 72 passed,`tsc --noEmit` 通过。
+- [ ] **AC7** `defaultScanParams` 矩阵:BINANCE `10M/10M`、BITGET `0.5M/3M`、OKX `1M/1M`;`topN` 均 `150/30`。
+- [ ] **AC8** `/api/scan` 带 `source=bitget` 时走 Bitget tickers/candles 并按 Bitget 缺省下限;缺省/非法 `source` 等同启动源;响应 `params.source` 回显。
+- [ ] **AC9** 选品面板"行情源"切换后参数默认值随之变化,且扫描请求带上 `source`。
 
 ## Out of Scope
 
@@ -60,6 +71,8 @@
 2. **阈值形态** = 单旋钮 + 内部偏移(用户选),不暴露 5 个输入框。
 3. **排序语义** = 最高合格级别优先(用户选),而非级别权重求和/加权 bestScore。
 4. **扫描池** = topN 抬到 150(用户选),不去 topN、不改成绝对成交额下限。
+5. **阈值分级**(用户选):下限按"源 × scope"给默认,而非全局单值 —— 下限是护栏、`topN` 是硬门槛,下限须低于该源的 topN 门槛。
+6. **换源下沉到请求**(用户选):源不再是启动期常量,`/api/scan` 按请求参数解析;启动源降级为"默认选中项"。
 
 ## Risks / Deferred
 
