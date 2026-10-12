@@ -2,6 +2,7 @@ import {
   defaultStructureParams,
   probeStructure,
   scanTimeframes,
+  timeframeMinScore,
   type ScanResponse,
   type ScanRow,
   type ShrinkScanParams,
@@ -59,8 +60,9 @@ export class CoinScanService {
    * Multi-timeframe convergence scan: pulls the top-N pool's candles once per
    * timeframe (parallel pool over the shared candle cache), probes each
    * (coin, timeframe) window for a volatility convergence (波动率越来越小), and
-   * returns one row per coin that converges on at least one timeframe, sorted by
-   * qualifiedCount desc then bestScore desc (score larger = stronger).
+   * returns one row per coin that converges on at least one timeframe, ordered by
+   * the highest qualified level, then qualifiedCount, then bestScore (score
+   * larger = stronger).
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
     // Discard stale rate-limit warnings (e.g. left by an earlier scan) so only
@@ -88,7 +90,9 @@ export class CoinScanService {
     const top = open.slice(0, params.topN);
     const structureParams = defaultStructureParams();
     // minScore gate: a timeframe counts as converged only when its structure is
-    // qualified AND (minScore absent OR score >= minScore).
+    // qualified AND its score reaches its OWN effective threshold — the single
+    // knob shifted by the level's offset, so a 4H/1D contraction clears a
+    // slightly lower bar (see `TIMEFRAME_SCORE_OFFSET`).
     const minScore = params.minScore ?? 0;
 
     // One fetch task per (coin, timeframe). Current scans request a refresh so
@@ -136,7 +140,7 @@ export class CoinScanService {
       }
       const converged = scanTimeframes.filter((timeframe) => {
         const structure = structures[timeframe];
-        return structure.qualified && structure.score >= minScore;
+        return structure.qualified && structure.score >= timeframeMinScore(timeframe, minScore);
       });
       // Only coins with >= 1 qualified (and score-passing) timeframe appear
       // (宁少勿滥); a coin with no convergence is not shown at all.
@@ -155,9 +159,18 @@ export class CoinScanService {
       });
     }
 
-    // Multi-timeframe convergence first (cross-timeframe consistency is a
-    // stronger signal), then the strongest structure within each count.
-    scanned.sort((a, b) => b.qualifiedCount - a.qualifiedCount || b.bestScore - a.bestScore);
+    // Order: the highest qualified level first (a lone 1D contraction is a rarer
+    // setup than a short-timeframe one), then cross-timeframe consistency, then
+    // the strongest structure within each count. The level is the
+    // `scanTimeframes` index (5m = 0 … 1D = 4), derived here rather than stored
+    // on the row — `ScanRow` keeps its contract, and `convergedTimeframes`
+    // already lets a caller read the strongest timeframe off. Equal keys keep the
+    // original ticker (24h-volume) order: `Array#sort` is stable.
+    const highestLevel = (row: ScanRow) =>
+      Math.max(...row.convergedTimeframes.map((timeframe) => scanTimeframes.indexOf(timeframe)));
+    scanned.sort(
+      (a, b) => highestLevel(b) - highestLevel(a) || b.qualifiedCount - a.qualifiedCount || b.bestScore - a.bestScore,
+    );
     // Echo the effective params, including the resolved scope and anchor
     // (Date.now() when absent), so the response always reflects what ran.
     const echoedParams = { ...params, scope, anchor };

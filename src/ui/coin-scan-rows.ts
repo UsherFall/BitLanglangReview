@@ -4,8 +4,9 @@ import type { ScanRow } from '../domain/coin-scan';
  * Display ordering for the 选品 results table with manually demoted instruments
  * sunk to the bottom.
  *
- * The SERVER owns the ranking (`qualifiedCount` desc → `bestScore` desc) and the
- * UI renders it as-is. Demotion is a LOCAL manual marker, so it is layered on top
+ * The SERVER owns the ranking (highest qualified level desc → `qualifiedCount`
+ * desc → `bestScore` desc) and the UI renders it as-is. Demotion is a LOCAL
+ * manual marker, so it is layered on top
  * without re-ranking anything: every not-demoted row keeps its server order, and
  * the demoted rows follow in their original server order as well. A stable
  * partition, not a sort — the relative order inside each group is untouched.

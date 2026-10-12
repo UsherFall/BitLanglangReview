@@ -35,9 +35,12 @@ export function scanScopeOf(marketClass: MarketClass | undefined): ScanScope {
  * omits them and mirrored by the panel's inputs. The equity pool is far smaller
  * than the crypto one (measured: ~45 equity contracts clear the volume floor
  * against 700+ crypto ones), so a smaller `topN` covers it without changing the
- * liquidity floor.
+ * liquidity floor. The crypto pool is 150 (raised from 60): 60 slots let the
+ * mid-cap tier that only converges on 4H/1D fall out of the scan entirely, and
+ * 150 is the compromise that reaches that tier while keeping a cold scan's
+ * klines budget (150 × 5 timeframes) inside the shared Binance rate budget.
  */
 export const DEFAULT_SCAN_PARAMS: Readonly<Record<ScanScope, { topN: number; minQuoteVolume24h: number }>> = {
-  crypto: { topN: 60, minQuoteVolume24h: 10_000_000 },
+  crypto: { topN: 150, minQuoteVolume24h: 10_000_000 },
   equity: { topN: 30, minQuoteVolume24h: 10_000_000 },
 };

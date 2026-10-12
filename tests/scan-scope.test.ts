@@ -29,9 +29,9 @@ describe('scan scopes', () => {
     expect(scanScopeOf(undefined)).toBe('crypto');
   });
 
-  it('keeps the pre-09/16 crypto defaults and gives equity a smaller pool size', () => {
-    expect(DEFAULT_SCAN_PARAMS.crypto).toEqual({ topN: 60, minQuoteVolume24h: 10_000_000 });
+  it('gives crypto the wider pool (150) and keeps equity smaller (30) on the same liquidity floor', () => {
+    expect(DEFAULT_SCAN_PARAMS.crypto).toEqual({ topN: 150, minQuoteVolume24h: 10_000_000 });
+    expect(DEFAULT_SCAN_PARAMS.equity).toEqual({ topN: 30, minQuoteVolume24h: 10_000_000 });
     expect(DEFAULT_SCAN_PARAMS.equity.topN).toBeLessThan(DEFAULT_SCAN_PARAMS.crypto.topN);
-    expect(DEFAULT_SCAN_PARAMS.equity.minQuoteVolume24h).toBe(DEFAULT_SCAN_PARAMS.crypto.minQuoteVolume24h);
   });
 });

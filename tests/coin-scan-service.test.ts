@@ -9,22 +9,52 @@ import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-d
 
 // ---------------------------------------------------------------------------
 // Synthetic bars for the volatility convergence detector: a strong band (far
-// quieter than the preceding stretch), a weak band (only mildly quieter), and a
-// trending channel that must NOT classify.
+// quieter than the preceding stretch), mild / shallow bands (quieter, but close
+// to the default threshold), and a trending channel that must NOT classify.
 // ---------------------------------------------------------------------------
 
-// Strong convergence: 16 volatile bars (~6.9% per bar) then 16 flat calm bars
-// (~1%) → the band is far quieter than the stretch before it (shrink depth ≈ 0.86).
+// One volatile lead of 16 bars (~6.5-7.2% per bar) shared by every shrink
+// fixture below, so their scores differ only through the band's own amplitude.
+const volatileLead: ReadonlyArray<readonly [number, number]> = Array.from(
+  { length: 16 },
+  (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const,
+);
+
+// Strong convergence: the volatile lead then 16 flat calm bars (~1%) → the band
+// is far quieter than the stretch before it (shrink depth ≈ 0.86).
 const strongBars: ReadonlyArray<readonly [number, number]> = [
-  ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
+  ...volatileLead,
   ...Array.from({ length: 16 }, () => [99.5, 100.5] as const),
 ];
 
 // Weak convergence: same volatile lead, but a band only ~1.7× quieter → detected
-// but scored below the default minScore 0.6 (shrink depth ≈ 0.415).
+// but scored below the default minScore 0.6 (shrink depth ≈ 0.41).
 const weakBars: ReadonlyArray<readonly [number, number]> = [
-  ...Array.from({ length: 16 }, (_, i) => [92 - i * 0.6, 98 - i * 0.6] as const),
+  ...volatileLead,
   ...Array.from({ length: 16 }, () => [98, 102] as const),
+];
+
+// Mild shrink: band ~2.0× quieter → shrink depth ≈ 0.51. Under minScore 0.6 it
+// clears the 1D threshold (0.50) and nothing else — the STRK 1D case.
+const mildBars: ReadonlyArray<readonly [number, number]> = [
+  ...volatileLead,
+  ...Array.from({ length: 16 }, () => [98, 101.35] as const),
+];
+
+// Shallow shrink: band ~1.75× quieter → shrink depth ≈ 0.44. Structurally
+// qualified, but below even the 4H threshold (0.55) at minScore 0.6.
+const shallowBars: ReadonlyArray<readonly [number, number]> = [
+  ...volatileLead,
+  ...Array.from({ length: 16 }, () => [98, 101.825] as const),
+];
+
+// Mid shrink: band ~2.4× quieter → shrink depth ≈ 0.576. This is the only band
+// that sits BETWEEN the small timeframes' bar (0.60) and the 4H bar (0.55), so
+// it is the one fixture that isolates the 4H offset: drop that offset and the
+// band stops converging on 4H while everything else stays put.
+const midBars: ReadonlyArray<readonly [number, number]> = [
+  ...volatileLead,
+  ...Array.from({ length: 16 }, () => [98, 100.9] as const),
 ];
 
 // Trending channel: no volatility shrink anywhere → never a convergence.
@@ -60,11 +90,14 @@ function candlesAt(
 }
 
 /** A shape plan per (coin, timeframe): which synthetic bars to serve. */
-type Shape = 'strong' | 'weak' | 'uptrend' | 'none';
+type Shape = 'strong' | 'weak' | 'mild' | 'mid' | 'shallow' | 'uptrend' | 'none';
 
 const shapeBars: Record<Exclude<Shape, 'none'>, ReadonlyArray<readonly [number, number]>> = {
   strong: strongBars,
   weak: weakBars,
+  mild: mildBars,
+  mid: midBars,
+  shallow: shallowBars,
   uptrend: uptrendBars,
 };
 
@@ -194,7 +227,7 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
     expect(result.qualifiedCount).toBe(1);
   });
 
-  it('sorts by qualifiedCount desc, then bestScore desc', async () => {
+  it('sorts by highest qualified level, then qualifiedCount desc, then bestScore desc', async () => {
     const source = buildSource((instrument, timeframe) => {
       if (instrument === 'BTC-USDT-SWAP') return 'strong'; // all 5 timeframes, strong
       if (instrument === 'ETH-USDT-SWAP') return timeframe === '5m' ? 'strong' : 'uptrend'; // 1 tf, strong
@@ -204,15 +237,96 @@ describe('CoinScanService (volatility convergence, multi-timeframe)', () => {
     const service = serviceFrom(source);
     const result = await service.scanShrink({ ...params, topN: 3 });
 
-    // BTC (5 timeframes) first; ETH and SOL both converge on 5m only, ETH's strong
-    // band outscores SOL's weak band → ETH second, SOL third.
+    // BTC (up to 1D) first; ETH and SOL both converge on 5m only — same highest
+    // level and same count, so ETH's strong band outscores SOL's weak one.
     expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'ETH-USDT-SWAP', 'SOL-USDT-SWAP']);
     expect(result.scanned[0].qualifiedCount).toBe(5);
+    expect(result.scanned[0].convergedTimeframes).toEqual(scanTimeframes);
     expect(result.scanned[1].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[2].convergedTimeframes).toEqual(['5m']);
     expect(result.scanned[1].bestScore).toBeGreaterThan(result.scanned[2].bestScore);
     expect(result.scanned[1].bestScore).toBeGreaterThan(0.85);
     expect(result.scanned[2].bestScore).toBeLessThan(0.7);
+  });
+
+  it('ranks a lone 1D convergence ahead of a coin converging on three small timeframes', async () => {
+    const source = buildSource((instrument, timeframe) => {
+      // BTC only on 1D (score ≈ 0.51, just over the 1D threshold) — one timeframe.
+      if (instrument === 'BTC-USDT-SWAP') return timeframe === '1D' ? 'mild' : 'uptrend';
+      // ETH on the three small timeframes, all strong — three timeframes.
+      if (instrument === 'ETH-USDT-SWAP') {
+        return timeframe === '5m' || timeframe === '15m' || timeframe === '1H' ? 'strong' : 'uptrend';
+      }
+      return 'none';
+    });
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 3, minScore: 0.6 });
+
+    // The higher LEVEL wins over the higher COUNT: a daily-level contraction is
+    // the earlier, rarer signal even when it is the coin's only timeframe.
+    expect(result.scanned.map((row) => row.instrument)).toEqual(['BTC-USDT-SWAP', 'ETH-USDT-SWAP']);
+    expect(result.scanned[0].convergedTimeframes).toEqual(['1D']);
+    expect(result.scanned[0].qualifiedCount).toBe(1);
+    expect(result.scanned[0].bestScore).toBeLessThan(result.scanned[1].bestScore);
+    expect(result.scanned[1].convergedTimeframes).toEqual(['5m', '15m', '1H']);
+    expect(result.scanned[1].qualifiedCount).toBe(3);
+  });
+
+  it('judges each timeframe against its own effective threshold (single knob, larger levels more lenient)', async () => {
+    const source = buildSource((_instrument, timeframe) => {
+      if (timeframe === '1D') return 'mild'; // shrink depth ≈ 0.51
+      if (timeframe === '4H') return 'shallow'; // shrink depth ≈ 0.44
+      return 'uptrend';
+    });
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 1, minScore: 0.6 });
+
+    expect(result.scanned).toHaveLength(1);
+    const row = result.scanned[0];
+    // Both bands ARE structures — the per-timeframe gate, not the detector,
+    // decides: at minScore 0.6 the effective thresholds are 0.50 (1D) and 0.55
+    // (4H), so the 1D band passes its bar while the 4H band misses its own.
+    expect(row.structures['1D'].structure).toBe('convergence');
+    expect(row.structures['1D'].score).toBeCloseTo(0.51, 2);
+    expect(row.structures['4H'].structure).toBe('convergence');
+    expect(row.structures['4H'].score).toBeCloseTo(0.44, 2);
+    expect(row.convergedTimeframes).toEqual(['1D']);
+    expect(row.qualifiedCount).toBe(1);
+    // The 4H verdict is reported truthfully, it just does not count as converged.
+    expect(row.structures['4H'].qualified).toBe(true);
+  });
+
+  it('clears only the levels whose own bar a mid-strength band reaches (the 4H offset is additive)', async () => {
+    // Same 0.576 band served for EVERY timeframe: it is above the 4H bar (0.55)
+    // and the 1D bar (0.50) but below the small timeframes' bar (0.60), so the
+    // converged set is decided purely by the per-level offsets.
+    const source = buildSource(() => 'mid');
+    const service = serviceFrom(source);
+    const result = await service.scanShrink({ ...params, topN: 1, minScore: 0.6 });
+
+    expect(result.scanned).toHaveLength(1);
+    const row = result.scanned[0];
+    for (const timeframe of scanTimeframes) {
+      expect(row.structures[timeframe].score).toBeCloseTo(0.576, 2);
+      expect(row.structures[timeframe].qualified).toBe(true);
+    }
+    // Removing the 4H offset (or reading `score >= minScore` per timeframe) drops
+    // 4H from this set — that is what this case exists to catch.
+    expect(row.convergedTimeframes).toEqual(['4H', '1D']);
+    expect(row.qualifiedCount).toBe(2);
+    expect(row.structures['5m'].score).toBeLessThan(0.6);
+  });
+
+  it('cannot be rescued by the 4H offset once the knob is raised past the shallow band', async () => {
+    // Control for the threshold test above: the offset is a fixed -0.05, so a
+    // shallow band leaves the list entirely as soon as the knob clears it.
+    const source = buildSource((_instrument, timeframe) => (timeframe === '4H' ? 'shallow' : 'uptrend'));
+    const service = serviceFrom(source);
+    const strict = await service.scanShrink({ ...params, topN: 1, minScore: 0.7 });
+    const permissive = await service.scanShrink({ ...params, topN: 1, minScore: 0.4 });
+
+    expect(strict.scanned).toEqual([]);
+    expect(permissive.scanned.map((row) => row.convergedTimeframes)).toEqual([['4H']]);
   });
 
   it('filters out instruments below the minimum 24h quote volume before picking top-N', async () => {

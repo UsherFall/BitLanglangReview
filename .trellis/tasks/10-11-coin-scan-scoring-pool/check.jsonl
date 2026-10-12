@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "核对改动后的 topN 默认、minScore 语义与排序是否与契约一致"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "阈值与排序跨 domain/service/ui 三层,逐层核对契约不被破坏"}

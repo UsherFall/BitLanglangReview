@@ -38,7 +38,7 @@ function scanResponse(instruments: string[] = ['AAAUSDT']): ScanResponse {
   return {
     scanned,
     qualifiedCount: scanned.length,
-    params: { method: 'shrink', topN: 60, minQuoteVolume24h: 10_000_000 },
+    params: { method: 'shrink', topN: 150, minQuoteVolume24h: 10_000_000 },
     scannedAt: '2026-09-11T00:00:00.000Z',
     skippedInstruments: ['BBBUSDT', 'CCCUSDT'],
   };

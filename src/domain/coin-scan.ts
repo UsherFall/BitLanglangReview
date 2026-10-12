@@ -5,6 +5,38 @@ import type { ReviewTimeframe } from './trade';
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
 
 /**
+ * Per-timeframe offset for the SINGLE 结构强度阈值 knob (the UI keeps exactly one
+ * input, default 0.6). A contraction on a larger level is a rarer, more
+ * meaningful event than one on a 5m chart, so it is measured against a slightly
+ * lower bar instead of adding a second knob or a level term to the score.
+ *
+ * Effective threshold = `max(0, minScore + offset)`: at the default 0.6 the small
+ * timeframes demand 0.60, 4H demands 0.55 and 1D only 0.50. With `minScore = 0`
+ * (the SERVICE default — the UI always sends a value) every timeframe degenerates
+ * to 0, so an absent knob behaves exactly as it did before the offsets existed.
+ *
+ * Only the 5 scanned timeframes (`scanTimeframes`) carry an entry: `ReviewTimeframe`
+ * also spans 1m/1W/1M, which the scan never measures — a lookup miss reads as an
+ * offset of 0, the same treatment the small timeframes get.
+ */
+export const TIMEFRAME_SCORE_OFFSET: Readonly<Partial<Record<ReviewTimeframe, number>>> = {
+  '5m': 0,
+  '15m': 0,
+  '1H': 0,
+  '4H': -0.05,
+  '1D': -0.10,
+};
+
+/**
+ * Effective `minScore` for one timeframe: the single knob shifted by the
+ * level's offset, floored at 0 so a low knob can never produce a negative
+ * threshold (which would qualify even a neutral `score` of 0).
+ */
+export function timeframeMinScore(timeframe: ReviewTimeframe, minScore: number): number {
+  return Math.max(0, minScore + (TIMEFRAME_SCORE_OFFSET[timeframe] ?? 0));
+}
+
+/**
  * The only convergence structure kind: a volatility convergence (波动率越来越小).
  * The fractal triangle module (swing detection / backscan / classifyStructure)
  * was removed — the scan judges a coin purely by whether its recent band is
@@ -90,9 +122,11 @@ export type ShrinkScanParams = {
   anchor?: number;
   /**
    * 结构强度阈值主旋钮;调高 = 宁少勿滥. A timeframe counts as converged only when
-   * its `score` (the shrink depth) is >= this. Because duration is unscored, the
-   * threshold is a direct statement about amplitude: 0.6 = the band's median
-   * per-bar amplitude is at most 40% of the preceding stretch's.
+   * its `score` (the shrink depth) is >= its own effective threshold
+   * (`timeframeMinScore`, i.e. this knob plus `TIMEFRAME_SCORE_OFFSET`). Because
+   * duration is unscored, the threshold is a direct statement about amplitude:
+   * 0.6 = the band's median per-bar amplitude is at most 40% of the preceding
+   * stretch's (50% on 1D, whose offset is -0.10).
    */
   minScore?: number;
 };
@@ -108,12 +142,19 @@ export type ScanRow = {
   quoteVolume24h: number;
   /** Per-timeframe structure verdicts, keyed by ReviewTimeframe (scanTimeframes order). */
   structures: Record<ReviewTimeframe, StructureResult>;
-  /** Timeframes with a qualified structure (收敛周期 column). */
+  /**
+   * Timeframes whose structure is qualified AND whose `score` reaches that
+   * level's effective threshold (`timeframeMinScore`); the 收敛结构 column.
+   * Ascending `scanTimeframes` order, so the strongest level is the last entry.
+   */
   convergedTimeframes: ReviewTimeframe[];
   qualifiedCount: number;
-  /** Strongest score across qualified timeframes; a row always has >= 1 qualified timeframe. */
+  /**
+   * Strongest score across the converged timeframes; a row always has >= 1
+   * (rows with none are dropped before this is computed).
+   */
   bestScore: number;
-  /** Always true (scanned rows only include coins with >= 1 qualified timeframe). */
+  /** Always true (scanned rows only include coins with >= 1 converged timeframe). */
   qualified: boolean;
 };
 

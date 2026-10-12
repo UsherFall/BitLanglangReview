@@ -5,10 +5,12 @@ import {
   DEFAULT_CONVERGENCE_FLAT_RATIO,
   DEFAULT_CONVERGENCE_MIN_RUN,
   DEFAULT_CONVERGENCE_RATIO,
+  TIMEFRAME_SCORE_OFFSET,
   defaultStructureParams,
   detectConvergence,
   probeStructure,
   scanTimeframes,
+  timeframeMinScore,
   type StructureParams,
 } from '../src/domain/coin-scan';
 
@@ -235,5 +237,39 @@ describe('Coin Scan structure defaults and types', () => {
       flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
     });
     expect(defaultStructureParams({ minRun: 7 }).minRun).toBe(7);
+  });
+});
+
+describe('timeframeMinScore (single knob, per-timeframe offset)', () => {
+  it('exposes the calibrated per-level offsets', () => {
+    expect(TIMEFRAME_SCORE_OFFSET).toEqual({ '5m': 0, '15m': 0, '1H': 0, '4H': -0.05, '1D': -0.10 });
+  });
+
+  it('lowers only the larger timeframes at the UI default 0.6', () => {
+    expect(timeframeMinScore('1D', 0.6)).toBeCloseTo(0.5);
+    expect(timeframeMinScore('4H', 0.6)).toBeCloseTo(0.55);
+    expect(timeframeMinScore('5m', 0.6)).toBe(0.6);
+    expect(timeframeMinScore('15m', 0.6)).toBe(0.6);
+    expect(timeframeMinScore('1H', 0.6)).toBe(0.6);
+  });
+
+  it('degenerates to 0 for every timeframe when the knob is 0 (unchanged service default)', () => {
+    for (const timeframe of scanTimeframes) {
+      expect(timeframeMinScore(timeframe, 0)).toBe(0);
+    }
+  });
+
+  it('floors the effective threshold at 0 instead of going negative', () => {
+    expect(timeframeMinScore('1D', 0.05)).toBe(0);
+    expect(timeframeMinScore('4H', 0.02)).toBe(0);
+    expect(timeframeMinScore('5m', 0)).toBe(0);
+  });
+
+  it('treats a timeframe the scan never measures as offset 0', () => {
+    // `ReviewTimeframe` spans 1m/1W/1M as well; only the 5 scanned timeframes
+    // carry an offset, and a lookup miss must not silently tighten the knob.
+    expect(timeframeMinScore('1m', 0.6)).toBe(0.6);
+    expect(timeframeMinScore('1W', 0.6)).toBe(0.6);
+    expect(timeframeMinScore('1M', 0.6)).toBe(0.6);
   });
 });

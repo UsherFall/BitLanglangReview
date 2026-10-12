@@ -161,7 +161,7 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
           ? '范围 = 美股 + 韩股:休市时段整体剔除,序列只含真实交易时段 K 线(盘前 04:00 – 盘后 20:00 ET)。'
           : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
         {method === 'shrink'
-          ? '一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
+          ? '一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥,大级别(4H/1D)自动更宽容;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
           : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
       </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
@@ -203,9 +203,9 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  // The service sorts scanned rows (qualifiedCount desc, then bestScore desc) and
-  // the UI keeps that order, except that manually demoted rows sink to the bottom
-  // (a stable partition, not a re-rank).
+  // The service sorts scanned rows (highest qualified level, then qualifiedCount,
+  // then bestScore) and the UI keeps that order, except that manually demoted
+  // rows sink to the bottom (a stable partition, not a re-rank).
   const rows = orderScanRows(result.scanned, demotedCoins);
   return (
     <>
