@@ -78,9 +78,13 @@ if (cached) reviewRow = { ...cached, isReviewCoin: true }; // per-request copy
 
 ## Design Decisions
 
-### Always Binance, independent of `MARKET_DATA_SOURCE`
+### Follows `MARKET_DATA_SOURCE` (flipped from always-Binance on 10/12)
 
-Heat's pool is Binance USDT-M top-N and only Binance metadata can gate TradFi sessions; the OKX switch applies to the scan only. Binance instances are shared with the scan in Binance mode (shared ticker/metadata caches).
+Heat runs on the SAME source as the coin scan (`MarketHeatService(tickerSource, scanCandleSource)` in `app-plugin.ts`): the whole 选品 module moves together, and the default is Bitget. Binance instances are still shared with the scan in Binance mode (shared ticker TTL / metadata caches). Consequences of the flip:
+
+- Bitget mode: the pool is Bitget USDT-FUTURES top-N; RWA contracts (isRwa=YES → US_EQUITY, two-bucket rule — see `market-data.md`) are session-gated/excluded exactly like Binance's TradFi perps, so the board stays crypto+commodity-flavoured.
+- OKX mode: heat now reads OKX (it was hardcoded to Binance before the flip) — module consistency was chosen over per-module source pinning.
+- Rate limits ride the running source's budget (`bitgetMarketRatePacer` 50ms / `binanceRatePacer` 110ms); a 429 surfaces as a warning on the response, and already-fetched coins stay cached so retry only tops up the missing ones.
 
 ### Historical heat is computed from candles, one request per coin
 

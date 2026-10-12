@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "数据源契约、Bitget 小节、缓存键规则"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "扫描契约、scope 语义、metadataUnavailable 机制"}
+{"file": ".trellis/spec/server/market-heat.md", "reason": "热度契约(随源切换后需更新的章节)"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用币安 metadata 源模式的依据"}
+{"file": ".trellis/tasks/10-12-bitget-rwa-classify-heat-source/research/bitget-isrwa-probes.md", "reason": "isRwa 字段实测、354/466 分布、两类决策记录"}

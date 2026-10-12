@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BitgetTickerSource } from '../src/server/bitget-tickers';
+import { BitgetInstrumentMetadataSource } from '../src/server/bitget-instrument-metadata';
 
 const tickerResponse = {
   data: [
@@ -80,14 +81,54 @@ describe('BitgetTickerSource', () => {
     expect(fetchJson).toHaveBeenCalledTimes(1);
   });
 
-  it('leaves marketClass unset (Bitget exposes no instrument metadata)', async () => {
+  it('leaves marketClass unset and reports metadata unavailable when no metadata source is wired', async () => {
     const fetchJson = vi.fn(async () => tickerResponse);
     const source = new BitgetTickerSource(fetchJson);
 
     const tickers = await source.listTickers();
 
     expect(tickers.every((ticker) => ticker.marketClass === undefined)).toBe(true);
-    // metadataAvailable is deliberately not implemented (same as the OKX source).
-    expect('metadataAvailable' in source).toBe(false);
+    expect(source.metadataAvailable()).toBe(false);
+  });
+
+  it('attaches marketClass from the contracts metadata (two buckets)', async () => {
+    const tickerFetch = vi.fn(async () => ({
+      data: [
+        { symbol: 'BTCUSDT', lastPr: '83553.1', change24h: '0.00744', usdtVolume: '1216963842.75' },
+        { symbol: 'TSLAUSDT', lastPr: '250', change24h: '0.01', usdtVolume: '900000000' },
+        { symbol: 'XAUUSDT', lastPr: '4000', change24h: '0.005', usdtVolume: '500000000' },
+      ],
+    }));
+    const metadataFetch = vi.fn(async () => ({
+      data: [
+        { symbol: 'BTCUSDT', isRwa: 'NO' },
+        { symbol: 'TSLAUSDT', isRwa: 'YES' },
+        { symbol: 'XAUUSDT', isRwa: 'YES' },
+      ],
+    }));
+    const source = new BitgetTickerSource(tickerFetch, new BitgetInstrumentMetadataSource(metadataFetch));
+
+    const tickers = await source.listTickers();
+
+    expect(tickers.find((ticker) => ticker.instrument === 'BTCUSDT')?.marketClass).toBe('CRYPTO');
+    // RWA contracts — stocks and gold alike — leave the crypto scope for the
+    // gated equity scope (the two-bucket decision).
+    expect(tickers.find((ticker) => ticker.instrument === 'TSLAUSDT')?.marketClass).toBe('US_EQUITY');
+    expect(tickers.find((ticker) => ticker.instrument === 'XAUUSDT')?.marketClass).toBe('US_EQUITY');
+    expect(source.metadataAvailable()).toBe(true);
+  });
+
+  it('reports metadata unavailable when the contracts fetch degrades to an empty map', async () => {
+    const tickerFetch = vi.fn(async () => tickerResponse);
+    const metadataFetch = vi.fn(async () => {
+      throw new Error('Bitget request failed: request timed out after 12s');
+    });
+    const source = new BitgetTickerSource(tickerFetch, new BitgetInstrumentMetadataSource(metadataFetch));
+
+    const tickers = await source.listTickers();
+
+    expect(tickers.length).toBeGreaterThan(0);
+    expect(tickers.every((ticker) => ticker.marketClass === undefined)).toBe(true);
+    expect(source.metadataAvailable()).toBe(false);
   });
 });

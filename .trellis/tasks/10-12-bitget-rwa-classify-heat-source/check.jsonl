@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对源契约与缓存隔离合规"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "核对扫描行为与 scope 语义"}
+{"file": ".trellis/spec/server/market-heat.md", "reason": "核对热度切源后的契约"}
+{"file": ".trellis/spec/server/index.md", "reason": "server 层质量基线"}
+{"file": ".trellis/tasks/10-12-bitget-rwa-classify-heat-source/research/bitget-isrwa-probes.md", "reason": "核对实现与 isRwa 实测行为一致"}

@@ -9,11 +9,11 @@
 - `TickerSource.metadataAvailable?(): boolean` — optional: whether the last snapshot could attach classes. `false` means session gating was effectively off for that snapshot.
 - `CandleRequest { instrument, timeframe, anchor, direction: 'earlier' | 'later', limit }` and `CandleSource.getCandlesticks(request): Promise<Candlestick[]>` — same contract as `CandlestickService`.
 
-`app-plugin.ts` wires the selected source via `marketDataSource` option, then `process.env.MARKET_DATA_SOURCE`, then the `'bitget'` default. `vite.config.ts` loads `.env` (via `loadEnv`) into `process.env.MARKET_DATA_SOURCE` when the shell has none, so `.env` is the local config file for the switch — precedence is **shell env > `.env` > `'bitget'`** (10/12; the default flipped from Binance to Bitget because the scan's China-network Binance path kept hitting 429/418, while the equity scope still needs `MARKET_DATA_SOURCE=binance` — see `coin-scan.md`):
+`app-plugin.ts` wires the selected source via `marketDataSource` option, then `process.env.MARKET_DATA_SOURCE`, then the `'bitget'` default. `vite.config.ts` loads `.env` (via `loadEnv`) into `process.env.MARKET_DATA_SOURCE` when the shell has none, so `.env` is the local config file for the switch — precedence is **shell env > `.env` > `'bitget'`** (10/12; the default flipped from Binance to Bitget because the scan's China-network Binance path kept hitting 429/418):
 
 ```ts
 const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'bitget';
-const bitgetTickerSource = new BitgetTickerSource();
+const bitgetTickerSource = new BitgetTickerSource(undefined, bitgetInstrumentMetadata());
 const bitgetCandleSource = new BitgetCandleSource(candleStore);
 const tickerSource =
   marketDataSource === 'okx' ? new OkxTickerSource()
@@ -25,13 +25,15 @@ const scanCandleSource =
   : new BinanceCandleSource(candleStore);
 // The scan surfaces rate-limit warnings from its gate, so the gate belongs to the running source.
 const coinScanService = new CoinScanService(tickerSource, scanCandleSource, marketDataSource === 'bitget' ? bitgetMarketRateGate : binanceRateGate);
+// Market heat follows the SAME source as the scan (10/12; see market-heat.md).
+const marketHeatService = new MarketHeatService(tickerSource, scanCandleSource);
 ```
 
 The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source").
 
-### Market heat always runs on Binance (09/07)
+### Market heat follows `MARKET_DATA_SOURCE` (flipped from always-Binance on 10/12)
 
-`MarketHeatService` (see `market-heat.md`) is wired in `app-plugin.ts` with dedicated `BinanceTickerSource` + `BinanceCandleSource` instances REGARDLESS of `marketDataSource`. Its pool is defined as Binance USDT-M top-N and only Binance `exchangeInfo` metadata can session-gate TradFi contracts, so the OKX switch does not apply. In Binance mode the same instances are shared with the coin scan so the 30s ticker TTL and 6h metadata cache stay shared.
+`MarketHeatService` (see `market-heat.md`) is wired in `app-plugin.ts` with the SAME instances the coin scan uses (`MarketHeatService(tickerSource, scanCandleSource)`), so the whole 选品 module moves together and the default is Bitget. In Binance mode the instances are shared with the scan so the 30s ticker TTL and 6h metadata cache stay shared. The flip superseded the 09/07 "always Binance" rule: Bitget's `isRwa` classification now gates RWA contracts the same way Binance's `exchangeInfo` metadata gates TradFi perps, and OKX-mode heat reads OKX (a deliberate module-consistency change).
 
 ## OKX Instrument List
 
@@ -138,7 +140,7 @@ Coverage is in `tests/binance-tickers.test.ts`.
 
 - Tickers: `GET api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES` — one request returns the whole USDT-FUTURES market. `quoteVolume24h = Number(usdtVolume)` (USDT-denominated, like Binance); `lastPrice = Number(lastPr)`; **`change24h = Number(change24h) * 100`** — Bitget reports a FRACTION (0.00744), the `Ticker` contract is a percent. USDT-quote + stablecoin-pair filtering (`STABLECOIN_QUOTE_PAIRS`, shared with Binance via `src/domain/stablecoin-quotes.ts`) and volume-descending sorting match the Binance source. 30s TTL + in-flight dedupe (the full-market response is ~400KB). Measured: the list is perpetuals only (no delivery rows) and carries no stablecoin pairs besides `USDCUSDT`.
 - Candles: `GET api.bitget.com/api/v2/mix/market/candles?productType=USDT-FUTURES&symbol=X&granularity=<tf>&limit=N`, rows `[ts, open, high, low, close, baseVolume, quoteVolume]` (no exchange-side completion flag, so the closed-bar judgement is time-based: `timestamp + step <= anchor` for `earlier`). `granularity` passes `ReviewTimeframe` through unchanged — Bitget mix tokens are identical (`1m/5m/15m/1H/4H/1D/1W/1M`, CAPITAL H/D; the SPOT API uses lowercase `1h/1day`). `earlier` uses `endTime = anchor - 1` (the endpoint returns the newest `limit` bars at or before `endTime`); `later` sets `startTime = anchor + 1` and clamps `endTime` to the **90-day span cap**. Store keys are namespaced with `bitget:` (see the cache-key rule above); returned candles carry the caller's own instrument.
-- **No `marketClass` and no `metadataAvailable()`**: Bitget's public API exposes no instrument classification, so — like OKX — every instrument reads as crypto-like (always open). Consequence: the **equity scope has an empty pool under this source**; the crypto scope is unaffected. Documented in `coin-scan.md`.
+- **Instrument classification via `isRwa` (10/12)**: `src/server/bitget-instrument-metadata.ts` (`BitgetInstrumentMetadataSource`, 6h TTL + in-flight, degrade-to-empty-never-throw, shared via `bitgetInstrumentMetadata()`) fetches `GET api.bitget.com/api/v2/mix/market/contracts?productType=USDT-FUTURES` and maps `isRwa` through `src/domain/bitget-market-class.ts` — **two buckets by user decision**: `NO` (466 crypto) → `CRYPTO`, `YES` (354 RWA: US/HK/KR/JP equities, metals, energy, indices/ETFs, FX, pre-IPO) → `US_EQUITY`; no region/commodity sub-tables. `BitgetTickerSource` attaches the class per symbol and implements `metadataAvailable()` (false when unwired or degraded → the scan reports `metadataUnavailable`). Consequence: RWA contracts leave the crypto scope for the equity scope's US-session gate — the crypto scan is no longer flooded by high-volume stock perps — and 24/7 products (gold, indices, FX) are gated to 04:00–20:00 ET, dropping ~8h of bars per day (accepted cost of the two-bucket rule). Probe notes in `.trellis/tasks/10-12-bitget-rwa-classify-heat-source/research/bitget-isrwa-probes.md`.
 - Rate handling: `defaultBitgetMarketFetchJson` (in `http.ts`) paces request starts through `bitgetMarketRatePacer` (50ms + 10ms jitter ≈ 20 req/s) and attaches `bitgetMarketRateGate`, wired into `CoinScanService` as the scan's warning source so a Bitget 429 surfaces as a user-visible warning ("Bitget限频(HTTP 429)…") instead of a silent stall. Bitget's nominal bucket is ~20 req/s per IP (response header `X-MBX-USED-REMAIN-LIMIT`); measured behaviour is burst-tolerant (150 requests at 30-way parallelism, zero 429) but soft-throttled under sustained concurrency (~2s per request), which is why the pacer is not optional. The silent weight monitor is injected so Bitget 429s never print `[binance]` lines.
 - Rolling retention (5m ≈ 3–4 months intraday, 1D+ years) only limits anchored historical scans past the window; refresh scans read the newest 100–200 bars and are unaffected.
 

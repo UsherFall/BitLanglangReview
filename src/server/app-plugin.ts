@@ -8,6 +8,7 @@ import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { DEFAULT_SCAN_PARAMS, isScanScope, type ScanScope } from '../domain/scan-scope';
 import { BinanceCandleSource } from './binance-candles';
 import { BitgetCandleSource } from './bitget-candles';
+import { bitgetInstrumentMetadata } from './bitget-instrument-metadata';
 import { BitgetTickerSource } from './bitget-tickers';
 import { resolveDataPath } from './data-root';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
@@ -56,21 +57,22 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const candleService = new CandlestickService(candleStore);
       // The coin scan uses the switchable market-data source: plugin option,
       // then process.env (vite.config injects MARKET_DATA_SOURCE from `.env`
-      // when the shell has none), then Bitget. The equity scope needs the
-      // Binance source — only Binance carries instrument-class metadata — so
-      // `.env` is where a Binance/OKX switch lives.
+      // when the shell has none), then Bitget. The equity scope works on every
+      // source now — Bitget classifies via the contracts endpoint's isRwa flag
+      // (two buckets: CRYPTO vs US_EQUITY) — so `.env` is purely a preference.
       const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'bitget';
-      // Market heat (市场热度) always runs on Binance: its pool is defined as
-      // Binance USDT-M top-N and only Binance metadata can session-gate TradFi
-      // contracts. Binance instances are shared with the scan when it is in
-      // Binance mode so the 30s ticker TTL / 6h metadata cache stay shared.
+      // Market heat (市场热度) follows the SAME source as the scan (10/12): the
+      // whole 选品 module moves together, and in Binance mode the instances are
+      // still shared with the scan so the 30s ticker TTL / 6h metadata cache
+      // stay shared. Bitget candles keep their `bitget:` store-key namespace,
+      // so heat and scan rows never mix across sources.
       const binanceTickerSource = new BinanceTickerSource(undefined, binanceInstrumentMetadata());
       const binanceCandleSource = new BinanceCandleSource(candleStore);
       // Bitget market sources (public, no API key): USDT-FUTURES tickers +
       // candles for the coin scan. Candle store keys are namespaced with
       // `bitget:` inside BitgetCandleSource, so they never collide with the
       // Binance rows sharing the same base+USDT vocabulary.
-      const bitgetTickerSource = new BitgetTickerSource();
+      const bitgetTickerSource = new BitgetTickerSource(undefined, bitgetInstrumentMetadata());
       const bitgetCandleSource = new BitgetCandleSource(candleStore);
       const tickerSource =
         marketDataSource === 'okx'
@@ -88,7 +90,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // belong to the source that is actually running.
       const scanRateGate = marketDataSource === 'bitget' ? bitgetMarketRateGate : binanceRateGate;
       const coinScanService = new CoinScanService(tickerSource, scanCandleSource, scanRateGate);
-      const marketHeatService = new MarketHeatService(binanceTickerSource, binanceCandleSource);
+      const marketHeatService = new MarketHeatService(tickerSource, scanCandleSource);
       const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));
