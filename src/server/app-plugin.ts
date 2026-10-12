@@ -7,6 +7,8 @@ import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { DEFAULT_SCAN_PARAMS, isScanScope, type ScanScope } from '../domain/scan-scope';
 import { BinanceCandleSource } from './binance-candles';
+import { BitgetCandleSource } from './bitget-candles';
+import { BitgetTickerSource } from './bitget-tickers';
 import { resolveDataPath } from './data-root';
 import { binanceInstrumentMetadata } from './binance-instrument-metadata';
 import { BinanceTickerSource } from './binance-tickers';
@@ -28,12 +30,13 @@ import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
 import { fetchBinanceOnlyCandles, fetchReviewCandles, getCandlesForMode } from './review-candle-source';
 import { loadTradesFromWorkbook } from './trade-import';
+import { binanceRateGate, bitgetMarketRateGate } from './http';
 
 const workbookPath = findSourceWorkbook();
 
 export type TradingReviewApiPluginOptions = {
   /** Coin-scan ticker + candle data source. Defaults to Binance. */
-  marketDataSource?: 'binance' | 'okx';
+  marketDataSource?: 'binance' | 'okx' | 'bitget';
 };
 
 export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = {}): Plugin {
@@ -59,9 +62,28 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // Binance mode so the 30s ticker TTL / 6h metadata cache stay shared.
       const binanceTickerSource = new BinanceTickerSource(undefined, binanceInstrumentMetadata());
       const binanceCandleSource = new BinanceCandleSource(candleStore);
-      const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : binanceTickerSource;
-      const scanCandleSource = marketDataSource === 'okx' ? candleService : binanceCandleSource;
-      const coinScanService = new CoinScanService(tickerSource, scanCandleSource);
+      // Bitget market sources (public, no API key): USDT-FUTURES tickers +
+      // candles for the coin scan. Candle store keys are namespaced with
+      // `bitget:` inside BitgetCandleSource, so they never collide with the
+      // Binance rows sharing the same base+USDT vocabulary.
+      const bitgetTickerSource = new BitgetTickerSource();
+      const bitgetCandleSource = new BitgetCandleSource(candleStore);
+      const tickerSource =
+        marketDataSource === 'okx'
+          ? new OkxTickerSource()
+          : marketDataSource === 'bitget'
+            ? bitgetTickerSource
+            : binanceTickerSource;
+      const scanCandleSource =
+        marketDataSource === 'okx'
+          ? candleService
+          : marketDataSource === 'bitget'
+            ? bitgetCandleSource
+            : binanceCandleSource;
+      // The scan surfaces rate-limit warnings from its gate, so the gate must
+      // belong to the source that is actually running.
+      const scanRateGate = marketDataSource === 'bitget' ? bitgetMarketRateGate : binanceRateGate;
+      const coinScanService = new CoinScanService(tickerSource, scanCandleSource, scanRateGate);
       const marketHeatService = new MarketHeatService(binanceTickerSource, binanceCandleSource);
       const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));

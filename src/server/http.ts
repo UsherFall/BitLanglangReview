@@ -141,6 +141,28 @@ const BINANCE_PACE_JITTER_MS = 15;
 export const binanceRatePacer = createRequestPacer(BINANCE_MIN_INTERVAL_MS, BINANCE_PACE_JITTER_MS);
 
 /**
+ * Request-start pacer for Bitget market data. Bitget's public endpoints carry a
+ * nominal ~20 req/s per-IP bucket (response header `X-MBX-USED-REMAIN-LIMIT`),
+ * and measured behaviour (2026-10-12, see the coin-scan-bitget-source task's
+ * research notes) is burst-tolerant but soft-throttled under sustained
+ * concurrency: 150 requests at 30-way parallelism passed untouched, while 10
+ * sustained workers saw per-request latency inflate to ~2s with no 429 at all.
+ * 50ms + 10ms jitter pins a cold scan (150 coins × 5 timeframes = 750 requests)
+ * to the nominal ceiling; the pacing floor of ~37.5s is the same order as the
+ * Binance path's ~82s cold scan.
+ */
+const BITGET_MIN_INTERVAL_MS = 50;
+const BITGET_PACE_JITTER_MS = 10;
+export const bitgetMarketRatePacer = createRequestPacer(BITGET_MIN_INTERVAL_MS, BITGET_PACE_JITTER_MS);
+
+/**
+ * IP-level gate for Bitget market-data 429s, mirroring `binanceRateGate`:
+ * a 429 pauses every Bitget caller and surfaces a user-visible warning, so the
+ * scan's warnings channel reports a Bitget limit instead of stalling silently.
+ */
+export const bitgetMarketRateGate = createRateGate();
+
+/**
  * `X-MBX-USED-WEIGHT-1M` — the used weight **for the IP** in the current minute
  * ("The limits on the API are based on the IPs, not the API keys"). Only Binance
  * sends it, so observing it needs no per-source switch: OKX/Bitget responses
@@ -261,11 +283,17 @@ const silentWeightMonitor: WeightMonitor = createWeightMonitor(() => {});
  * every response plus one line per rate-limit event; it defaults to the shared
  * `binanceWeightMonitor` and is a no-op for responses without the header.
  */
+/**
+ * `sourceLabel` names the exchange in the user-facing gate warnings (default
+ * `币安`); the Bitget market path reuses the same gate mechanics under its own
+ * label so a Bitget 429 never reads as a Binance limit.
+ */
 export async function fetchJsonWithRetry(
   url: string,
   fetchImpl: FetchImpl,
   gate?: RateGate,
   monitor: WeightMonitor = binanceWeightMonitor,
+  sourceLabel = '币安',
 ): Promise<unknown> {
   for (let attempt = 1; ; attempt += 1) {
     await waitOutGate(gate);
@@ -283,14 +311,14 @@ export async function fetchJsonWithRetry(
     // the one from the very response that tripped the limit.
     monitor.recordLimit(response.status, usedWeight, parseRetryAfterSeconds(response.headers));
     if (response.status === 418) {
-      gate?.block(Date.now() + delayMs, '418', `币安 IP 被自动封禁(HTTP 418)，${Math.ceil(delayMs / 1000)} 秒内不再发请求，请稍后重试`);
+      gate?.block(Date.now() + delayMs, '418', `${sourceLabel} IP 被自动封禁(HTTP 418)，${Math.ceil(delayMs / 1000)} 秒内不再发请求，请稍后重试`);
       if (gate) throw new Error('HTTP 418 (Binance IP auto-banned)');
     }
     if (attempt >= retry.maxAttempts) {
-      gate?.block(Date.now() + delayMs, response.status === 418 ? '418' : '429', `币安${response.status === 418 ? ' IP 被自动封禁(HTTP 418)' : '限频(HTTP 429)'}，已自动退避 ${Math.ceil(delayMs / 1000)} 秒`);
+      gate?.block(Date.now() + delayMs, response.status === 418 ? '418' : '429', `${sourceLabel}${response.status === 418 ? ' IP 被自动封禁(HTTP 418)' : '限频(HTTP 429)'}，已自动退避 ${Math.ceil(delayMs / 1000)} 秒`);
       throw new Error(`HTTP ${response.status}`);
     }
-    gate?.block(Date.now() + delayMs, '429', `币安限频(HTTP 429)，已自动退避 ${Math.ceil(delayMs / 1000)} 秒`);
+    gate?.block(Date.now() + delayMs, '429', `${sourceLabel}限频(HTTP 429)，已自动退避 ${Math.ceil(delayMs / 1000)} 秒`);
     await sleep(delayMs);
   }
 }
@@ -316,6 +344,15 @@ async function fetchImplWithTimeout(url: string, fetchImpl: FetchImpl): Promise<
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     return await fetchImpl(url, { signal: controller.signal });
+  } catch (error) {
+    // undici aborts with a bare `AbortError("This operation was aborted")`,
+    // which reads as an opaque OS error once wrapped by the labeled fetchers.
+    // Translate at the choke point so every source reports a self-describing
+    // timeout ("<Source> request failed: request timed out after 12s").
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`request timed out after ${REQUEST_TIMEOUT_MS / 1000}s`);
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -354,6 +391,22 @@ export async function defaultBinanceFetchJson(url: string): Promise<unknown> {
   // note above). Every outbound fapi request is throttled here.
   await binanceRatePacer.pace();
   return labeledFetch(url, 'Binance request failed', binanceRateGate);
+}
+
+/**
+ * Public (unauthenticated) Bitget market-data GET — tickers and candles. Bitget
+ * answers business errors with an HTTP 200 body (`code` != `'00000'`), which
+ * the SOURCE inspects; this fetcher only guarantees the shared timeout/error
+ * contract, the market-data pacer, and the 429 gate. The silent weight monitor
+ * is injected for the same reason as the OKX path: Bitget's own 429s must not
+ * print `[binance]` lines. A timeout surfaces as
+ * "Bitget request failed: request timed out after 12s" via `fetchImplWithTimeout`.
+ */
+export async function defaultBitgetMarketFetchJson(url: string): Promise<unknown> {
+  // Share one request-start budget across all Bitget market callers (the coin
+  // scan is the only one today); see the pacer note above.
+  await bitgetMarketRatePacer.pace();
+  return labeledFetch(url, 'Bitget request failed', bitgetMarketRateGate, silentWeightMonitor, 'Bitget');
 }
 
 /**
@@ -396,9 +449,10 @@ async function labeledFetch(
   label: string,
   gate?: RateGate,
   monitor: WeightMonitor = binanceWeightMonitor,
+  warningLabel = '币安',
 ): Promise<unknown> {
   try {
-    return await fetchJsonWithRetry(url, fetchViaProxy, gate, monitor);
+    return await fetchJsonWithRetry(url, fetchViaProxy, gate, monitor, warningLabel);
   } catch (error) {
     throw new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`);
   }

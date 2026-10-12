@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对命名空间隔离与源契约合规"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "核对扫描行为无回归"}
+{"file": ".trellis/spec/server/index.md", "reason": "server 层质量基线"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层数据流检查"}
+{"file": ".trellis/tasks/10-12-coin-scan-bitget-source/research/bitget-api-probes.md", "reason": "核对实现与实测限频/端点行为一致"}

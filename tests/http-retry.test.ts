@@ -76,6 +76,18 @@ describe('fetchJsonWithRetry (no gate — OKX path, per-request behavior)', () =
     await expect(fetchJsonWithRetry('https://x', fetchImpl)).rejects.toThrow(/HTTP 500/);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
+
+  it('translates an abort (per-attempt timeout) into a self-describing error', async () => {
+    // undici aborts with a bare AbortError("This operation was aborted"), which
+    // the labeled fetchers would otherwise surface verbatim.
+    const abortError = new Error('This operation was aborted');
+    abortError.name = 'AbortError';
+    const fetchImpl = vi.fn(async () => {
+      throw abortError;
+    });
+    await expect(fetchJsonWithRetry('https://x', fetchImpl)).rejects.toThrow('request timed out after 12s');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('fetchJsonWithRetry (with gate — Binance path, IP-level behavior)', () => {
@@ -124,5 +136,20 @@ describe('fetchJsonWithRetry (with gate — Binance path, IP-level behavior)', (
     await vi.advanceTimersByTimeAsync(5_000);
     await expect(promise).resolves.toEqual({ ok: true });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels gate warnings with the source label so a Bitget 429 never reads as Binance', async () => {
+    vi.useFakeTimers();
+    const gate = createRateGate();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({}, 429, { 'retry-after': '2' }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+
+    const promise = fetchJsonWithRetry('https://x', fetchImpl, gate, silentMonitor, 'Bitget');
+    await vi.advanceTimersByTimeAsync(100_000);
+
+    await expect(promise).resolves.toEqual({ ok: true });
+    expect(gate.takeWarnings()).toEqual([expect.stringContaining('Bitget限频(HTTP 429)')]);
   });
 });

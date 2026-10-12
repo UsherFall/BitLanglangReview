@@ -13,8 +13,18 @@
 
 ```ts
 const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
-const tickerSource = marketDataSource === 'okx' ? new OkxTickerSource() : new BinanceTickerSource(undefined, binanceInstrumentMetadata());
-const scanCandleSource = marketDataSource === 'okx' ? candleService : new BinanceCandleSource(candleStore);
+const bitgetTickerSource = new BitgetTickerSource();
+const bitgetCandleSource = new BitgetCandleSource(candleStore);
+const tickerSource =
+  marketDataSource === 'okx' ? new OkxTickerSource()
+  : marketDataSource === 'bitget' ? bitgetTickerSource
+  : new BinanceTickerSource(undefined, binanceInstrumentMetadata());
+const scanCandleSource =
+  marketDataSource === 'okx' ? candleService
+  : marketDataSource === 'bitget' ? bitgetCandleSource
+  : new BinanceCandleSource(candleStore);
+// The scan surfaces rate-limit warnings from its gate, so the gate belongs to the running source.
+const coinScanService = new CoinScanService(tickerSource, scanCandleSource, marketDataSource === 'bitget' ? bitgetMarketRateGate : binanceRateGate);
 ```
 
 The coin scan and the market-heat service consume the selected `tickerSource`; the scan also consumes `scanCandleSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source").
@@ -76,17 +86,17 @@ Chain exhaustion raises `ReviewCandleUnavailableError`, which the route turns in
 
 **Known residual**: when that metadata is unreadable (empty status map) nothing can be validated, so every Binance candidate is attempted and the chain cannot advance to OKX. A `SETTLING` contract is then undetectable and still charts as a flat line, and a symbol Binance does not list (SHIB) still 502s — i.e. exactly the pre-chain behaviour. Closing either would need a "zero-volume window" heuristic (which would misfire on genuinely quiet markets) or a fallback on request errors (which would mask rate limits).
 
-Why not Bitget's own candles? Bitget `/api/v2/mix/market/candles` keeps only a **rolling window per granularity** (measured 09/07 on BTCUSDT): 5m ≈ 30 days, 15m ≈ 1–2 months, 1H ≈ 60–90 days, 4H ≈ a few months, while 1D/1W/1M go back years. Intraday charts for any but recent trades were therefore empty, so the personal review default was moved to Binance, whose `fapi/v1/klines` have no such rolling retention (5m data from 2021+). Historical notes kept for future reference:
+Why not Bitget's own candles? Bitget `/api/v2/mix/market/candles` keeps only a **rolling window per granularity** (measured 09/07 on BTCUSDT: 5m ≈ 30 days, 15m ≈ 1–2 months, 1H ≈ 60–90 days, 4H ≈ a few months, while 1D/1W/1M go back years; re-measured 10/12: 5m ≈ 3–4 months). Intraday charts for any but recent trades were therefore empty, so the personal review default was moved to Binance, whose `fapi/v1/klines` have no such rolling retention (5m data from 2021+). **The retention gap does NOT block the coin scan** (10/12): the scan only reads the newest 100–200 bars per timeframe, so `BitgetCandleSource` was re-introduced for the scan — see "Bitget (Coin Scan)" below. Historical notes kept for future reference:
 
-- Bitget candle rows/caching follow the native-symbol isolation rule (`BTCUSDT` vs OKX `BTC-USDT-SWAP`), the same rule Binance uses.
+- Bitget candle rows/caching follow the native-symbol isolation rule (`BTCUSDT` vs OKX `BTC-USDT-SWAP`), the same rule Binance uses — but Bitget shares Binance's `base+USDT` vocabulary, so its store keys MUST be prefixed (see the namespace rule below).
 - Bitget `startTime~endTime` span per request is capped at **90 days** (HTTP 400 code `00001`), so paging windows must not exceed it.
-- A `BitgetCandleSource` existed for this mode and was removed when the source moved to Binance; do not re-introduce it without reconsidering the retention gap.
+- A `BitgetCandleSource` existed for the personal review mode and was removed when the source moved to Binance (commit 99a0a8f); do not re-introduce it for that mode without reconsidering the retention gap.
 
 ### Source selection notes
 
 - `CandleRequest.instrument` is always the **native symbol of the chosen source**. The route resolves the review's OKX-style instrument into a chain (`src/domain/instrument-symbol.ts`) and each step requests its own source with that source's vocabulary.
 - The personal review chain must not leak into the coin scan or market heat: those consumers hold `BinanceCandleSource` directly (the scan pool is defined as Binance USDT-M, so an OKX fallback would rank a different universe), and only the `/api/candles?source=binance` route path runs the chain.
-- **Cache-key namespace rule (09/07)**: the `candles` PK is `(instrument, timeframe, timestamp)` with no source column. Isolation works only when sources use DIFFERENT symbol vocabularies — OKX's `X-USDT-SWAP` vs `base+USDT` — NOT when two sources share a vocabulary. The retired Bitget source and Binance both keyed on `base+USDT` (`ZECUSDT`), so Bitget leftovers mixed with Binance rows and produced two daily bars per day. If a future source shares the `base+USDT` namespace, it MUST namespace its cache keys (e.g. a source prefix); the retired-source leftovers were cleared once from the local cache.
+- **Cache-key namespace rule (09/07, extended 10/12)**: the `candles` PK is `(instrument, timeframe, timestamp)` with no source column. Isolation works only when sources use DIFFERENT symbol vocabularies — OKX's `X-USDT-SWAP` vs `base+USDT` — NOT when two sources share a vocabulary. The retired Bitget source and Binance both keyed on `base+USDT` (`ZECUSDT`), so Bitget leftovers mixed with Binance rows and produced two daily bars per day; the retired-source leftovers were cleared once from the local cache. **Bitget as a coin-scan source (10/12) therefore namespaces its keys**: `BitgetCandleSource` prefixes every store read/write with `bitget:` (`BITGET_KEY_PREFIX`), keeps the native symbol on the wire and in the candles it returns, and is covered by a regression test asserting both directions (writes land under the prefix; raw-symbol rows are invisible). Any future source sharing the `base+USDT` namespace MUST do the same.
 - The mode→source binding lives in `src/ui/App.tsx` (`reviewModeBindings`): workbook review → `okx`, personal review → `binance`.
 - Binance daily candles align to UTC 0:00 (no -8h offset), so a trade near a UTC day boundary may sit on a different chart day than the OKX/UTC+8 view — accepted for the personal mode.
 
@@ -121,6 +131,18 @@ OKX ticker `volCcy24h` is the 24h volume in **base coin units** (e.g. XLM coins)
 `baseAsset` is intentionally NOT surfaced: the scan classifies by `underlyingType`, and the Yahoo-ticker alias design that briefly needed the upstream symbol was dropped in 09/16 (Yahoo's free chart API rate-limits after ~40 requests).
 
 Coverage is in `tests/binance-tickers.test.ts`.
+
+## Bitget (Coin Scan)
+
+`src/server/bitget-tickers.ts` (`BitgetTickerSource`) and `src/server/bitget-candles.ts` (`BitgetCandleSource`) are the `MARKET_DATA_SOURCE=bitget` option for the coin scan, backed by Bitget's public v2 mix API (no API key). Endpoints and behaviour measured 2026-10-12 (probe notes in `.trellis/tasks/10-12-coin-scan-bitget-source/research/bitget-api-probes.md`); Bitget's official doc pages are JS-rendered and unreadable to fetchers, so the measured facts are the source of truth.
+
+- Tickers: `GET api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES` — one request returns the whole USDT-FUTURES market. `quoteVolume24h = Number(usdtVolume)` (USDT-denominated, like Binance); `lastPrice = Number(lastPr)`; **`change24h = Number(change24h) * 100`** — Bitget reports a FRACTION (0.00744), the `Ticker` contract is a percent. USDT-quote + stablecoin-pair filtering (`STABLECOIN_QUOTE_PAIRS`, shared with Binance via `src/domain/stablecoin-quotes.ts`) and volume-descending sorting match the Binance source. 30s TTL + in-flight dedupe (the full-market response is ~400KB). Measured: the list is perpetuals only (no delivery rows) and carries no stablecoin pairs besides `USDCUSDT`.
+- Candles: `GET api.bitget.com/api/v2/mix/market/candles?productType=USDT-FUTURES&symbol=X&granularity=<tf>&limit=N`, rows `[ts, open, high, low, close, baseVolume, quoteVolume]` (no exchange-side completion flag, so the closed-bar judgement is time-based: `timestamp + step <= anchor` for `earlier`). `granularity` passes `ReviewTimeframe` through unchanged — Bitget mix tokens are identical (`1m/5m/15m/1H/4H/1D/1W/1M`, CAPITAL H/D; the SPOT API uses lowercase `1h/1day`). `earlier` uses `endTime = anchor - 1` (the endpoint returns the newest `limit` bars at or before `endTime`); `later` sets `startTime = anchor + 1` and clamps `endTime` to the **90-day span cap**. Store keys are namespaced with `bitget:` (see the cache-key rule above); returned candles carry the caller's own instrument.
+- **No `marketClass` and no `metadataAvailable()`**: Bitget's public API exposes no instrument classification, so — like OKX — every instrument reads as crypto-like (always open). Consequence: the **equity scope has an empty pool under this source**; the crypto scope is unaffected. Documented in `coin-scan.md`.
+- Rate handling: `defaultBitgetMarketFetchJson` (in `http.ts`) paces request starts through `bitgetMarketRatePacer` (50ms + 10ms jitter ≈ 20 req/s) and attaches `bitgetMarketRateGate`, wired into `CoinScanService` as the scan's warning source so a Bitget 429 surfaces as a user-visible warning ("Bitget限频(HTTP 429)…") instead of a silent stall. Bitget's nominal bucket is ~20 req/s per IP (response header `X-MBX-USED-REMAIN-LIMIT`); measured behaviour is burst-tolerant (150 requests at 30-way parallelism, zero 429) but soft-throttled under sustained concurrency (~2s per request), which is why the pacer is not optional. The silent weight monitor is injected so Bitget 429s never print `[binance]` lines.
+- Rolling retention (5m ≈ 3–4 months intraday, 1D+ years) only limits anchored historical scans past the window; refresh scans read the newest 100–200 bars and are unaffected.
+
+Coverage is in `tests/bitget-tickers.test.ts` and `tests/bitget-candles.test.ts`.
 
 ## Error Handling
 

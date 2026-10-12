@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "数据源接缝契约、缓存键命名空间规则(09/07)、90天跨度上限、退休 Bitget 源的历史笔记"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选品扫描契约:池子/时间框架/警告透出通道"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "app-plugin 装配与路由约定"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用退休 BitgetCandleSource(99a0a8f^)模式的判断依据"}
+{"file": ".trellis/tasks/10-12-coin-scan-bitget-source/research/bitget-api-probes.md", "reason": "Bitget 端点/granularity/限频/历史深度实测数据"}

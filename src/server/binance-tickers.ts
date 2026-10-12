@@ -1,23 +1,8 @@
 import { defaultBinanceFetchJson, type FetchJson } from './http';
 import { BinanceInstrumentMetadataSource } from './binance-instrument-metadata';
+import { STABLECOIN_QUOTE_PAIRS } from '../domain/stablecoin-quotes';
 import type { MarketClass } from '../domain/market-class';
 import type { Ticker, TickerSource } from './market-data';
-
-/**
- * Exact USDT-M perpetual symbols to exclude from the scan pool. These are
- * stablecoin / synthetic pairs whose "price discovery" is not meaningful for a
- * volume-shrink scan. Extend this list as new stablecoin pairs appear.
- */
-export const STABLECOIN_QUOTE_PAIRS = new Set<string>([
-  'USDCUSDT',
-  'FDUSDUSDT',
-  'DAIUSDT',
-  'TUSDUSDT',
-  'USDDUSDT',
-  'USDPUSDT',
-  'USD1USDT',
-  'USD0USDT',
-]);
 
 type BinanceTicker24hr = {
   symbol?: string;
