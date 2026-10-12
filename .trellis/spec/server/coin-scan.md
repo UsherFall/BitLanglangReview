@@ -30,10 +30,10 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 | --- | --- | --- | --- |
 | `method` | string | — | `shrink` (收敛结构) or `heat` (热度); anything else → 400 |
 | `scope` | string | `crypto` | `crypto` (加密: crypto + indices + commodities) or `equity` (股票: US + Korean equities); anything else → 400; `heat` + `equity` → 400 |
-| `topN` | number | `crypto` 60 / `equity` 30 | `>= 1` |
+| `topN` | number | `crypto` 150 / `equity` 30 | `>= 1` (crypto raised 60 → 150 on 10/11; see "Pool size and level weighting (10/11)") |
 | `minQuoteVolume24h` | number | 10_000_000 (both scopes) | `>= 0`; instruments below this 24h quote volume are filtered before Top-N selection |
 | `anchor` | number (optional) | now | epoch ms; bars whose close time (`timestamp + timeframe`) is `<= anchor` are treated as completed. Absent / empty / NaN → `Date.now()`. Present and `<= 0` → 400 |
-| `minScore` | number (optional) | 0 | `>= 0`; a timeframe counts as converged only when `score >= minScore`. The 宁少勿滥 strength knob (UI default **0.6**). Because `score` is the shrink depth and nothing else, this reads directly as an amplitude statement: 0.6 = the band's median per-bar amplitude is at most 40% of the preceding stretch's. Absent → 0. Present and `< 0` → 400 |
+| `minScore` | number (optional) | 0 | `>= 0`; the single 宁少勿滥 strength knob (UI default **0.6**). A timeframe counts as converged only when `score >= timeframeMinScore(tf, minScore)`, i.e. this knob shifted by the level's own offset: `max(0, minScore + TIMEFRAME_SCORE_OFFSET[tf])` (0 for 5m/15m/1H, −0.05 for 4H, −0.10 for 1D). Because `score` is the shrink depth and nothing else, the effective bar reads directly as an amplitude statement: at 0.6 the small timeframes demand ≤40% of the preceding stretch, 4H ≤45%, 1D ≤50%. `minScore = 0` (the SERVICE default; the UI always sends a value) degenerates every offset to 0, so an absent knob behaves exactly as before the offsets existed. Absent → 0. Present and `< 0` → 400 |
 
 Non-numeric params fall back to the scope's default (never to 0 — an absent `topN` must not become `0` and 400). Invalid final values → 400. The per-scope defaults live in `DEFAULT_SCAN_PARAMS` (`src/domain/scan-scope.ts`) and are mirrored by the panel's inputs.
 
@@ -58,13 +58,13 @@ type ScanRow = {
   change24h: number;             // percent
   quoteVolume24h: number;        // 24h quote volume in USDT (liquidity floor)
   structures: Record<ReviewTimeframe, StructureResult>; // all 5 timeframes, scanTimeframes order
-  convergedTimeframes: ReviewTimeframe[]; // timeframes with structure.qualified && score >= minScore
+  convergedTimeframes: ReviewTimeframe[]; // qualified && score >= timeframeMinScore(tf, minScore); ASCENDING (scanTimeframes order), so the last element is the highest level
   qualifiedCount: number;        // = convergedTimeframes.length
   bestScore: number;             // max score across qualified timeframes (larger = stronger)
   qualified: boolean;            // always true (only converged coins appear)
 };
 type ScanResponse = {
-  scanned: ScanRow[];            // only coins with >= 1 qualified timeframe; sorted by qualifiedCount desc, then bestScore desc
+  scanned: ScanRow[];            // only coins with >= 1 qualified timeframe; sorted by highest qualified level desc, then qualifiedCount desc, then bestScore desc
   qualifiedCount: number;        // = scanned.length
   params: ShrinkScanParams;      // echoes effective params, including resolved anchor
   scannedAt: string;             // ISO
@@ -92,11 +92,15 @@ score        = relativeCalm
 
 Duration is deliberately unscored: see "Score is the shrink depth alone (09/20)" under Design Decisions. Because nothing else enters the score, the UI default `minScore` **0.6** reads directly as an amplitude statement — the band's median per-bar amplitude must be at most 40% of the preceding stretch's — and raising the knob is a direct tightening of that ratio.
 
+**The knob is applied per timeframe** (10/11): the level's own offset (`TIMEFRAME_SCORE_OFFSET`) is subtracted before the comparison, so at the default 0.6 the effective bars are 0.60 (5m/15m/1H), 0.55 (4H) and 0.50 (1D). This is how "a contraction on a bigger level is a rarer setup" is expressed — deliberately WITHOUT adding a level term back into `score` (which would re-litigate 09/20).
+
 ### Calibration constants (`src/domain/coin-scan.ts`, all exported)
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `scanTimeframes` | `['5m','15m','1H','4H','1D']` | the 5 scanned timeframes |
+| `scanTimeframes` | `['5m','15m','1H','4H','1D']` | the 5 scanned timeframes; also defines the LEVEL order (index 0 = 5m … 4 = 1D) used for sorting |
+| `TIMEFRAME_SCORE_OFFSET` | `{ 5m:0, 15m:0, 1H:0, 4H:-0.05, 1D:-0.10 }` (typed `Partial<Record<ReviewTimeframe, number>>`) | per-level shift applied to the single `minScore` knob (10/11). Only the 5 scanned timeframes carry an entry; a lookup miss reads as 0 |
+| `timeframeMinScore` | `(tf, minScore) => Math.max(0, minScore + (TIMEFRAME_SCORE_OFFSET[tf] ?? 0))` | the effective per-timeframe threshold — the ONLY place the offset is applied |
 | `DEFAULT_CONVERGENCE_MIN_RUN` | 5 | min band length (K bars) for a convergence. Load-bearing since 09/20: with duration unscored the best band tends to be short, so this is the only floor keeping bands from being a couple of bars |
 | `DEFAULT_CONVERGENCE_RATIO` | 0.9 | shrink gate: band median vol must be `< this ×` preceding median vol (0.9 admits mild real shrinks; the score ranks them) |
 | `DEFAULT_CONVERGENCE_FLAT_RATIO` | 2.0 | band flatness: edge regression drift `<= this × runMed` (the band's own noise) |
@@ -130,10 +134,11 @@ scanShrink(params):
   })
   for coin in top:
     structures = scanTimeframes.map(tf => result ?? neutral { structure: null, position:0, score:0, touchCount:0, qualified:false })
-    converged = scanTimeframes.filter(tf => structures[tf].qualified && structures[tf].score >= minScore)
+    converged = scanTimeframes.filter(tf => structures[tf].qualified && structures[tf].score >= timeframeMinScore(tf, minScore))
     if converged.length == 0: continue        // 宁少勿滥
     rows.push({ ..., structures, convergedTimeframes, qualifiedCount, bestScore: max(converged.score) })
-  rows.sort(qualifiedCount desc, bestScore desc)   // score larger = stronger
+  highestLevel(row) = max(scanTimeframes.indexOf(tf) for tf in row.convergedTimeframes)  // converged is non-empty (the push is behind the `continue` above)
+  rows.sort(highestLevel desc, qualifiedCount desc, bestScore desc)   // score larger = stronger; equal keys keep the ticker (24h-volume) order (stable sort)
   if tickerSource.metadataAvailable?.() === false: response.metadataUnavailable = true
   return { scanned: rows, qualifiedCount: rows.length, params: { ...params, anchor }, scannedAt, ... }
 ```
@@ -144,8 +149,8 @@ scanShrink(params):
 - **Session-only series** (09/16): `isCandleInSession(marketClass, open, barMs)` keeps a candle only when part of its span falls inside a session window. Ungated classes short-circuit to `true`. The span test (not an "open time inside the window" test) is what makes the UTC-aligned **daily** candles work: Binance daily candles open at 20:00 ET, so an open-time test would drop every one of them, while a span test keeps exactly the days containing a session and drops weekends and holidays.
 - **Metadata degradation is visible** (09/16): `BinanceTickerSource.metadataAvailable()` reports whether the last snapshot attached classes; when it did not, the response carries `metadataUnavailable` and the UI states that closed-market filtering was off. A silent outage would judge closed equity contracts as crypto.
 - The forming bar is dropped **by time** (`timestamp + timeframeMs(timeframe) <= anchor`). Do not `slice(0, -1)` unconditionally — the candle cache may contain no forming bar.
-- **Concurrency**: 5 in-flight candle fetches (mapLimit-style). Binance request *starts* are paced by the SHARED `binanceRatePacer` (`src/server/http.ts`, `BINANCE_MIN_INTERVAL_MS=110`, jitter 15ms → ~9 req/s) inside `defaultBinanceFetchJson`, so the whole pipeline — one click = 300 forced-fresh klines requests (topN 60 × 5 timeframes) plus any concurrent market-heat fetch — shares a single rate budget well under Binance's IP auto-ban (418) threshold. 50ms/20 req/s (the old per-scan pacer) still tripped 418 occasionally; 110ms is the agreed conservative ceiling (09/07, user decision; scan latency ~15s → ~33s). OKX-path scans are not paced by this budget.
-- **Sorting** is done by the service: `qualifiedCount` descending (cross-timeframe consistency is a stronger signal), then `bestScore` descending.
+- **Concurrency**: 5 in-flight candle fetches (mapLimit-style). Binance request *starts* are paced by the SHARED `binanceRatePacer` (`src/server/http.ts`, `BINANCE_MIN_INTERVAL_MS=110`, jitter 15ms → ~9 req/s) inside `defaultBinanceFetchJson`, so the whole pipeline — one click = 750 forced-fresh klines requests (topN 150 × 5 timeframes) plus any concurrent market-heat fetch — shares a single rate budget well under Binance's IP auto-ban (418) threshold. 50ms/20 req/s (the old per-scan pacer) still tripped 418 occasionally; 110ms is the agreed conservative ceiling (09/07, user decision). 150 × 5 klines = 1500 weight per cold scan spread over ~82s, and the 110ms pacer caps the process at ~1090 weight/min (≈45% of the 2400 IP ceiling), so the raised topN adds LATENCY, not 418 risk (10/11). OKX-path scans are not paced by this budget.
+- **Sorting** is done by the service: `highestLevel` descending first (a contraction on a bigger level is rarer, so a lone 1D convergence outranks a lone 5m one — 10/11), then `qualifiedCount` descending (cross-timeframe consistency), then `bestScore` descending. `highestLevel` = the max `scanTimeframes` index over `convergedTimeframes`, derived at sort time — `ScanRow` carries no level field. Equal keys keep the original ticker (24h-volume) order (`Array#sort` is stable).
 
 ### Candle cache freshness
 
@@ -167,7 +172,7 @@ scanShrink(params):
 
 ## 5. Good/Base/Bad Cases
 
-- **Good**: a coin whose recent band is meaningfully quieter than the same-length stretch before it (e.g. 16 volatile bars then 16 flat calm bars → band/preceding ≈ 0.16, score ≈ 0.84). The score IS that complement, so the default `minScore 0.6` admits any band at ≤40% of its preceding stretch.
+- **Good**: a coin whose recent band is meaningfully quieter than the same-length stretch before it (e.g. 16 volatile bars then 16 flat calm bars → band/preceding ≈ 0.16, score ≈ 0.84). The score IS that complement, so the default `minScore 0.6` admits any band at ≤40% of its preceding stretch on 5m/15m/1H, ≤45% on 4H and ≤50% on 1D (the per-level offsets).
 - **Base**: a uniformly calm coin (band vol ≈ preceding vol → ratio ≈ 1) has no "越来越小" tension and is rejected. A band with no preceding stretch (too few bars) returns null. A price that has broken out of the band is rejected by containment — and containment must compare the newest bar against a range built WITHOUT it (`CONVERGENCE_CONFIRMED_TAIL`), otherwise the check is vacuous.
 - **Bad**: a rising/falling trend (whose relative amplitude shrinks as price climbs) is rejected by the band's flatness gate. A crash-then-pause band is detected as a strong shrink by the pure band-vs-preceding rule; its wide post-dump edges usually fail the flatness gate, but if a narrow post-crash band shows up it will qualify — an open calibration decision flagged in the task notes.
 
@@ -177,7 +182,8 @@ scanShrink(params):
   - `detectConvergence`: band quieter than preceding → convergence ≥0.7; uniformly calm → null; short mild band → <0.7; **`score` is the shrink depth alone, independent of band length** (09/20 — same amplitude ratio on a 5-bar vs an 11-bar band, fixtures carrying 5 vs 16 quiet bars after an identical lead, must score identically and must equal `1 - bandMedian/precedingMedian`; under the removed length bonus those two were 0.68 vs 0.89, so the test fails if a duration term returns); **breakout rejected only when the newest bar left the CONFIRMED range** (09/20 — a paired control/breakout fixture differing in one legal bar, whose comment records the flatness/shrink margins proving containment is the rejecting gate); **`position` read off the confirmed range, not the whole band** (09/20, `position = 0.6` where the whole-band range would give 0.5); too few bars → null; non-positive price → null; crash-then-pause detected (known consequence); mild shrink (band ≈ 60% of preceding) → <0.7; stricter `convergenceRatio` filters more. Fixtures must be LEGAL candles (`low <= open/close <= high`) — an illegal `close` is what let the old containment test reach a gate that real data never reaches.
   - `probeStructure`: forwards to the convergence detector; trending channel → null.
   - defaults: constants + `defaultStructureParams` fills all thresholds.
-- `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, sort `qualifiedCount desc → bestScore desc`, `minScore` gate (0.4 admits the weak fixture at 0.415, 0.7 filters it — the permissive value moved from 0.5 when the score became the shrink depth alone), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty. Plus the 09/16 blocks: session gating (closed equity dropped, kept out of topN, candles never requested; historical weekend anchor behaves the same), **session-only series** (identical candle fixture converges for crypto and yields nothing for an equity whose only bars sit in the closed overnight window), **per-class window** (gated class requests `limit` 200, ungated 100), and **`metadataUnavailable`** (present only when the ticker source reports no classes).
+  - `timeframeMinScore` (10/11): default 0.6 → 1D 0.50 / 4H 0.55 / 5m·15m·1H 0.60; `minScore = 0` degenerates to 0 for every timeframe; a negative shift is floored at 0; an unscanned timeframe (1m/1W/1M) reads as offset 0. The literal `TIMEFRAME_SCORE_OFFSET` is asserted so a typo in the table fails the build.
+- `tests/coin-scan-service.test.ts` — aggregation: Top-N + all 5 timeframes, **uniform window (limit 100 for every timeframe)**, forming bar dropped by time, `change24h` carried, non-converged coins hidden, **sort `highestLevel desc → qualifiedCount desc → bestScore desc`** (a lone-1D row ranks ahead of a lone-5m+15m+1H row — the case that fails if the sort reverts to `qualifiedCount` first; equal keys keep the ticker order), **per-timeframe threshold** (a band at 1D 0.51 / 4H 0.44 yields `convergedTimeframes = ['1D']` at minScore 0.6; a 0.576 band is the only fixture between the 4H bar 0.55 and the small-timeframe bar 0.60, so it isolates the 4H offset — it converges on 4H+1D only), `minScore` gate (0.4 admits the weak fixture at 0.415, 0.7 filters it — the permissive value moved from 0.5 when the score became the shrink depth alone), neutral zeros, past anchor echoed, one coin converging on multiple timeframes as a single row, insufficient history → empty. Plus the 09/16 blocks: session gating (closed equity dropped, kept out of topN, candles never requested; historical weekend anchor behaves the same), **session-only series** (identical candle fixture converges for crypto and yields nothing for an equity whose only bars sit in the closed overnight window), **per-class window** (gated class requests `limit` 200, ungated 100), and **`metadataUnavailable`** (present only when the ticker source reports no classes).
 - `tests/market-session.test.ts` — session math: the 04:00–20:00 US window incl. the DST switch, weekends, NYSE holidays/early closes, HK/KR/CN windows, ungated classes, the current-year coverage assertion, and `isCandleInSession` (edge candles that only partly overlap, the UTC-aligned daily candles that would all be dropped by an open-time test, and ungated classes that never lose a candle).
 - `tests/scan-pool.test.ts` — `isScannable`: crypto/commodity/US/KR in; HK/CN/pre-IPO out; unclassified in.
 - `tests/scan-scope.test.ts` — `ScanScope` narrowing, `scanScopeOf` (US/KR → equity, everything else incl. unclassified → crypto), and the per-scope `DEFAULT_SCAN_PARAMS`.
@@ -267,3 +273,15 @@ Binance USDT-M lists 191 TradFi perpetuals (US/HK/KR/CN equities + commodities +
 - **US window widened to 04:00–20:00 ET** — pre-market included. Measured: the 04:00 ET hour carries the highest non-regular volatility (MUUSDT median 5m range 0.222%, 3–4× the 17:00–19:00 ET trough), so the old 09:30–16:00 window was discarding the liveliest extended-session hour. The 20:00–04:00 overnight session stays closed.
 - **Session-only series added** — a closed stretch must not be *measurable*, not merely *unlisted*. Measured on 1H: dropping untraded candles removes ~96 windows whose "convergence" was an artifact of the closed stretch, at the cost of changing the verdict on others (the relative band-vs-preceding test reads differently once both sides hold only traded bars). On 5m the filter is a no-op (the window rarely spans a closure).
 - **Why a calendar and not a smarter source** (all verified): Yahoo's free chart API is the only free source covering US + Korean equities with pre/post bars, and it rate-limits after ~40 requests (429 for >15 min). Binance Stocks' real-session equity K-lines exist **only** as a live WebSocket feed (`{symbol}@kline_5m`, public) with no REST history and no 15m/4h; Binance equity perps are 24/5 in reality (only weekends collapse to 1–2% of peak volume, a US holiday keeps ~half), so "closed" cannot be derived from the data. Hong Kong / A-share / pre-IPO instruments are therefore out of the pool rather than guessed at.
+
+### Pool size and level weighting (10/11)
+
+Trigger: STRKUSDT, which started a run in early October after a quiet late-September. Replaying the scan around 2026-09-29 showed the coin was missed by THREE independent gates, not one, so all three were revisited (user decisions):
+
+1. **Pool was too small** — the scan pool is selected from the CURRENT 24h quote volume (the anchor only picks the candles), so at the time STRK sat at ~16.8M USDT, rank 169/740, while the top-60 cutoff that day was ~110M. `crypto.topN` was therefore raised **60 → 150**, reaching the mid-cap tier that only converges on 4H/1D. This adds LATENCY (~33s → ~82s cold, 1500 weight), not 418 risk — the shared 110ms pacer still caps the process at ~1090 weight/min.
+2. **The threshold ignored the level** — STRK's service-口径 1D score at 12:00Z was **0.5522**, short of the flat 0.6 bar, while its 4H was 0.4424. A single knob is kept (the UI still has exactly one 结构强度阈值 input) but it is now shifted per level by `TIMEFRAME_SCORE_OFFSET` (4H −0.05, 1D −0.10), so at 0.6 the 1D bar is 0.50 and STRK qualifies. `-0.10` rather than `-0.05` on purpose: 0.5522 against a 0.55 bar would be razor-thin.
+3. **Ordering buried the rare setup** — the sort was `qualifiedCount` first, which ranks "5m+15m+1H converged" above "1D converged". Order is now **highest qualified level** first, then count, then score.
+
+The key boundary kept intact: `score` itself is UNCHANGED — no level term was added back (that would re-litigate 09/20). The level is expressed through the THRESHOLD and the ORDER only, so the 强度分 column still reports the raw shrink depth.
+
+Expected, not a regression: the list gets longer (a 1D/4H-only convergence now qualifies) and the order changes for existing rows. Both are the point of the change.
