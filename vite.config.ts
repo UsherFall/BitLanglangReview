@@ -7,7 +7,14 @@ export default defineConfig(({ mode }) => {
   // switches the coin scan off its Bitget default (binance / okx / bitget);
   // a value already set in the shell environment wins over the file.
   const env = loadEnv(mode, process.cwd(), '');
-  process.env.MARKET_DATA_SOURCE ??= env.MARKET_DATA_SOURCE;
+  // Only copy a value the file actually defines. `process.env.X ??= undefined`
+  // would store the literal string "undefined" (Node stringifies assigned env
+  // values), which the server reads as a source name and silently falls back to
+  // Binance — defeating the Bitget default when `.env` has no MARKET_DATA_SOURCE
+  // or is absent.
+  if (process.env.MARKET_DATA_SOURCE === undefined && env.MARKET_DATA_SOURCE !== undefined) {
+    process.env.MARKET_DATA_SOURCE = env.MARKET_DATA_SOURCE;
+  }
   return {
     plugins: [tradingReviewApiPlugin(), react()],
     server: {
