@@ -420,3 +420,38 @@ Fixed Free Replay timeframe switching so new timeframe candle loading anchors on
 ### Next Steps
 
 - 浏览器手感验证未做(jsdom测不了真实坐标换算):线身平移是否连续、切关是否恢复自由、两面板与跨周期各过一眼
+
+
+## Session 21: 选品下限按源分级 + UI 选源
+<!-- trellis-session: v=2 fp=6fe05e6a6c854265 -->
+
+**Date**: 2026-10-12
+**Task**: 选品下限按源分级 + UI 选源
+**Branch**: `master`
+
+### Summary
+
+先修 MARKET_DATA_SOURCE 被写成字符串 "undefined" 的 bug(选品实际落到 Binance,换源"没成功");随后把选品下限改为 source×scope 分级并把行情源下沉为按请求可切换 + UI 选源。
+
+### Main Changes
+
+- vite.config.ts(env 赋值守卫); src/domain/scan-scope.ts(MarketDataSource/SCAN_PARAM_DEFAULTS/defaultScanParams); src/server/app-plugin.ts(按请求选源 + /api/scan/config); src/domain/coin-scan.ts(ShrinkScanParams.source 回显); src/ui/CoinScanPanel.tsx(行情源选择行); spec x3
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67afa7c` | fix(config): MARKET_DATA_SOURCE 不再被写成字符串 "undefined" |
+| `77716e8` | feat(coin-scan): 选品下限按源分级 + UI 选源 |
+
+### Testing
+
+- [OK] 相关 4 文件 57 passed; 全量 493 passed/66 files(默认 pool); tsc --noEmit 干净
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无,任务已归档。若要再调下限,改 SCAN_PARAM_DEFAULTS 即可

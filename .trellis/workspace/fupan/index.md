@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
-- **Last Active**: 2026-09-20
+- **Total Sessions**: 21
+- **Last Active**: 2026-10-12
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~422 | Active |
+| `journal-1.md` | ~457 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-10-12 | 选品下限按源分级 + UI 选源 | `67afa7c`, `77716e8` | `master` |
 | 20 | 2026-09-20 | 画线磁吸:吸附到K线OHLC | `f7f2748`, `351d9c6` | `master` |
 | 19 | 2026-09-20 | K线缓存只存已收盘bar(BTC 9-17断线修复) | `3e25fd5`, `c1f24e1` | `master` |
 | 18 | 2026-09-15 | Trellis 0.6.16 升级 + 币安权重可观测埋点,并定位测试环境全量失败 | `b752d6b`, `59518de` | `master` |
