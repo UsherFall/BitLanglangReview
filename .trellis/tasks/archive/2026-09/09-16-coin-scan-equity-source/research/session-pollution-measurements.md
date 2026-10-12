@@ -194,10 +194,8 @@ push2his.eastmoney.com/api/qt/stock/kline/get  → http=000（连接被重置）
 
 ## 9. 复现方式
 
-实验脚本（临时、未入库、`gitignored`）：`.scratch/session-pollution.probe.ts`、`.scratch/session-paired.probe.ts`、`.scratch/session-window.probe.ts`。它们跑真实网络并用仓库自己的 `detectConvergence`，因此**刻意不叫 `*.test.ts`**，避免被主测试套件收集（主套件基线：51 文件 / 308 测试）。执行：
-
-```bash
-npx vitest run --config .scratch/vitest.probes.config.ts
-```
-
-原始 K 线快照（Binance/Yahoo 响应）在同目录 `.scratch/*.json`。
+> **脚本已清理（09/16 收工）**：取证用的临时探针（`session-pollution/session-paired/session-window/session-gating-live/session-series-live.probe.ts` + `vitest.probes.config.ts`）与 26 MB 的原始响应快照（Binance/Yahoo K 线、`llms*.txt` 文档快照）都是**一次性、未入库**的，已在收工时删除 —— 上面各节的数字就是当时的测量结果，因此本文是这些结论的唯一记录。探针的做法：跑真实网络 + 仓库自己的 `detectConvergence`，文件名刻意不叫 `*.test.ts` 以免被主测试套件收集。
+>
+> 需要重新测量时的起点：`BinanceTickerSource` + `BinanceInstrumentMetadataSource` + `BinanceCandleSource`（后者需要一个真实的 `CandlestickStore`，或一个实现了 `save/listBefore/listAfter` 的内存桩）+ `CoinScanService.scanShrink({ scope, topN, minQuoteVolume24h, anchor })`；会话判定用 `isMarketOpen` / `isCandleInSession`。
+>
+> 会话序列的**常驻**验证不依赖探针：`tests/market-session.test.ts`（会话与会话序列的边界/节假日/日线用例）与 `tests/coin-scan-service.test.ts`（同一份数据下"加密收敛、休市窗口的美股不收敛"的配对用例）覆盖了核心行为。
