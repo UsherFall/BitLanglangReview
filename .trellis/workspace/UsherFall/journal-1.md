@@ -997,3 +997,38 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 - 选中的带系统性变短(带长中位 17→6 根),确认区间中位仅 5 根,position 会更抖;这是主动接受的代价
 - 榜单换血:35 条里消失 24 条(门槛口径变化,非回归),已在 spec Design Decisions 与本任务 research 明确记录
 - 下一个独立任务是'关键位置收敛':要定'关键位'是哪一类(前高低/水平位/均线),并且 100 根窗口对关键位远远不够,需要拉更长历史;注意 8/13 曾因'用几何给形态贴标签'整体删掉 swing 检测,做'位置'时须守住'客观价位当判断基准'的边界
+
+
+## Session 22: 选品扫描迁移 Bitget 行情源:源实现/默认切换/isRWA 两类分类/热度随源
+<!-- trellis-session: v=2 fp=ab3c93f5d2b208d5 -->
+
+**Date**: 2026-10-12
+**Task**: 选品扫描迁移 Bitget 行情源:源实现/默认切换/isRWA 两类分类/热度随源
+**Branch**: `master`
+
+### Summary
+
+选品模块从 Binance 默认迁移到 Bitget。用户动机: 币安路径在国内网络频繁 429/418。isRWA 两类分类是用户明确决策(不建商品/地区细分符号表),黄金等 24/7 产品被美股时段门控为用户确认接受的代价。教训: TaskStop 只杀 npm 外壳不杀 node 子进程,7 个 vite 孤儿占 5173-5184,已按命令行核对全部强杀;以后起 dev server 直接用 node vite/bin/vite.js 或按进程树杀。
+
+### Main Changes
+
+- 新增 BitgetTickerSource/BitgetCandleSource/defaultBitgetMarketFetchJson(50ms pacer+gate);MARKET_DATA_SOURCE 加 bitget 且默认值 binance→bitget,vite.config loadEnv 读 .env;isRWA 两类分类(NO→CRYPTO/YES→US_EQUITY, contracts 端点 6h TTL 降级不抛错);MarketHeatService 随源切换;candle store 键 bitget: 前缀隔离;超时自描述报错;稳定币集合抽域
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `abe34de` | feat: 选品扫描支持 Bitget 行情源(MARKET_DATA_SOURCE=bitget) |
+| `5d10576` | feat(coin-scan): 选品扫描默认源改为 Bitget,.env 提供配置入口 |
+| `220c703` | feat(coin-scan): Bitget isRwa 标的分类 + 市场热度随源切换 |
+| `ab68ba3` | chore(trellis): 归档 Bitget 标的分类与热度切源 任务 |
+| `8c61759` | chore(trellis): 归档 选品扫描切换 Bitget 行情源 任务 |
+| `d62d73b` | docs(research): 09-16 会话污染测量文档补记探针脚本已清理 |
+
+### Testing
+
+- [OK] 483 测试 + tsc 全绿;集成实测: 加密扫描零 RWA、股票 scope 锚定美股时段 10 行、闭市全 skipped、market-heat Top80 纯币、binance 模式无回归
+
+### Status
+
+[OK] **Completed**
