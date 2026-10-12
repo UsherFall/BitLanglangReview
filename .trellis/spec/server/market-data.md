@@ -9,10 +9,10 @@
 - `TickerSource.metadataAvailable?(): boolean` — optional: whether the last snapshot could attach classes. `false` means session gating was effectively off for that snapshot.
 - `CandleRequest { instrument, timeframe, anchor, direction: 'earlier' | 'later', limit }` and `CandleSource.getCandlesticks(request): Promise<Candlestick[]>` — same contract as `CandlestickService`.
 
-`app-plugin.ts` wires the selected source via `marketDataSource` option (default `'binance'`) with `process.env.MARKET_DATA_SOURCE` as fallback:
+`app-plugin.ts` wires the selected source via `marketDataSource` option, then `process.env.MARKET_DATA_SOURCE`, then the `'bitget'` default. `vite.config.ts` loads `.env` (via `loadEnv`) into `process.env.MARKET_DATA_SOURCE` when the shell has none, so `.env` is the local config file for the switch — precedence is **shell env > `.env` > `'bitget'`** (10/12; the default flipped from Binance to Bitget because the scan's China-network Binance path kept hitting 429/418, while the equity scope still needs `MARKET_DATA_SOURCE=binance` — see `coin-scan.md`):
 
 ```ts
-const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
+const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'bitget';
 const bitgetTickerSource = new BitgetTickerSource();
 const bitgetCandleSource = new BitgetCandleSource(candleStore);
 const tickerSource =

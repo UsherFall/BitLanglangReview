@@ -54,8 +54,12 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // would have empty intraday charts. The source parameter decides which
       // CandleSource a request hits.
       const candleService = new CandlestickService(candleStore);
-      // The coin scan uses the switchable market-data source.
-      const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'binance';
+      // The coin scan uses the switchable market-data source: plugin option,
+      // then process.env (vite.config injects MARKET_DATA_SOURCE from `.env`
+      // when the shell has none), then Bitget. The equity scope needs the
+      // Binance source — only Binance carries instrument-class metadata — so
+      // `.env` is where a Binance/OKX switch lives.
+      const marketDataSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE ?? 'bitget';
       // Market heat (市场热度) always runs on Binance: its pool is defined as
       // Binance USDT-M top-N and only Binance metadata can session-gate TradFi
       // contracts. Binance instances are shared with the scan when it is in
