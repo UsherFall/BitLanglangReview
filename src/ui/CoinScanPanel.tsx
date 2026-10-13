@@ -317,6 +317,11 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
             </p>
           )}
+          {result.failedInstruments && result.failedInstruments.length > 0 && (
+            <p className="coin-scan-skip-hint" title={result.failedInstruments.join(', ')}>
+              已跳过 {result.failedInstruments.length} 个取数失败标的:{formatSkippedNames(result.failedInstruments)}
+            </p>
+          )}
           {result.metadataUnavailable && (
             <p className="coin-scan-skip-hint" title="币安 exchangeInfo 元数据不可用，本次未按交易时段过滤">
               休市过滤未生效:合约类别元数据拉取失败，本次结果可能包含休市标的

@@ -57,11 +57,26 @@ function scanWindowFor(marketClass: MarketClass | undefined): number {
   return marketClass !== undefined && marketSession(marketClass) !== null ? GATED_SCAN_WINDOW : SCAN_WINDOW;
 }
 
+/**
+ * Whether a failed candle fetch must abort the WHOLE scan instead of being
+ * isolated to its own instrument (10/13).
+ *
+ * Read off the gate, not the error message: a 418 means the IP is banned, and
+ * firing more requests only prolongs the ban (`waitOutGate`'s rationale in
+ * `http.ts`), so the scan stops right there. Every other failure — timeout,
+ * network error, a 429 whose retries are exhausted, or an exchange business
+ * error — is the instrument's own problem and never justifies dropping the
+ * results of the hundreds of instruments that did fetch fine.
+ */
+function isIpBanned(gate: Pick<RateGate, 'reason'> | undefined): boolean {
+  return gate?.reason() === '418';
+}
+
 export class CoinScanService {
   constructor(
     private readonly tickerSource: TickerSource,
     private readonly candleSource: CandleSource,
-    private readonly rateLimitWarnings: Pick<RateGate, 'takeWarnings'> = binanceRateGate,
+    private readonly rateLimitGate: Pick<RateGate, 'takeWarnings' | 'reason'> = binanceRateGate,
   ) {}
 
   /**
@@ -82,7 +97,7 @@ export class CoinScanService {
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
     // Discard stale rate-limit warnings (e.g. left by an earlier scan) so only
     // warnings raised DURING this scan are reported.
-    this.rateLimitWarnings.takeWarnings();
+    this.rateLimitGate.takeWarnings();
     const tickers = await this.tickerSource.listTickers();
     const anchor = params.anchor ?? Date.now();
     // Sub-module of 选品: `crypto` (always open) or `equity` (session-gated).
@@ -117,13 +132,29 @@ export class CoinScanService {
     const refresh = params.anchor === undefined;
 
     // ---- Stage 1: the coarse timeframe for the WHOLE candidate pool ----
-    const coarseFetches = await mapLimit(candidates, SCAN_CONCURRENCY, async (ticker) => ({
-      ticker,
-      completed: await this.completedCandles(ticker, COARSE_TIMEFRAME, anchor, refresh),
-    }));
+    // Per-instrument failures are isolated here (10/13): one timed-out klines
+    // request used to reject `mapLimit`'s `Promise.all` and take the whole scan
+    // down with it, discarding every result fetched so far. A failed candidate
+    // now reports no candles, which is the SAME shape a too-short history has —
+    // `coarseStructure` reads null, the instrument leaves the percentile base
+    // and can never pass — so no new screen branch is introduced. It is a silent
+    // omission by nature, which is what `failedInstruments` in the response is
+    // there to undo.
+    const failedInstruments = new Set<string>();
+    const coarseFetches = await mapLimit(candidates, SCAN_CONCURRENCY, async (ticker) => {
+      try {
+        return { ticker, completed: await this.completedCandles(ticker, COARSE_TIMEFRAME, anchor, refresh) };
+      } catch (error) {
+        if (isIpBanned(this.rateLimitGate)) throw error;
+        failedInstruments.add(ticker.instrument);
+        return { ticker, completed: null };
+      }
+    });
     // The cuts come from THIS scan's own pool — never from a frozen absolute
     // W/D pair, whose pool rate decays as the market moves (see `coarseScreen`).
-    const measures = coarseFetches.map(({ completed }) => coarseStructure(completed, DEFAULT_COARSE_PARAMS));
+    const measures = coarseFetches.map(({ completed }) =>
+      completed === null ? null : coarseStructure(completed, DEFAULT_COARSE_PARAMS),
+    );
     const { screen, passes } = coarseScreen(measures, DEFAULT_COARSE_PARAMS);
 
     // ---- Stage 2: the other four timeframes, only for the survivors ----
@@ -131,14 +162,31 @@ export class CoinScanService {
       .filter((_, index) => passes[index])
       .flatMap(({ ticker }) => REMAINING_TIMEFRAMES.map((timeframe) => ({ ticker, timeframe })));
     const results = await mapLimit(tasks, SCAN_CONCURRENCY, async ({ ticker, timeframe }) => {
-      const completed = await this.completedCandles(ticker, timeframe, anchor, refresh);
-      return { ticker, timeframe, structure: probeStructure(completed, structureParams) };
+      try {
+        const completed = await this.completedCandles(ticker, timeframe, anchor, refresh);
+        return { ticker, timeframe, structure: probeStructure(completed, structureParams) };
+      } catch (error) {
+        if (isIpBanned(this.rateLimitGate)) throw error;
+        failedInstruments.add(ticker.instrument);
+        // Dropped rather than filled with `neutralStructure()`: "no convergence
+        // here" is a VERDICT about complete data, so using it for a fetch that
+        // never returned would let `convergedTimeframes` / `qualifiedCount` /
+        // `bestScore` and the row order run on a half-empty input — a silent
+        // wrong answer instead of a reported omission. `null` marks the row for
+        // removal below.
+        return { ticker, timeframe, structure: null };
+      }
     });
-    const byCoinAndTimeframe = new Map(results.map((r) => [`${r.ticker.instrument}:${r.timeframe}`, r.structure]));
+    const byCoinAndTimeframe = new Map<string, StructureResult>();
+    for (const { ticker, timeframe, structure } of results) {
+      if (structure !== null) byCoinAndTimeframe.set(`${ticker.instrument}:${timeframe}`, structure);
+    }
 
     const scanned: ScanRow[] = [];
     for (const [index, { ticker, completed }] of coarseFetches.entries()) {
-      if (!passes[index]) continue;
+      // A survivor whose OTHER timeframes failed loses its row entirely — the
+      // row's own convergence columns cannot be reported on partial data.
+      if (!passes[index] || completed === null || failedInstruments.has(ticker.instrument)) continue;
       const structures = {} as Record<ReviewTimeframe, StructureResult>;
       for (const timeframe of scanTimeframes) {
         if (timeframe === COARSE_TIMEFRAME) {
@@ -216,9 +264,13 @@ export class CoinScanService {
     if (this.tickerSource.metadataAvailable?.() === false) response.metadataUnavailable = true;
     // Surface any rate-limit backoffs the scan hit (Binance 429) — a scan can
     // still succeed while the pipeline had to pause for the weight window.
-    const warnings = this.rateLimitWarnings.takeWarnings();
+    const warnings = this.rateLimitGate.takeWarnings();
     if (warnings.length > 0) response.warnings = warnings;
     if (skippedInstruments.length > 0) response.skippedInstruments = skippedInstruments;
+    // Instruments whose candles could not be fetched. A non-empty list does NOT
+    // make the scan a failure — the rest of the pool is real — but it must be
+    // visible, because these are valid candidates missing from the result.
+    if (failedInstruments.size > 0) response.failedInstruments = [...failedInstruments];
     return response;
   }
 

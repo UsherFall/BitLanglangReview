@@ -89,6 +89,31 @@ describe('CoinScanResults', () => {
     expect(hint?.textContent).toContain(`${scanResponse().skippedInstruments?.length}`);
   });
 
+  it('reports fetch-failed instruments as their own hint, next to the closed-market one', () => {
+    const { container } = renderResults({
+      result: { ...scanResponse(), failedInstruments: ['DDDUSDT', 'EEEUSDT'] },
+    });
+
+    // Two hints, in render order: closed markets first, then fetch failures —
+    // the two channels must not be folded into one line, because they ask for
+    // different user reactions (re-scan later vs. look at the instrument).
+    const hints = Array.from(container.querySelectorAll('.coin-scan-skip-hint'));
+    expect(hints).toHaveLength(2);
+    expect(hints[0]?.textContent).toContain('BBBUSDT');
+    expect(hints[1]?.closest('.detail-header')).not.toBeNull();
+    expect(hints[1]?.textContent).toContain('DDDUSDT');
+    expect(hints[1]?.textContent).toContain('EEEUSDT');
+    expect(hints[1]?.textContent).toContain('2');
+    // Folding the hint into the header still leaves two results-grid children.
+    expect(container.childElementCount).toBe(2);
+  });
+
+  it('renders no fetch-failure hint on a clean scan', () => {
+    const { container } = renderResults();
+
+    expect(container.querySelectorAll('.coin-scan-skip-hint')).toHaveLength(1);
+  });
+
   it('leaves only the header and the table as results-grid children when instruments were skipped', () => {
     const { container } = renderResults();
 

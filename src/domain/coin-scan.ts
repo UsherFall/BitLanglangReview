@@ -483,6 +483,19 @@ export type ScanResponse = {
    */
   skippedInstruments?: string[];
   /**
+   * Instruments DROPPED because fetching their candles failed (timeout, network
+   * error, or an exchange business error). A single failed fetch is isolated to
+   * its own instrument instead of failing the whole scan: stage 1 (1D) failures
+   * lose the coarse measure like a short history, and a stage-2 failure drops
+   * the row outright. Present only when at least one instrument failed.
+   *
+   * A third, separate channel from the two above: `warnings` reports rate-limit
+   * backoffs, `skippedInstruments` reports closed markets, and this reports
+   * data-fetch failures. Never folded together — each leads to a different
+   * user reaction (wait / re-scan later / look at the instrument).
+   */
+  failedInstruments?: string[];
+  /**
    * True when the ticker snapshot carried no instrument classes at all, so
    * session gating was effectively OFF for this scan. Present only when that
    * happened — it is the one failure mode that silently lets closed-market

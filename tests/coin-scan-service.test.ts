@@ -176,6 +176,25 @@ function serviceFrom(source: Source): CoinScanService {
   return new CoinScanService({ listTickers: source.listTickers }, { getCandlesticks: source.getCandlesticks });
 }
 
+/**
+ * Wraps a source so the matching (instrument, timeframe) fetches REJECT, leaving
+ * every other request on the original implementation. Used to prove a single
+ * failed klines request is isolated to its own instrument instead of rejecting
+ * `mapLimit`'s `Promise.all` and taking the whole scan with it.
+ */
+function sourceFailingOn(source: Source, fails: (instrument: string, timeframe: ReviewTimeframe) => boolean, error: Error): Source {
+  const original = source.getCandlesticks.getMockImplementation();
+  if (!original) throw new Error('source has no implementation to wrap');
+  source.getCandlesticks.mockImplementation(async (request: CandleRequest) => {
+    if (fails(request.instrument, request.timeframe)) throw error;
+    return original(request);
+  });
+  return source;
+}
+
+/** The Bitget error string a stalled request produces (12s timeout, see `http.ts`). */
+const TIMEOUT_ERROR = new Error('Bitget request failed: request timed out after 12s');
+
 // ---- The 20-name US-equity pool (the session-gated side) ------------------
 const TSLA = 'TSLAUSDT';
 const EQUITY_POOL = [TSLA, ...Array.from({ length: POOL_SIZE - 1 }, (_, i) => `EQ${String(i).padStart(2, '0')}USDT`)];
@@ -562,7 +581,7 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     const service = new CoinScanService(
       { listTickers: source.listTickers },
       { getCandlesticks: source.getCandlesticks },
-      { takeWarnings: () => warnings.splice(0) },
+      { takeWarnings: () => warnings.splice(0), reason: () => null },
     );
     // A warning left over from an earlier scan is dropped...
     warnings.push('stale');
@@ -572,7 +591,78 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     const result = await resultPromise;
     expect(result.warnings).toEqual(['币安限频(HTTP 429)，已自动退避 10 秒']);
   });
+
+  // -------------------------------------------------------------------------
+  // Fetch-failure isolation (10/13).
+  //
+  // One timed-out klines request used to reject `mapLimit`'s `Promise.all`,
+  // which threw out of `scanShrink` and surfaced as a 502 — the UI then showed
+  // only "扫描失败" and every already-scanned row was lost. The three failures
+  // below are asserted separately because they have DIFFERENT answers: a stage-1
+  // failure is absorbed by the existing "no measure" path, a stage-2 failure
+  // drops the row outright, and an IP ban must still stop everything.
+  // -------------------------------------------------------------------------
+
+  it('isolates a stage-1 fetch failure to its own instrument and keeps the rest of the scan intact', async () => {
+    const shapes = { [BTC]: { '1D': 'flat' }, [ETH]: { '1D': 'flat' }, [SOL]: { '1D': 'flat' } } as const;
+    const control = await serviceFrom(poolSource(shapes)).scanShrink(params);
+    // Sanity: the three subjects are the screen's survivors, so dropping one of
+    // them is observable — and a clean run carries NO failure list at all.
+    expect(control.scanned.map((row) => row.instrument)).toEqual([BTC, ETH, SOL]);
+    expect(control.failedInstruments).toBeUndefined();
+
+    const source = sourceFailingOn(poolSource(shapes), (instrument) => instrument === BTC, TIMEOUT_ERROR);
+    const result = await serviceFrom(source).scanShrink(params);
+
+    // The scan still RESOLVES: the other survivors and their structures are the
+    // control's rows minus BTC, not an empty list.
+    expect(result.scanned.map((row) => row.instrument)).toEqual([ETH, SOL]);
+    expect(result.scanned[0]?.structures).toEqual(control.scanned[1]?.structures);
+    expect(result.coarse?.candidates).toBe(POOL_SIZE);
+    // An unmeasurable candidate leaves the percentile base, exactly like a short
+    // history — the failed fetch is not a third kind of pool member.
+    expect(result.coarse?.poolSize).toBe(POOL_SIZE - 1);
+    expect(result.failedInstruments).toEqual([BTC]);
+  });
+
+  it('drops the whole row when a stage-2 fetch fails, rather than judging it on partial data', async () => {
+    const shapes = {
+      [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'flat' },
+      [ETH]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'flat' },
+    } as const;
+    const control = await serviceFrom(poolSource(shapes)).scanShrink(params);
+    expect(control.scanned.map((row) => row.instrument)).toEqual([BTC, ETH]);
+    // BTC's 4H is a real convergence, so any "keep the row on a neutral 4H"
+    // implementation would visibly change its score/count instead of dropping it.
+    expect(control.scanned[0]?.structures['4H'].structure).toBe('convergence');
+
+    const source = sourceFailingOn(
+      poolSource(shapes),
+      (instrument, timeframe) => instrument === BTC && timeframe === '4H',
+      TIMEOUT_ERROR,
+    );
+    const result = await serviceFrom(source).scanShrink(params);
+
+    expect(result.scanned.map((row) => row.instrument)).toEqual([ETH]);
+    expect(result.scanned[0]?.structures['4H']).toEqual(control.scanned[1]?.structures['4H']);
+    expect(result.failedInstruments).toEqual([BTC]);
+  });
+
+  it('aborts the whole scan when the IP was banned (HTTP 418), instead of skipping the instrument', async () => {
+    // Every request fails, so a per-instrument policy alone would turn a ban
+    // into "scan succeeded with an empty result" — the one outcome that must
+    // NOT happen, because firing more requests prolongs the ban.
+    const source = sourceFailingOn(poolSource({ [BTC]: { '1D': 'flat' } }), () => true, new Error('HTTP 418 (IP auto-banned)'));
+    const service = new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      { takeWarnings: () => [], reason: () => '418' },
+    );
+
+    await expect(service.scanShrink(params)).rejects.toThrow('HTTP 418');
+  });
 });
+
 
 describe('CoinScanService (session gating: skip closed traditional markets)', () => {
   it('drops closed US equities before any candle request and never lets them take a slot', async () => {
