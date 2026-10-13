@@ -54,6 +54,15 @@ const uptrendBars: ReadonlyArray<Bar> = Array.from({ length: 40 }, (_, i) => [10
 // but a very narrow range with zero drift — the coarse screen's "keeps it" tier.
 const flatBars: ReadonlyArray<Bar> = Array.from({ length: 40 }, () => [99, 101] as const);
 
+// 趴在绝对底部: a 220 → 100 dump whose last 24 bars are the tightest box in the
+// pool (23-day range 2%, zero drift) while the newest close (101) sits ~0.8% above
+// the series' lowest low. The percentile gates admit it; the ABSOLUTE position
+// floor is the only thing that can reject it.
+const bottomBars: ReadonlyArray<Bar> = [
+  ...Array.from({ length: 16 }, () => [200, 220] as const),
+  ...Array.from({ length: 24 }, () => [100, 102] as const),
+];
+
 /**
  * The coarse screen's "rejected" tier, and the pool's majority: a rising channel
  * that is far wider AND drifts far more than any subject shape below. Every
@@ -63,7 +72,7 @@ const flatBars: ReadonlyArray<Bar> = Array.from({ length: 40 }, () => [99, 101] 
  */
 const trendBars: ReadonlyArray<Bar> = Array.from({ length: 40 }, (_, i) => [100 + i * 3, 106 + i * 3] as const);
 
-type Shape = 'strong' | 'weak' | 'mild' | 'mid' | 'shallow' | 'flat' | 'uptrend' | 'trend' | 'none';
+type Shape = 'strong' | 'weak' | 'mild' | 'mid' | 'shallow' | 'flat' | 'bottom' | 'uptrend' | 'trend' | 'none';
 
 /** Bars for one shape. */
 function barsFor(shape: Shape): ReadonlyArray<Bar> | null {
@@ -80,6 +89,8 @@ function barsFor(shape: Shape): ReadonlyArray<Bar> | null {
       return shallowBars;
     case 'flat':
       return flatBars;
+    case 'bottom':
+      return bottomBars;
     case 'uptrend':
       return uptrendBars;
     case 'trend':
@@ -320,11 +331,31 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     expect(row.coarse?.pass).toBe(true);
     expect(row.coarse?.rangePct).toBeCloseTo(0.02, 10);
     expect(row.coarse?.netPct).toBeCloseTo(0, 10);
+    // The position the absolute floor judges, echoed on the row (mid-series here).
+    expect(row.coarse?.posRange).toBeCloseTo(0.5, 10);
     expect(row.convergedTimeframes).toEqual([]);
     expect(row.qualifiedCount).toBe(0);
     expect(row.bestScore).toBe(0);
     expect(row.qualified).toBe(true);
     expect(requestedTimeframes(source, BTC)).toEqual([COARSE_TIMEFRAME]);
+  });
+
+  it('drops a coin sitting on its series absolute bottom — even when a small timeframe converges', async () => {
+    const source = poolSource({
+      // BTC's 23-day window is the TIGHTEST box in the pool (2% range, zero drift),
+      // so both pool-relative cuts admit it — but its 40-bar series dumped from 220
+      // to 100 and its newest close is 101, i.e. it hugs the absolute bottom. Only
+      // the ABSOLUTE position floor can reject it, and its converging 5m must not
+      // buy it a row (that 5m is never requested either).
+      [BTC]: { '5m': 'strong', '1D': 'bottom' },
+      [ETH]: { '1D': 'flat' },
+    });
+    const result = await serviceFrom(source).scanShrink(params);
+
+    expect(result.scanned.map((row) => row.instrument)).toEqual([ETH]);
+    // The rejected coin paid exactly ONE request: the coarse timeframe.
+    expect(requestedTimeframes(source, BTC)).toEqual([COARSE_TIMEFRAME]);
+    expect(source.getCandlesticks).toHaveBeenCalledTimes(POOL_SIZE + 1 * (scanTimeframes.length - 1));
   });
 
   it('sorts by highest qualified level, then qualifiedCount desc, then bestScore desc', async () => {

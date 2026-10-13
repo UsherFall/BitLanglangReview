@@ -7,6 +7,7 @@ import {
 } from '../domain/coin-scan';
 import type { MarketHeatResult } from '../domain/market-heat';
 import {
+  COARSE_POS_RANGE_FLOOR,
   DEFAULT_MARKET_DATA_SOURCE,
   MARKET_DATA_SOURCES,
   SCAN_SCOPES,
@@ -253,7 +254,7 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
           ? '范围 = 美股 + 韩股:休市时段整体剔除,序列只含真实交易时段 K 线(盘前 04:00 – 盘后 20:00 ET)。'
           : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
         {method === 'shrink'
-          ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中),只对通过者再取 5m/15m/1H/4H,每币一行。结构强度阈值调高 = 宁少勿滥,大级别(4H/1D)自动更宽容;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
+          ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中,再排除趴在序列绝对底部的品种),只对通过者再取 5m/15m/1H/4H,每币一行。结构强度阈值调高 = 宁少勿滥,大级别(4H/1D)自动更宽容;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
           : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
       </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
@@ -456,16 +457,19 @@ function formatConvergedStructures(row: ScanRow): string {
 }
 
 // 结构 column: the 1D coarse screen's own measures — 盘得够久(窗口天数)/ 收住了(区间)/
-// 不在趋势中(净漂移). Every row in the table passed it, so this is what put the row
-// here; the thresholds behind it are pool-relative and printed (rounded) in the title.
+// 不在趋势中(净漂移)/ 位置(现价在全序列中的位置, 0 = 绝对底部). Every row in the
+// table passed the screen, so this is what put the row here; the pool-relative
+// cuts and the absolute position floor behind it are printed in the title.
 function formatCoarse(row: ScanRow, windowDays: number | undefined): ReactNode {
   const coarse = row.coarse;
   if (!coarse) return '—';
   const window = windowDays === undefined ? '' : `${windowDays}天 `;
-  const title = `日线粗筛(池内分位): 区间 ≤ ${formatPercent(coarse.rangePctThreshold)} 且 净漂移 ≤ ${formatPercent(coarse.netPctThreshold)}(本次池内重算)`;
+  const title =
+    `日线粗筛: 区间 ≤ ${formatPercent(coarse.rangePctThreshold)} 且 净漂移 ≤ ${formatPercent(coarse.netPctThreshold)}(本次池内分位重算)` +
+    ` 且 全序列位置 ≥ ${formatPercent(COARSE_POS_RANGE_FLOOR)}(绝对下限)`;
   return (
     <span className="coin-scan-coarse" title={title}>
-      {`${window}区间${formatPercent(coarse.rangePct)} 净${formatPercent(coarse.netPct)}`}
+      {`${window}区间${formatPercent(coarse.rangePct)} 净${formatPercent(coarse.netPct)} 位${formatPercent(coarse.posRange)}`}
     </span>
   );
 }

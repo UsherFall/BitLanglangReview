@@ -70,11 +70,14 @@ export class CoinScanService {
    * Stage 1 fetches the coarse timeframe (1D) for EVERY candidate — one klines
    * request each — and screens the pool on its own percentiles: keep the coins
    * whose 23-day range and net drift both sit in the pool's lowest `qR`/`qN`
-   * fraction. Stage 2 then fetches the remaining four timeframes ONLY for the
-   * survivors, which is what makes the expanded pool affordable (a rejected coin
-   * costs exactly one request). Rows are the survivors, ordered by their highest
-   * converged level, then `qualifiedCount`, then `bestScore`; the per-timeframe
-   * convergence verdicts are reported alongside but no longer decide inclusion.
+   * fraction AND whose position inside their whole 1D series is not at the
+   * absolute bottom (`COARSE_POS_RANGE_FLOOR` — an absolute rail, unlike the two
+   * pool-relative cuts). Stage 2 then fetches the remaining four timeframes ONLY
+   * for the survivors, which is what makes the expanded pool affordable (a
+   * rejected coin costs exactly one request). Rows are the survivors, ordered by
+   * their highest converged level, then `qualifiedCount`, then `bestScore`; the
+   * per-timeframe convergence verdicts are reported alongside but no longer decide
+   * inclusion.
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
     // Discard stale rate-limit warnings (e.g. left by an earlier scan) so only
@@ -166,6 +169,7 @@ export class CoinScanService {
           pass: true,
           rangePct: measure.rangePct,
           netPct: measure.netPct,
+          posRange: measure.posRange,
           rangePctThreshold: screen.rangePctThreshold,
           netPctThreshold: screen.netPctThreshold,
         },

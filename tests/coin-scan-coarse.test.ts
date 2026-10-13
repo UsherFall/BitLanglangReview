@@ -9,7 +9,12 @@ import {
   detectConvergence,
   scanTimeframes,
 } from '../src/domain/coin-scan';
-import { COARSE_SCREEN_PCT_NET, COARSE_SCREEN_PCT_RANGE, COARSE_SCREEN_WINDOW_DAYS } from '../src/domain/scan-scope';
+import {
+  COARSE_POS_RANGE_FLOOR,
+  COARSE_SCREEN_PCT_NET,
+  COARSE_SCREEN_PCT_RANGE,
+  COARSE_SCREEN_WINDOW_DAYS,
+} from '../src/domain/scan-scope';
 
 /** Builds 1D candles from `[low, high]` bars, close = midpoint, ascending timestamps. */
 function dailyBars(bars: ReadonlyArray<readonly [number, number]>): Candlestick[] {
@@ -72,6 +77,49 @@ describe('coarseStructure (1D 粗筛的度量)', () => {
     expect(falling!.rangePct).toBeGreaterThan(rising!.rangePct);
   });
 
+  it('reads posRange off the WHOLE series, not the 23-day window', () => {
+    // 10 bottom bars (close 11) then 23 flat bars (close 100): the window measures
+    // a 2% box while the coin actually sits at the very TOP of its 33-bar series.
+    const candles = dailyBars([
+      ...Array.from({ length: 10 }, () => [10, 12] as const),
+      ...Array.from({ length: 23 }, () => flatBar),
+    ]);
+    const measure = coarseStructure(candles)!;
+
+    expect(measure.rangePct).toBeCloseTo(0.02, 10); // the window only
+    // (100 − 10) / (101 − 10) — the window's own range would read 0.5.
+    expect(measure.posRange).toBeCloseTo(90 / 91, 10);
+    expect(measure.posRange).not.toBeCloseTo(0.5, 2);
+  });
+
+  it('puts a coin on the absolute bottom near 0, and the same coin mid-window at 0.5', () => {
+    // A dump that ends on the series' lowest low: 22 bars at [50, 100] (close 75),
+    // then one bar at the bottom. `posRange` ≈ 0.03 for the 51.5 close.
+    const dumped = dailyBars([
+      ...Array.from({ length: 22 }, () => [50, 100] as const),
+      [51, 52] as const,
+    ]);
+    expect(coarseStructure(dumped)!.posRange).toBeCloseTo(0.03, 10);
+    // One cent lower = below the floor (see the screen test below).
+    const lower = dailyBars([...Array.from({ length: 22 }, () => [50, 100] as const), [50.98, 52] as const]);
+    expect(coarseStructure(lower)!.posRange).toBeLessThan(COARSE_POS_RANGE_FLOOR);
+  });
+
+  it('degenerates a zero-height series to posRange 0.5 instead of dividing by zero', () => {
+    // Every bar prints the same [100, 100]: `maxHigh === minLow`, so "position
+    // inside the series" has no meaning. 0.5 is the same reading
+    // `StructureResult.position` uses, and it PASSES the floor on purpose — the
+    // flattest possible box is not a bottom-hugger.
+    const degenerate = dailyBars(Array.from({ length: 30 }, () => [100, 100] as const));
+    const measure = coarseStructure(degenerate)!;
+
+    expect(measure.posRange).toBe(0.5);
+    expect(measure.rangePct).toBe(0);
+    expect(measure.netPct).toBe(0);
+    expect(coarseScreen([measure]).passes).toEqual([false]); // too small a pool: the percentile cut is 0
+    expect(coarseScreen([measure], { pctRange: 1, pctNet: 1 }).passes).toEqual([true]);
+  });
+
   it('returns null for a window it cannot measure at all (次新币 / bad prices)', () => {
     // A coin listed for 10 days: fewer bars than T. It has no place in the
     // percentile base and can never pass the screen.
@@ -92,9 +140,13 @@ describe('coarseStructure (1D 粗筛的度量)', () => {
   });
 });
 
-/** `n` measures built from one `range`/`net` pair, so the pool shape is explicit. */
-function measures(pairs: ReadonlyArray<readonly [number, number]>) {
-  return pairs.map(([rangePct, netPct]) => ({ rangePct, netPct }));
+/**
+ * Measures built from `[rangePct, netPct]` pairs — plus an explicit `posRange`,
+ * defaulting to 0.5 (mid-series) so a fixture that is not ABOUT the position
+ * floor is never rejected by it.
+ */
+function measures(pairs: ReadonlyArray<readonly [number, number]>, posRange = 0.5) {
+  return pairs.map(([rangePct, netPct]) => ({ rangePct, netPct, posRange }));
 }
 
 describe('coarseScreen (池内相对分位)', () => {
@@ -172,6 +224,28 @@ describe('coarseScreen (池内相对分位)', () => {
     expect(passes.slice(1, 6)).toEqual([true, true, true, true, true]);
   });
 
+  it('applies the ABSOLUTE position floor on top of the two percentile cuts', () => {
+    // 3 tight names (they clear both pool-relative cuts) + 17 identical wide ones
+    // (a tie group, so their shared rank is 20 and none of them can sneak under a
+    // cut). The three differ ONLY in where they sit inside their series.
+    const pool = [
+      ...measures([[0.02, 0.001]], 0.03), // exactly the floor → in (`≥`, never `>`)
+      ...measures([[0.03, 0.002]], 0.029), // one step lower → out
+      ...measures([[0.04, 0.003]], 0.0), // 趴在绝对底部 → out
+      ...measures(Array.from({ length: 17 }, () => [0.9, 0.8] as const)),
+    ];
+    const { passes } = coarseScreen(pool);
+    const withoutFloor = coarseScreen(pool, { posRangeFloor: -1 });
+
+    expect(pool).toHaveLength(20);
+    expect(passes.slice(0, 3)).toEqual([true, false, false]);
+    expect(passes.slice(3).some(Boolean)).toBe(false);
+    // The floor is the ONLY reason the two failing names are out: they pass both
+    // percentile gates (rank 2 and 3 against cuts 14 / 9).
+    expect(withoutFloor.passes.slice(0, 3)).toEqual([true, true, true]);
+    expect(withoutFloor.passes.slice(3)).toEqual(passes.slice(3));
+  });
+
   it('degenerates safely on a pool too small for the cut (cut 0 = nobody passes)', () => {
     const { screen, passes } = coarseScreen(measures([[0.01, 0.001], [0.02, 0.002]]));
 
@@ -188,9 +262,13 @@ describe('coarseScreen (池内相对分位)', () => {
   it('defaults to the calibrated caps and window', () => {
     expect(DEFAULT_COARSE_PARAMS.pctRange).toBe(COARSE_SCREEN_PCT_RANGE);
     expect(DEFAULT_COARSE_PARAMS.pctNet).toBe(COARSE_SCREEN_PCT_NET);
+    expect(DEFAULT_COARSE_PARAMS.posRangeFloor).toBe(COARSE_POS_RANGE_FLOOR);
     expect(COARSE_SCREEN_PCT_RANGE).toBeCloseTo(0.7371, 4);
     expect(COARSE_SCREEN_PCT_NET).toBeCloseTo(0.4849, 4);
     expect(COARSE_SCREEN_PCT_RANGE).toBeGreaterThan(COARSE_SCREEN_PCT_NET);
+    // The position floor is ABSOLUTE (a fixed near-zero rail), not a percentile:
+    // it is the only gate whose value is a literal instead of a pool fraction.
+    expect(COARSE_POS_RANGE_FLOOR).toBe(0.03);
     // The screen runs on the daily series only.
     expect(COARSE_TIMEFRAME).toBe('1D');
     expect(scanTimeframes).toContain(COARSE_TIMEFRAME);

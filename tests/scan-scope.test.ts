@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  COARSE_POS_RANGE_FLOOR,
   COARSE_SCREEN_PCT_NET,
   COARSE_SCREEN_PCT_RANGE,
   COARSE_SCREEN_WINDOW_DAYS,
@@ -106,5 +107,14 @@ describe('coarse screen constants', () => {
       expect(pct).toBeGreaterThan(0);
       expect(pct).toBeLessThan(1);
     }
+  });
+
+  it('exposes the position floor as the one ABSOLUTE coarse gate', () => {
+    // A fixed near-zero rail (排除趴在序列绝对底部的币), NOT a percentile: it must
+    // stay tiny so it can never act as a screen (the whole-pool pass rate is
+    // ≈97.6%; a "better" value was measured to trade labels for nothing).
+    expect(COARSE_POS_RANGE_FLOOR).toBe(0.03);
+    expect(COARSE_POS_RANGE_FLOOR).toBeGreaterThan(0);
+    expect(COARSE_POS_RANGE_FLOOR).toBeLessThan(COARSE_SCREEN_PCT_RANGE);
   });
 });

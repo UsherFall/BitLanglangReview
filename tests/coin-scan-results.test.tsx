@@ -32,7 +32,7 @@ function scanRow(instrument = 'AAAUSDT'): ScanRow {
     qualified: true,
     // Row inclusion IS the 1D coarse screen, so every row carries its measures and
     // this scan's pool-relative cuts.
-    coarse: { pass: true, rangePct: 0.459, netPct: 0.0948, rangePctThreshold: 0.41, netPctThreshold: 0.06 },
+    coarse: { pass: true, rangePct: 0.459, netPct: 0.0948, posRange: 0.5, rangePctThreshold: 0.41, netPctThreshold: 0.06 },
   };
 }
 
@@ -112,11 +112,15 @@ describe('CoinScanResults', () => {
     expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '收敛结构', '强度分', '操作']);
 
     const cell = container.querySelector('.coin-scan-coarse');
-    expect(cell?.textContent).toBe('23天 区间45.9% 净9.5%');
+    // 区间/净漂移 are pool-relative measures, 位 is the row's position inside its
+    // whole 1D series (the quantity the absolute floor judges).
+    expect(cell?.textContent).toBe('23天 区间45.9% 净9.5% 位50.0%');
     // The thresholds are pool-relative and recomputed per scan, so they are
-    // reported (they are NOT the qR/qN constants).
+    // reported (they are NOT the qR/qN constants); the position floor is the one
+    // ABSOLUTE gate and is reported as such.
     expect(cell?.getAttribute('title')).toContain('41.0%');
     expect(cell?.getAttribute('title')).toContain('6.0%');
+    expect(cell?.getAttribute('title')).toContain('3.0%');
   });
 
   it('reports the coarse candidates against the converged subset in the header', () => {

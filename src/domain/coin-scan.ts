@@ -1,5 +1,6 @@
 import type { Candlestick } from './candlestick';
 import {
+  COARSE_POS_RANGE_FLOOR,
   COARSE_SCREEN_PCT_NET,
   COARSE_SCREEN_PCT_RANGE,
   COARSE_SCREEN_WINDOW_DAYS,
@@ -54,13 +55,17 @@ export function timeframeMinScore(timeframe: ReviewTimeframe, minScore: number):
 }
 
 /**
- * Knobs of the 1D coarse screen (池内相对分位). All three are CALIBRATION
- * constants — the window `T` plus the two percentile caps — and none of them is
- * an absolute price threshold: the `rangePct` / `|netPct|` cuts are recomputed
- * from the CURRENT pool on every scan (`coarseScreen`). That is the whole point
- * of the percentile form: a frozen absolute `W`/`D` pair decays as the market
- * moves (measured pool-rate drift 31.2pp over 15 anchors), the pool-relative cut
- * does not (4.7pp).
+ * Knobs of the 1D coarse screen (池内相对分位). `windowDays` / `pctRange` /
+ * `pctNet` are CALIBRATION constants — the window `T` plus the two percentile
+ * caps — and none of them is an absolute price threshold: the `rangePct` /
+ * `|netPct|` cuts are recomputed from the CURRENT pool on every scan
+ * (`coarseScreen`). That is the whole point of the percentile form: a frozen
+ * absolute `W`/`D` pair decays as the market moves (measured pool-rate drift
+ * 31.2pp over 15 anchors), the pool-relative cut does not (4.7pp).
+ *
+ * `posRangeFloor` is the one ABSOLUTE gate in the same pass condition: it is NOT
+ * derived from the pool, so it cannot decay and cannot be gamed by the pool's
+ * composition — it only says "not hugging the absolute bottom".
  */
 export type CoarseParams = {
   /** Window length in 1D bars — the calibrated `T`. Absent → `COARSE_SCREEN_WINDOW_DAYS`. */
@@ -69,6 +74,12 @@ export type CoarseParams = {
   pctRange?: number;
   /** Pool percentile cap for `|netPct|` — the calibrated `qN`. Absent → `COARSE_SCREEN_PCT_NET`. */
   pctNet?: number;
+  /**
+   * Absolute floor for `posRange` (not a percentile). Absent → `COARSE_POS_RANGE_FLOOR`.
+   * A value `<= 0` makes the gate vacuous, which is how a caller reads the screen
+   * as it behaved before the patch.
+   */
+  posRangeFloor?: number;
 };
 
 /** The calibrated coarse-screen parameters (465-pool calibration, 10/13). */
@@ -76,20 +87,29 @@ export const DEFAULT_COARSE_PARAMS: Required<CoarseParams> = {
   windowDays: COARSE_SCREEN_WINDOW_DAYS,
   pctRange: COARSE_SCREEN_PCT_RANGE,
   pctNet: COARSE_SCREEN_PCT_NET,
+  posRangeFloor: COARSE_POS_RANGE_FLOOR,
 };
 
 /**
- * The two pool-relative measures the coarse screen judges, both over the last
- * `windowDays` 1D bars. They mirror the user's three words:
- * 盘得够久 = the window is long enough at all, 收住了 = a narrow `rangePct`,
- * 不在趋势中 = a small `|netPct|`. Both are FRACTIONS (0.459 = 45.9%), not
- * percents, matching the rest of the module's relative measures.
+ * The three measures the coarse screen judges. `rangePct` / `netPct` cover the
+ * last `windowDays` 1D bars and mirror the user's three words: 盘得够久 = the
+ * window is long enough at all, 收住了 = a narrow `rangePct`, 不在趋势中 = a
+ * small `|netPct|`. `posRange` covers the WHOLE available series instead — it is
+ * about where the coin sits inside everything it has printed, not inside the
+ * 23-day box. All three are FRACTIONS (0.459 = 45.9%), not percents, matching the
+ * rest of the module's relative measures.
  */
 export type CoarseMeasures = {
   /** `(max high − min low) / lastClose` over the window — 振幅口径(含影线). */
   rangePct: number;
   /** `|close_last − close_first| / close_first` over the window — 净漂移(方向无关). */
   netPct: number;
+  /**
+   * `(lastClose − series min low) / (series max high − series min low)` over ALL
+   * provided 1D bars — 位置(0 = 趴在序列绝对底部, 1 = 序列最高). `0.5` for a
+   * zero-height series (see `coarseStructure`).
+   */
+  posRange: number;
 };
 
 /**
@@ -124,15 +144,29 @@ export type CoarseScreening = {
 };
 
 /**
- * Measures one instrument's 1D window: `rangePct` and `|netPct|` over the newest
- * `windowDays` bars. Pure — no pool, no thresholds, no absolute judgement.
+ * Measures one instrument's 1D series: `rangePct` / `|netPct|` over the newest
+ * `windowDays` bars, plus `posRange` over ALL provided bars. Pure — no pool, no
+ * thresholds, no absolute judgement.
+ *
+ * The two windows are deliberately different: the box measures describe the
+ * 23-day 盤整, while `posRange` asks where the coin sits inside everything it has
+ * printed (≤ 90 bars, see `market-data.md`) — "趴在绝对底部" is a statement about
+ * the whole visible history, and evaluating it on the 23-day window would call
+ * every quiet box "mid-range" by construction.
+ *
+ * A zero-height series (`maxHigh === minLow`, every bar printing the same
+ * `[low, high]`) has no vertical extent, so "position inside it" is undefined:
+ * `posRange` reads as **0.5** — the same degenerate reading `StructureResult.position`
+ * uses, and a PASSING value on purpose, because the flattest possible box is not
+ * a bottom-hugger (returning 0 would silently exclude it through the floor).
  *
  * Returns `null` when the window cannot be measured AT ALL: fewer than
  * `windowDays` bars (a 次新币 whose whole history is shorter than `T`), a
- * non-positive price, or a non-finite result. Such an instrument has no place in
- * the percentile BASE and can never pass the screen — the calibration treats it
- * the same way (`T > available bars` ⇒ excluded, which is the right direction
- * for a coin that has not been listed long enough to be 盘得够久).
+ * non-positive price ANYWHERE in the series (it would poison `posRange`), or a
+ * non-finite result. Such an instrument has no place in the percentile BASE and
+ * can never pass the screen — the calibration treats it the same way
+ * (`T > available bars` ⇒ excluded, which is the right direction for a coin that
+ * has not been listed long enough to be 盘得够久).
  */
 export function coarseStructure(candles: readonly Candlestick[], params: CoarseParams = {}): CoarseMeasures | null {
   const windowDays = params.windowDays ?? DEFAULT_COARSE_PARAMS.windowDays;
@@ -149,24 +183,41 @@ export function coarseStructure(candles: readonly Candlestick[], params: CoarseP
     if (candle.high > high) high = candle.high;
     if (candle.low < low) low = candle.low;
   }
+  // Position: the WHOLE provided series, not the window (see the doc comment).
+  // The positivity guard therefore covers the bars OLDER than the window too —
+  // a non-positive price there would poison `posRange`.
+  let seriesHigh = -Infinity;
+  let seriesLow = Infinity;
+  for (const candle of sorted) {
+    if (!(candle.low > 0)) return null;
+    if (candle.high > seriesHigh) seriesHigh = candle.high;
+    if (candle.low < seriesLow) seriesLow = candle.low;
+  }
   const rangePct = (high - low) / lastClose;
   const netPct = Math.abs(lastClose - firstClose) / firstClose;
-  if (!Number.isFinite(rangePct) || !Number.isFinite(netPct)) return null;
-  return { rangePct, netPct };
+  const posRange = seriesHigh > seriesLow ? (lastClose - seriesLow) / (seriesHigh - seriesLow) : 0.5;
+  if (!Number.isFinite(rangePct) || !Number.isFinite(netPct) || !Number.isFinite(posRange)) return null;
+  return { rangePct, netPct, posRange };
 }
 
 /**
- * The 1D coarse screen: keep the instruments whose `rangePct` AND `|netPct|`
- * both sit in the CURRENT pool's lowest `qR` / `qN` fraction. The thresholds are
- * derived from `measures` on every call, which is what makes the pass rate
- * structurally stable instead of decaying with the market (see `CoarseParams`).
+ * The 1D coarse screen. Keep the instruments that clear all THREE gates:
+ *
+ * 1. `rangePct` and 2. `|netPct|` sit in the CURRENT pool's lowest `qR` / `qN`
+ *    fraction. Those two cuts are derived from `measures` on every call, which is
+ *    what makes the pass rate structurally stable instead of decaying with the
+ *    market (see `CoarseParams`).
+ * 3. `posRange >= posRangeFloor` — an ABSOLUTE, pool-independent rail that only
+ *    drops instruments still sitting on their series' absolute bottom (10/13;
+ *    see `COARSE_POS_RANGE_FLOOR`). It is a precision patch, not a screen.
  *
  * The ranking is the calibration's: ascending in-pool rank 1..N, and a tie group
  * takes its MAXIMUM rank ("并列取最保守的秩"), so a pass needs `rank ≤ floor(q·N)`.
  * Only one half of the user's judgement lives here — the screen is deliberately
- * WIDE (≈44% of the 465 pool at the calibration point) and the precision is left
- * to the small-timeframe stage; it exists to shrink the candidate set without
- * dropping a label, not to be a good filter on its own.
+ * WIDE (≈44% of the 465 pool at the calibration point, ≈43% with the position
+ * floor) and the precision is left to the small-timeframe stage; it exists to
+ * shrink the candidate set without dropping a label, not to be a good filter on
+ * its own.
  */
 export function coarseScreen(
   measures: readonly (CoarseMeasures | null)[],
@@ -174,6 +225,7 @@ export function coarseScreen(
 ): CoarseScreening {
   const pctRange = params.pctRange ?? DEFAULT_COARSE_PARAMS.pctRange;
   const pctNet = params.pctNet ?? DEFAULT_COARSE_PARAMS.pctNet;
+  const posRangeFloor = params.posRangeFloor ?? DEFAULT_COARSE_PARAMS.posRangeFloor;
   const present = measures.filter((measure): measure is CoarseMeasures => measure !== null);
   const poolSize = present.length;
   const rangeRanks = ascendingRanks(present.map((measure) => measure.rangePct));
@@ -187,7 +239,11 @@ export function coarseScreen(
       passes.push(false);
       continue;
     }
-    passes.push(rangeRanks[presentIndex] <= rangePctRank && netRanks[presentIndex] <= netPctRank);
+    passes.push(
+      rangeRanks[presentIndex] <= rangePctRank &&
+        netRanks[presentIndex] <= netPctRank &&
+        measure.posRange >= posRangeFloor,
+    );
     presentIndex += 1;
   }
   return {
@@ -346,6 +402,8 @@ export type CoarseRow = {
   pass: boolean;
   rangePct: number;
   netPct: number;
+  /** Position inside the WHOLE 1D series (0 = absolute bottom); see `CoarseMeasures.posRange`. */
+  posRange: number;
   /** The cuts RECOMPUTED from this scan's own pool — identical on every row of one scan. */
   rangePctThreshold: number;
   netPctThreshold: number;

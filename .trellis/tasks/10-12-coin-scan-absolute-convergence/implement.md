@@ -23,6 +23,15 @@
 11. **spec** — `server/coin-scan.md`(池定义变更 + 新字段 + 两阶段取数 + 请求预算);`server/market-data.md`(**Bitget 1D 90 根硬上限**);`frontend/component-guidelines.md`(新列 + `扫描数量` 语义)。
 12. **门禁**:报告多锚点下的**正样本覆盖**与**负样本混入**;若负样本混入 >0 或覆盖 <7/8,**回到用户**。
 
+## B2. R1 位置下限补丁(2026-10-13,已批准)
+
+12b. **`src/domain/coin-scan.ts`** — `coarseStructure` 追加输出 `posRange = (末根 close − 窗口 min low) / (窗口 max high − 窗口 min low)`(窗口 = 传入的全部 1D 根)。
+12c. **`src/domain/scan-scope.ts`** — 新增 `COARSE_POS_RANGE_FLOOR = 0.03`(绝对下限,**不是分位**;它是"别趴在绝对底部"的近零下限,不受池率腐蚀影响)。
+12d. **`src/server/coin-scan-service.ts`** — 行入选追加 `posRange ≥ COARSE_POS_RANGE_FLOOR`;`coarse` 字段带上 `posRange`。
+12e. **`src/ui/CoinScanPanel.tsx`** — 「结构」列可加"位置"。
+12f. **测试** — `coin-scan-coarse.test.ts` 补该门的边界(恰好 0.03、低于、`窗口最高 == 最低` 的退化情形);service 用例补"趴底者被剔"。
+12g. **spec** — `server/coin-scan.md` 记该门与语义(精度补丁、非筛子、全池通过率 ~97.6%)。
+
 ## C. 小级别绝对收敛(只离线标定,**不落地**)
 
 13. 在粗筛通过的标的上,对 `5m/15m/1H/4H` 各取末尾窗口,标定 `B/R/D2/n`(按周期分级)。

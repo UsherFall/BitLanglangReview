@@ -130,3 +130,23 @@ export const COARSE_SCREEN_PCT_RANGE = 0.7370689655172413;
 
 /** Pool percentile cap for the coarse screen's `|netPct|` gate (the calibrated `qN`). */
 export const COARSE_SCREEN_PCT_NET = 0.4849137931034483;
+
+/**
+ * ABSOLUTE floor on the coarse screen's `posRange` (10/13, R1 位置下限补丁):
+ * `(lastClose − series min low) / (series max high − series min low)` over ALL
+ * available 1D bars (≤ 90, NOT the 23-day window) must be at least this.
+ *
+ * It is deliberately NOT a percentile — the two gates above are recomputed from
+ * the current pool on every scan, this one is a fixed near-zero rail whose job is
+ * only to drop instruments still sitting on their series' absolute bottom (they
+ * are still falling, not 收敛). It is a PRECISION PATCH, not a screen: measured
+ * pool pass rate ≈ 97.6% (97.63% snapshot / 96.31% live), and inside the R1
+ * sub-pool it dropped 5 rows of ≈206 — 4 of which were exactly the user-named
+ * dumps CYS/TUT/BEAT/DEXE (hypergeometric p ≈ 1e-4) — without costing a single
+ * approved label. Do NOT tune it to shrink the pool, and do NOT read it as the R2
+ * "箱体内位置" judgement: the label spread of `posRange` makes position
+ * non-separable on its own (positive labels run 0.063…0.766, negatives sit on
+ * BOTH sides), so anything stronger was measured and rejected. See
+ * `research/stage2-position-direction.md` §5.3 / §8.
+ */
+export const COARSE_POS_RANGE_FLOOR = 0.03;
