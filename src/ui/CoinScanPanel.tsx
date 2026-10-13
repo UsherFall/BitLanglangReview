@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   scanTimeframes,
   type ConvergenceStructure,
@@ -47,12 +47,22 @@ function anchorScanLabel(anchorEpoch: number | null): string {
   return anchorEpoch === null ? `当前 ${localDateTimeLabel(Date.now())}` : `锚点 ${localDateTimeLabel(anchorEpoch)}`;
 }
 
+/**
+ * 扫描数量 is a CAP now (上限保护), not the pool definition: the scan covers the
+ * whole 加密 universe of the scope, and the box only limits it. An absent cap
+ * renders as an EMPTY input, which is what "留空 = 全池" means on the wire.
+ */
+function topNInput(value: number | undefined): string {
+  return value === undefined ? '' : String(value);
+}
+
 export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanelProps) {
   const [method, setMethod] = useState<'shrink' | 'heat'>('shrink');
   // 行情源: 初值 = 共享默认源, 挂载后由服务端启动源校正(见下)。
   const [source, setSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
-  // 参数默认值按「源 × 品种」推导(下限分级: 各源成交额体量不同)。
-  const [topN, setTopN] = useState(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).topN));
+  // 参数默认值按「源 × 品种」推导(成交额下限分级: 各源体量不同)。扫描数量留空 =
+  // 全池 —— topN 只是上限保护, 不再是硬门槛(见 `scan-scope.ts`)。
+  const [topN, setTopN] = useState(topNInput(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).topN));
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).minQuoteVolume24h));
   // 结构强度阈值主旋钮:调高 = 宁少勿滥.
   const [minScore, setMinScore] = useState('0.6');
@@ -92,7 +102,7 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
   /** 换源/换品种都要重算默认值, 因为下限是「源 × 品种」的二维表。 */
   function applyDefaults(nextSource: MarketDataSource, nextScope: ScanScope) {
     const defaults = defaultScanParams(nextSource, nextScope);
-    setTopN(String(defaults.topN));
+    setTopN(topNInput(defaults.topN));
     setMinQuoteVolume24h(String(defaults.minQuoteVolume24h));
   }
 
@@ -115,8 +125,13 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
 
   async function scan() {
     if (method === 'shrink') {
-      const inputs = [topN, minQuoteVolume24h, minScore];
+      const inputs = [minQuoteVolume24h, minScore];
       if (inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
+        setError('参数无效,请检查');
+        return;
+      }
+      // 扫描数量留空 = 全池(合法); 填了就必须是 >= 1 的有限数。
+      if (topN.trim() !== '' && !(Number.isFinite(Number(topN)) && Number(topN) >= 1)) {
         setError('参数无效,请检查');
         return;
       }
@@ -132,7 +147,8 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
     try {
       const query = new URLSearchParams({ method, scope, source });
       if (method === 'shrink') {
-        query.set('topN', topN);
+        // 留空 = 不发 topN = 全池。
+        if (topN.trim() !== '') query.set('topN', topN);
         query.set('minQuoteVolume24h', minQuoteVolume24h);
         query.set('minScore', minScore);
       }
@@ -200,7 +216,14 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
           <>
             <label>
               扫描数量
-              <input type="number" min="1" value={topN} onChange={(event) => setTopN(event.target.value)} />
+              <input
+                type="number"
+                min="1"
+                value={topN}
+                placeholder="全池"
+                title="上限保护: 留空 = 全池(扫描整个品种池后再粗筛)"
+                onChange={(event) => setTopN(event.target.value)}
+              />
             </label>
             <label>
               最低成交额
@@ -230,7 +253,7 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
           ? '范围 = 美股 + 韩股:休市时段整体剔除,序列只含真实交易时段 K 线(盘前 04:00 – 盘后 20:00 ET)。'
           : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
         {method === 'shrink'
-          ? '一次扫描全周期(5m/15m/1H/4H/1D),每币一行。结构强度阈值调高 = 宁少勿滥,大级别(4H/1D)自动更宽容;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
+          ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中),只对通过者再取 5m/15m/1H/4H,每币一行。结构强度阈值调高 = 宁少勿滥,大级别(4H/1D)自动更宽容;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
           : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
       </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
@@ -272,16 +295,22 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  // The service sorts scanned rows (highest qualified level, then qualifiedCount,
-  // then bestScore) and the UI keeps that order, except that manually demoted
-  // rows sink to the bottom (a stable partition, not a re-rank).
+  // The service sorts scanned rows (highest converged level, then qualifiedCount,
+  // then bestScore — a coarse survivor that converges nowhere reads as level -1
+  // and sinks) and the UI keeps that order, except that manually demoted rows sink
+  // to the bottom (a stable partition, not a re-rank).
   const rows = orderScanRows(result.scanned, demotedCoins);
+  // 行入选 = 通过 1D 粗筛,所以「收敛」是行内子集(粗筛放行的币可能在所有周期都不收敛)。
+  const convergedRows = rows.filter((row) => row.qualifiedCount > 0).length;
   return (
     <>
       <header className="detail-header">
         <div>
           <h1>选品结果 · {SCOPE_LABELS[result.params.scope ?? 'crypto']}</h1>
-          <p>扫描 {result.scanned.length} 个 · 收敛 {result.qualifiedCount} 个 · 全周期</p>
+          <p>
+            粗筛 {result.scanned.length} 个{result.coarse ? ` · 候选 ${result.coarse.candidates} 个` : ''} · 收敛 {convergedRows} 个
+            {result.coarse ? ` · 日线窗口 ${result.coarse.windowDays} 天` : ''}
+          </p>
           {result.skippedInstruments && result.skippedInstruments.length > 0 && (
             <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>
               已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
@@ -302,6 +331,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               <th>最新价</th>
               <th>24h 涨跌</th>
               <th>成交额</th>
+              <th>结构</th>
               <th>收敛结构</th>
               <th>强度分</th>
               <th>操作</th>
@@ -317,6 +347,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                     <td>{formatPrice(row.lastPrice)}</td>
                     <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
                     <td>{formatVolume(row.quoteVolume24h)}</td>
+                    <td>{formatCoarse(row, result.coarse?.windowDays)}</td>
                     <td>{formatConvergedStructures(row)}</td>
                     <td>{formatScore(row.bestScore)}</td>
                     <td>
@@ -357,7 +388,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                   </tr>
                   {expandedInstrument === row.instrument && (
                     <tr className={isDemoted ? 'coin-scan-detail-row demoted' : 'coin-scan-detail-row'}>
-                      <td colSpan={7}>
+                      <td colSpan={8}>
                         <table className="coin-scan-detail-table">
                           <thead>
                             <tr>
@@ -422,6 +453,26 @@ function formatConvergedStructures(row: ScanRow): string {
     return `${timeframe}${structureLabel(structure)}`;
   });
   return parts.length > 0 ? parts.join(' ') : '—';
+}
+
+// 结构 column: the 1D coarse screen's own measures — 盘得够久(窗口天数)/ 收住了(区间)/
+// 不在趋势中(净漂移). Every row in the table passed it, so this is what put the row
+// here; the thresholds behind it are pool-relative and printed (rounded) in the title.
+function formatCoarse(row: ScanRow, windowDays: number | undefined): ReactNode {
+  const coarse = row.coarse;
+  if (!coarse) return '—';
+  const window = windowDays === undefined ? '' : `${windowDays}天 `;
+  const title = `日线粗筛(池内分位): 区间 ≤ ${formatPercent(coarse.rangePctThreshold)} 且 净漂移 ≤ ${formatPercent(coarse.netPctThreshold)}(本次池内重算)`;
+  return (
+    <span className="coin-scan-coarse" title={title}>
+      {`${window}区间${formatPercent(coarse.rangePct)} 净${formatPercent(coarse.netPct)}`}
+    </span>
+  );
+}
+
+/** A 0..1 relative measure as a percent (0.459 → "45.9%"); unknown cuts read as "—". */
+function formatPercent(value: number): string {
+  return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '—';
 }
 
 function structureLabel(structure: ConvergenceStructure | null): string {

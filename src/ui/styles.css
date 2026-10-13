@@ -1651,6 +1651,11 @@ label,
   opacity: 0.45;
 }
 
+/* 结构列(日线粗筛的度量:盘整窗口 / 区间 / 净漂移):次要信息,比价格弱一档。 */
+.coin-scan-coarse {
+  color: #8b949e;
+}
+
 .coin-scan-detail-row td {
   padding: 0 !important;
   background: #0b1017;

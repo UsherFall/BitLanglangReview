@@ -333,19 +333,22 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         if (method !== 'shrink') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
-        // Parameter defaults depend on the source AND the scope (the volume floor
-        // has to sit below the source's own topN cutoff, see
-        // `SCAN_PARAM_DEFAULTS`); an absent or unparsable value falls back to
-        // that pair's default (never to 0, which would 400).
+        // The volume floor is per `source × scope` (`SCAN_PARAM_DEFAULTS`); an
+        // absent or unparsable value falls back to that pair's default (never to
+        // 0, which would 400).
         const scopeDefaults = defaultScanParams(source, scope);
-        const topN = parseOptionalNumber(url.searchParams.get('topN')) ?? scopeDefaults.topN;
+        // `topN` is an optional CAP since 10/13 (the pool is the whole open
+        // universe, because the approved labels sit as deep as rank #319):
+        // absent/empty = no cap. A present value must still be >= 1 — `0` would
+        // silently scan nothing instead of failing loudly.
+        const topN = parseOptionalNumber(url.searchParams.get('topN'));
         const minQuoteVolume24h = parseOptionalNumber(url.searchParams.get('minQuoteVolume24h')) ?? scopeDefaults.minQuoteVolume24h;
         // anchor/minScore are optional: parse them with the optional parser that
         // maps null/empty/NaN → undefined, so an absent param never becomes 0 and
         // trips the guard below.
         const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
         const minScore = parseOptionalNumber(url.searchParams.get('minScore'));
-        if (topN < 1 || minQuoteVolume24h < 0) {
+        if ((topN !== undefined && topN < 1) || minQuoteVolume24h < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (anchor !== undefined && anchor <= 0) {

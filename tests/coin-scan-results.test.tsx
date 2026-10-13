@@ -30,6 +30,9 @@ function scanRow(instrument = 'AAAUSDT'): ScanRow {
     qualifiedCount: 1,
     bestScore: 0.8,
     qualified: true,
+    // Row inclusion IS the 1D coarse screen, so every row carries its measures and
+    // this scan's pool-relative cuts.
+    coarse: { pass: true, rangePct: 0.459, netPct: 0.0948, rangePctThreshold: 0.41, netPctThreshold: 0.06 },
   };
 }
 
@@ -38,9 +41,18 @@ function scanResponse(instruments: string[] = ['AAAUSDT']): ScanResponse {
   return {
     scanned,
     qualifiedCount: scanned.length,
-    params: { method: 'shrink', topN: 150, minQuoteVolume24h: 10_000_000 },
+    params: { method: 'shrink', minQuoteVolume24h: 10_000_000 },
     scannedAt: '2026-09-11T00:00:00.000Z',
     skippedInstruments: ['BBBUSDT', 'CCCUSDT'],
+    coarse: {
+      windowDays: 23,
+      pctRange: 0.7371,
+      pctNet: 0.4849,
+      poolSize: 465,
+      rangePctThreshold: 0.41,
+      netPctThreshold: 0.06,
+      candidates: 465,
+    },
   };
 }
 
@@ -91,6 +103,28 @@ describe('CoinScanResults', () => {
 
     expect(renderedInstruments(container)).toEqual(['AAAUSDT', 'BBBUSDT', 'CCCUSDT']);
     expect(container.querySelectorAll('.coin-scan-table tbody tr.demoted')).toHaveLength(0);
+  });
+
+  it('shows the 1D coarse measures in the 结构 column, with this scan\'s cuts', () => {
+    const { container } = renderResults();
+
+    const headers = [...container.querySelectorAll('.coin-scan-table thead th')].map((th) => th.textContent);
+    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '收敛结构', '强度分', '操作']);
+
+    const cell = container.querySelector('.coin-scan-coarse');
+    expect(cell?.textContent).toBe('23天 区间45.9% 净9.5%');
+    // The thresholds are pool-relative and recomputed per scan, so they are
+    // reported (they are NOT the qR/qN constants).
+    expect(cell?.getAttribute('title')).toContain('41.0%');
+    expect(cell?.getAttribute('title')).toContain('6.0%');
+  });
+
+  it('reports the coarse candidates against the converged subset in the header', () => {
+    const { container } = renderResults({ result: scanResponse(['AAAUSDT', 'BBBUSDT']) });
+
+    const summary = container.querySelector('.detail-header p')?.textContent ?? '';
+    expect(summary).toContain('候选 465 个');
+    expect(summary).toContain('收敛 2 个');
   });
 
   it('sinks demoted rows to the bottom while keeping the order inside each group', () => {

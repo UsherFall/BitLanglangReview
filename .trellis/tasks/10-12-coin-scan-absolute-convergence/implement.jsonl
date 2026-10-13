@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选品扫描契约:参数默认值、响应结构、排序与阈值语义、限流预算;本任务改行入选判据并新增行字段"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "数据源与 K 线契约;需补记 Bitget 1D 90 根硬上限,并核对换源/缓存命名空间"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "选品面板契约(参数区/结果列);新增'结构'列需与面板规格一致"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "新增粗筛/绝对收敛纯函数前,检查是否已有可复用的度量与标定常量"}

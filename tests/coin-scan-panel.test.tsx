@@ -3,7 +3,12 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MARKET_DATA_SOURCE, defaultScanParams, type ScanScope } from '../src/domain/scan-scope';
+import {
+  DEFAULT_MARKET_DATA_SOURCE,
+  defaultScanParams,
+  type MarketDataSource,
+  type ScanScope,
+} from '../src/domain/scan-scope';
 import { CoinScanPanel } from '../src/ui/CoinScanPanel';
 
 /**
@@ -40,10 +45,18 @@ function Harness() {
 const methodSelect = () => screen.getByRole('combobox') as HTMLSelectElement;
 /** The 品种 / 行情源 rows are both button groups, so one lookup serves both. */
 const panelButton = (label: string) => screen.getByRole('button', { name: label });
-const numberInputs = () =>
-  [...document.querySelectorAll<HTMLInputElement>('.coin-scan-params input[type="number"]')].map((input) => input.value);
+const numberInputEls = () => [...document.querySelectorAll<HTMLInputElement>('.coin-scan-params input[type="number"]')];
+const numberInputs = () => numberInputEls().map((input) => input.value);
 /** The defaults each pair should produce, so the assertions track the table. */
 const cryptoDefaults = (source = DEFAULT_MARKET_DATA_SOURCE) => defaultScanParams(source, 'crypto');
+/**
+ * 扫描数量 is a CAP (上限保护): an uncapped pair renders as an EMPTY input, which
+ * is what "留空 = 全池" means, so the expectation mirrors the defaults.
+ */
+const capInput = (source: MarketDataSource, scope: ScanScope) => {
+  const topN = defaultScanParams(source, scope).topN;
+  return topN === undefined ? '' : String(topN);
+};
 
 describe('CoinScanPanel sub-modules (选品)', () => {
   beforeEach(() => {
@@ -74,12 +87,12 @@ describe('CoinScanPanel sub-modules (选品)', () => {
 
   it('reports a scope change and resets the scope-specific parameters', () => {
     const { onScopeChange, onScanned } = renderPanel('crypto');
-    expect(numberInputs()[0]).toBe(String(cryptoDefaults().topN));
+    expect(numberInputs()[0]).toBe(capInput(DEFAULT_MARKET_DATA_SOURCE, 'crypto'));
 
     fireEvent.click(panelButton('股票'));
 
     expect(onScopeChange).toHaveBeenCalledWith('equity');
-    expect(numberInputs()[0]).toBe(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, 'equity').topN));
+    expect(numberInputs()[0]).toBe(capInput(DEFAULT_MARKET_DATA_SOURCE, 'equity'));
     expect(numberInputs()[1]).toBe(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, 'equity').minQuoteVolume24h));
     // Switching sub-module never emits a result on its own.
     expect(onScanned).not.toHaveBeenCalled();
@@ -129,7 +142,7 @@ describe('CoinScanPanel 行情源 (data source)', () => {
 
     await waitFor(() => expect(panelButton('币安')).toHaveClass('selected'));
     expect(panelButton('Bitget')).not.toHaveClass('selected');
-    expect(numberInputs()[0]).toBe(String(cryptoDefaults('binance').topN));
+    expect(numberInputs()[0]).toBe(capInput('binance', 'crypto'));
     expect(numberInputs()[1]).toBe(String(cryptoDefaults('binance').minQuoteVolume24h));
   });
 
@@ -178,7 +191,7 @@ describe('CoinScanPanel 行情源 (data source)', () => {
 
     releaseConfig!();
     await waitFor(() => expect(panelButton('币安')).toHaveClass('selected'));
-    expect(numberInputs()[0]).toBe(String(defaultScanParams('binance', 'equity').topN));
+    expect(numberInputs()[0]).toBe(capInput('binance', 'equity'));
     expect(numberInputs()[1]).toBe(String(defaultScanParams('binance', 'equity').minQuoteVolume24h));
   });
 
@@ -197,5 +210,40 @@ describe('CoinScanPanel 行情源 (data source)', () => {
     expect(query.get('source')).toBe('binance');
     expect(query.get('minQuoteVolume24h')).toBe(String(cryptoDefaults('binance').minQuoteVolume24h));
     expect(query.get('minScore')).toBe('0.6');
+  });
+
+  it('leaves 扫描数量 empty by default and sends NO topN (= 全池)', async () => {
+    const fetchMock = stubFetch();
+    renderPanel('crypto');
+
+    // The default is "no cap": the pool is the whole scope universe.
+    expect(numberInputs()[0]).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: '扫描' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/scan?'))).toBe(true));
+    const scanUrl = fetchMock.mock.calls.map(([url]) => url).find((url) => url.startsWith('/api/scan?'))!;
+    const query = new URLSearchParams(scanUrl.slice(scanUrl.indexOf('?') + 1));
+    expect(query.has('topN')).toBe(false);
+    expect(query.get('minQuoteVolume24h')).toBe(String(cryptoDefaults('bitget').minQuoteVolume24h));
+  });
+
+  it('sends 扫描数量 as an upper cap when it is filled in, and rejects a non-positive one', async () => {
+    const fetchMock = stubFetch();
+    renderPanel('crypto');
+
+    fireEvent.change(numberInputEls()[0], { target: { value: '300' } });
+    fireEvent.click(screen.getByRole('button', { name: '扫描' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/scan?'))).toBe(true));
+    const scanUrl = fetchMock.mock.calls.map(([url]) => url).find((url) => url.startsWith('/api/scan?'))!;
+    expect(new URLSearchParams(scanUrl.slice(scanUrl.indexOf('?') + 1)).get('topN')).toBe('300');
+
+    // A cap of 0 would silently scan nothing, so it is a parameter error.
+    fetchMock.mockClear();
+    fireEvent.change(numberInputEls()[0], { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: '扫描' }));
+
+    await screen.findByText('参数无效,请检查');
+    expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/scan?'))).toBe(false);
   });
 });

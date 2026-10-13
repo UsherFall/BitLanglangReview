@@ -146,8 +146,10 @@ _Avoid_: coin scanner, single mixed pool
 _Avoid_: market screener, strategy backtest
 
 **Shrink Method** (缩量方法):
-The first **Instrument Scan** method, available in both sub-modules. It scans the sub-module's top instruments by 24h quote volume (USDT-M perpetuals only) and ranks them by how much their recent volatility has shrunk relative to each instrument's own recent stretch. The pool applies the **Scan Pool Policy**, the sub-module's **Scan Scope**, and **Session Gating**: an instrument whose underlying **Market Session** is closed is dropped before the top-N slice, and the surviving window holds only **Session-only Series** candles.
-_Avoid_: volume drop filter, low volume watch
+The first **Instrument Scan** method, available in both sub-modules. It scans the sub-module's **whole scan-pool universe** above a low 24h quote-volume floor (USDT-M perpetuals only) — there is **no top-N slice**; `扫描数量` is only an optional upper bound — and ranks the surviving rows by how much their recent volatility has shrunk relative to each instrument's own recent stretch. The pool applies the **Scan Pool Policy**, the sub-module's **Scan Scope**, and **Session Gating**; a **Coarse Screen** then decides which instruments become rows, and each row's window holds only **Session-only Series** candles.
+_Avoid_: volume drop filter, low volume watch**Coarse Screen** (粗筛):
+The **Instrument Scan**'s row gate: on the daily series, an instrument becomes a row only when its recent window is **long enough, tight enough, and no longer trending** — expressed **relative to the rest of the pool** (a rank against the pool's own range and net-drift distribution), never as a fixed absolute range. This keeps the gate self-calibrating as the market changes; precision is deliberately left to the per-timeframe convergence readings, and a wide-range structure (see ACE) is not expected to pass.
+_Avoid_: absolute range threshold, top-N slice
 
 **Volume Ratio** (量比):
 For a completed **Candlestick**, its volume divided by the mean volume of the `window` candles immediately before it. The still-forming candlestick is excluded before any computation.
@@ -166,7 +168,7 @@ The recurring hours during which an exchange is open, defined in that exchange's
 _Avoid_: UTC trading window, exchange uptime
 
 **Session Gating** (休市跳过):
-Excluding instruments whose underlying **Market Session** is closed at the scan anchor. Gating runs after the 24h quote-volume threshold and before the top-N slice, so a closed **TradFi Instrument** never consumes a top slot and never fires candle requests. Skipped instruments are reported back as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. A metadata outage turns gating off (the scan still runs unfiltered) — the response then carries `metadataUnavailable` and the UI states it, rather than quietly listing closed markets.
+Excluding instruments whose underlying **Market Session** is closed at the scan anchor. Gating runs after the 24h quote-volume floor, so a closed **TradFi Instrument** never reaches the **Coarse Screen** and never fires candle requests. Skipped instruments are reported back as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. A metadata outage turns gating off (the scan still runs unfiltered) — the response then carries `metadataUnavailable` and the UI states it, rather than quietly listing closed markets.
 _Avoid_: market filter, closed-market ban**Session-only Series** (会话序列):
 The candle series an **Instrument Scan** actually measures for a session-gated instrument: every candle whose span `[open, open + timeframe)` contains no trading time of its **Market Session** is dropped before the detector runs, so weekends / holidays / overnight stretches — and for the UTC-aligned daily candles whole non-trading days — can never read as a quiet 蓄力 band. The scan requests 2× the raw window for gated instruments (Binance's cheapest klines weight band) so the same number of tradable candles remains. Ungated classes (crypto, commodity) keep every candle.
 _Avoid_: 24/7 series, unfiltered candles**Scan Pool Policy** (选品池范围):
@@ -286,7 +288,7 @@ Developer: Free replay chart context excludes trade markers so the reviewer can 
 
 Reviewer: I want to find instruments whose volume is shrinking on the five-minute chart.
 
-Developer: That is the coin scan's shrink method: it ranks top instruments by 24h quote volume, then by how much their recent volume shrank against each coin's own average.
+Developer: That is the coin scan's shrink method: it scans the whole pool above a low volume floor, keeps the instruments whose daily window is long, tight and no longer trending, then ranks them by how much their recent volatility shrank against each coin's own preceding stretch.
 
 Reviewer: One of the scanned coins looks worth replaying.
 

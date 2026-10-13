@@ -11,6 +11,9 @@ coverage/
 *.log
 .playwright-mcp/
 
+# Throwaway research probes / fetched-candle caches (also excluded from vite watch).
+.scratch/
+
 # Local review data. Keep the database and archive export on this machine.
 data/
 data.zip

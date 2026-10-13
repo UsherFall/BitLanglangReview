@@ -48,41 +48,60 @@ export function isMarketDataSource(v: unknown): v is MarketDataSource {
   return (MARKET_DATA_SOURCES as readonly unknown[]).includes(v);
 }
 
-export type ScanParams = { topN: number; minQuoteVolume24h: number };
+export type ScanParams = {
+  /**
+   * Pool CAP — an upper protection, NOT the pool definition (10/13). Absent =
+   * the whole open pool of that scope. It used to be the hard gate (the pool was
+   * simply the top N by 24h volume); that gate is what hid half of the labels
+   * the user approved as "structurally good" (see `SCAN_PARAM_DEFAULTS`).
+   */
+  topN?: number;
+  minQuoteVolume24h: number;
+};
 
 /**
  * Per-`source × scope` defaults for the shrink method's parameters, used when a
- * request omits them and mirrored by the panel's inputs.
+ * request omits them and mirrored by the panel's inputs (which leaves the 扫描数量
+ * box empty = no cap).
  *
- * `topN` is the HARD gate (the pool is simply the top N by 24h volume); the
- * volume floor is a guard rail, so it must stay BELOW that source's topN cutoff
- * — otherwise the floor, not `topN`, decides the pool size. The floor therefore
- * has to follow the venue's own scale: measured 2026-10-12, Bitget/Binance
- * overlapping instruments sit at ≈0.10 of Binance's 24h volume, so Binance's 10M
- * floor left Bitget with only 33 crypto instruments (vs 189 on Binance) and made
- * the raised `topN` a no-op.
+ * **`topN` is no longer the gate (10/13).** It was raised 60 → 150 on 10/11 to
+ * reach the mid-cap tier — and the 10-12 calibration showed the tier is not
+ * nearly far enough down: of the 8 labels the user approved as "structurally
+ * good", four sit at 24h-volume ranks #224–#319 (measured 10/13 on Bitget:
+ * BLESS #224, ACE #247, KAVA #298, CATI #319), so a top-N selector cannot see
+ * them at all and no detector improvement can compensate. The pool is therefore
+ * the WHOLE scannable universe of the scope, and `topN` survives only as an
+ * optional cap. The 10/11 reasoning above ("raise the cut to reach the mid-cap
+ * tier") is superseded by this measurement, not contradicted by it — the tier
+ * it reached was still ~150 ranks too high.
  *
- * The equity pool is far smaller than the crypto one (measured: ~45 equity
- * contracts clear the volume floor against 700+ crypto ones), so a smaller
- * `topN` covers it without changing the liquidity floor. The crypto pool is 150
- * (raised from 60 on 10/11): 60 slots let the mid-cap tier that only converges
- * on 4H/1D fall out of the scan entirely, and 150 is the compromise that reaches
- * that tier while keeping a cold scan's klines budget (150 × 5 timeframes)
- * inside the shared rate budget. OKX does not classify instruments, so its
- * equity scope is a placeholder for symmetry.
+ * The expanded pool stays affordable because the 1D coarse screen runs FIRST and
+ * only its survivors pay for the other four timeframes (a rejected instrument
+ * costs exactly one klines request): ≈465 + ≈205×4 ≈ 1285 requests ≈ 65s at
+ * Bitget's ~20 req/s pace, the same order as the old top-150 cold scan
+ * (750 requests, ≈82s). See `server/coin-scan.md`.
+ *
+ * `minQuoteVolume24h` is a LOW RAIL now, not a selector — it only keeps empty /
+ * dust contracts out of the candle budget. Bitget crypto was the one value still
+ * acting as a selector: at 500_000 it kept 224 of the 465 crypto contracts and
+ * dropped KAVA (287k), CATI (245k) and ACE (433k) — three of the four labels
+ * above — so it was lowered to 100_000, which keeps 408 of 465 and leaves every
+ * approved label ≥2.4× of headroom. The other venues keep their previous floors
+ * pending their own measurement; Bitget equity keeps the smaller number because
+ * its pool is far smaller (~36 RWA contracts clear 3M).
  */
 const SCAN_PARAM_DEFAULTS: Readonly<Record<MarketDataSource, Readonly<Record<ScanScope, ScanParams>>>> = {
   binance: {
-    crypto: { topN: 150, minQuoteVolume24h: 10_000_000 },
-    equity: { topN: 30, minQuoteVolume24h: 10_000_000 },
+    crypto: { minQuoteVolume24h: 10_000_000 },
+    equity: { minQuoteVolume24h: 10_000_000 },
   },
   bitget: {
-    crypto: { topN: 150, minQuoteVolume24h: 500_000 },
-    equity: { topN: 30, minQuoteVolume24h: 3_000_000 },
+    crypto: { minQuoteVolume24h: 100_000 },
+    equity: { minQuoteVolume24h: 3_000_000 },
   },
   okx: {
-    crypto: { topN: 150, minQuoteVolume24h: 1_000_000 },
-    equity: { topN: 30, minQuoteVolume24h: 1_000_000 },
+    crypto: { minQuoteVolume24h: 1_000_000 },
+    equity: { minQuoteVolume24h: 1_000_000 },
   },
 };
 
@@ -90,3 +109,24 @@ const SCAN_PARAM_DEFAULTS: Readonly<Record<MarketDataSource, Readonly<Record<Sca
 export function defaultScanParams(source: MarketDataSource, scope: ScanScope): ScanParams {
   return SCAN_PARAM_DEFAULTS[source][scope];
 }
+
+/**
+ * Window of the 1D coarse screen, in 1D bars — the calibrated `T` (10/13).
+ * `rangePct` / `|netPct|` are measured over exactly this many 1D bars ending at
+ * the newest completed bar. A `T` of 23 days is a SHARP optimum, not a plateau:
+ * `T ± 1` loses 1–2 of the 7 covered labels in the calibration, so changing it
+ * needs a re-run of `research/coarse-1d-percentile.md`, not a guess.
+ */
+export const COARSE_SCREEN_WINDOW_DAYS = 23;
+
+/**
+ * Pool percentile cap for the coarse screen's `rangePct` gate (the calibrated
+ * `qR`) — a CONSTANT, deliberately not an absolute threshold: the actual
+ * `rangePct` cut is recomputed from the current pool on every scan (see
+ * `coarseScreen`). Writing a frozen `W`/`D` back in would restore the pool-rate
+ * decay the percentile form removed (measured 31.2pp → 4.7pp on the 465 pool).
+ */
+export const COARSE_SCREEN_PCT_RANGE = 0.7370689655172413;
+
+/** Pool percentile cap for the coarse screen's `|netPct|` gate (the calibrated `qN`). */
+export const COARSE_SCREEN_PCT_NET = 0.4849137931034483;

@@ -1,8 +1,25 @@
 import type { Candlestick } from './candlestick';
-import type { MarketDataSource, ScanScope } from './scan-scope';
+import {
+  COARSE_SCREEN_PCT_NET,
+  COARSE_SCREEN_PCT_RANGE,
+  COARSE_SCREEN_WINDOW_DAYS,
+  type MarketDataSource,
+  type ScanScope,
+} from './scan-scope';
 import type { ReviewTimeframe } from './trade';
 
 export const scanTimeframes: ReviewTimeframe[] = ['5m', '15m', '1H', '4H', '1D'];
+
+/**
+ * The timeframe the coarse screen runs on. 1D is the only level where "盘得够久
+ * (23 天)、收住了(区间窄)、不在趋势中(净漂移小)" spans a meaningful calendar
+ * stretch — 4H was measured to be the SAME structure at a finer sampling density
+ * (16/16 sample points identical to within 0.0pp) with a worse constant
+ * stability, so the screen stays on 1D. It is also the level whose candles the
+ * scan fetches FIRST and alone (see `coin-scan-service.ts`): everything else is
+ * requested only for the instruments this screen keeps.
+ */
+export const COARSE_TIMEFRAME: ReviewTimeframe = '1D';
 
 /**
  * Per-timeframe offset for the SINGLE 结构强度阈值 knob (the UI keeps exactly one
@@ -34,6 +51,179 @@ export const TIMEFRAME_SCORE_OFFSET: Readonly<Partial<Record<ReviewTimeframe, nu
  */
 export function timeframeMinScore(timeframe: ReviewTimeframe, minScore: number): number {
   return Math.max(0, minScore + (TIMEFRAME_SCORE_OFFSET[timeframe] ?? 0));
+}
+
+/**
+ * Knobs of the 1D coarse screen (池内相对分位). All three are CALIBRATION
+ * constants — the window `T` plus the two percentile caps — and none of them is
+ * an absolute price threshold: the `rangePct` / `|netPct|` cuts are recomputed
+ * from the CURRENT pool on every scan (`coarseScreen`). That is the whole point
+ * of the percentile form: a frozen absolute `W`/`D` pair decays as the market
+ * moves (measured pool-rate drift 31.2pp over 15 anchors), the pool-relative cut
+ * does not (4.7pp).
+ */
+export type CoarseParams = {
+  /** Window length in 1D bars — the calibrated `T`. Absent → `COARSE_SCREEN_WINDOW_DAYS`. */
+  windowDays?: number;
+  /** Pool percentile cap for `rangePct` — the calibrated `qR`. Absent → `COARSE_SCREEN_PCT_RANGE`. */
+  pctRange?: number;
+  /** Pool percentile cap for `|netPct|` — the calibrated `qN`. Absent → `COARSE_SCREEN_PCT_NET`. */
+  pctNet?: number;
+};
+
+/** The calibrated coarse-screen parameters (465-pool calibration, 10/13). */
+export const DEFAULT_COARSE_PARAMS: Required<CoarseParams> = {
+  windowDays: COARSE_SCREEN_WINDOW_DAYS,
+  pctRange: COARSE_SCREEN_PCT_RANGE,
+  pctNet: COARSE_SCREEN_PCT_NET,
+};
+
+/**
+ * The two pool-relative measures the coarse screen judges, both over the last
+ * `windowDays` 1D bars. They mirror the user's three words:
+ * 盘得够久 = the window is long enough at all, 收住了 = a narrow `rangePct`,
+ * 不在趋势中 = a small `|netPct|`. Both are FRACTIONS (0.459 = 45.9%), not
+ * percents, matching the rest of the module's relative measures.
+ */
+export type CoarseMeasures = {
+  /** `(max high − min low) / lastClose` over the window — 振幅口径(含影线). */
+  rangePct: number;
+  /** `|close_last − close_first| / close_first` over the window — 净漂移(方向无关). */
+  netPct: number;
+};
+
+/**
+ * The coarse screen's pool-relative cuts for ONE scan. `poolSize` is the number
+ * of instruments the cuts were computed from — an instrument without a full
+ * window is not measurable and is not part of the base (see `coarseStructure`).
+ */
+export type CoarseScreen = {
+  /**
+   * Ascending pool value at rank `floor(pctRange × poolSize)`. Indicative only:
+   * the decision itself is rank-based (`rank ≤ floor(q × N)`, ties taking the
+   * most conservative rank — the calibration's `pctRanks`), so at a tie that
+   * straddles the cut a value equal to the threshold can still be rejected.
+   * `-Infinity` when the cut is 0 (too small a pool), i.e. nothing passes.
+   */
+  rangePctThreshold: number;
+  /** Same, for `|netPct|`. */
+  netPctThreshold: number;
+  /** Instruments with a full window — the percentile base `N`. */
+  poolSize: number;
+  /** The rank cut `floor(pctRange × N)`: a rank at or below it passes that gate. */
+  rangePctRank: number;
+  /** The rank cut `floor(pctNet × N)`. */
+  netPctRank: number;
+};
+
+/** One scan's coarse screen: the cuts, plus the per-input verdict aligned to the input order. */
+export type CoarseScreening = {
+  screen: CoarseScreen;
+  /** `passes[i]` decides whether `measures[i]` cleared BOTH gates; `null` never passes. */
+  passes: boolean[];
+};
+
+/**
+ * Measures one instrument's 1D window: `rangePct` and `|netPct|` over the newest
+ * `windowDays` bars. Pure — no pool, no thresholds, no absolute judgement.
+ *
+ * Returns `null` when the window cannot be measured AT ALL: fewer than
+ * `windowDays` bars (a 次新币 whose whole history is shorter than `T`), a
+ * non-positive price, or a non-finite result. Such an instrument has no place in
+ * the percentile BASE and can never pass the screen — the calibration treats it
+ * the same way (`T > available bars` ⇒ excluded, which is the right direction
+ * for a coin that has not been listed long enough to be 盘得够久).
+ */
+export function coarseStructure(candles: readonly Candlestick[], params: CoarseParams = {}): CoarseMeasures | null {
+  const windowDays = params.windowDays ?? DEFAULT_COARSE_PARAMS.windowDays;
+  const sorted = [...candles].sort((a, b) => a.timestamp - b.timestamp);
+  if (windowDays < 1 || sorted.length < windowDays) return null;
+  const window = sorted.slice(sorted.length - windowDays);
+  const firstClose = window[0].close;
+  const lastClose = window[window.length - 1].close;
+  if (!(firstClose > 0) || !(lastClose > 0)) return null;
+  let high = -Infinity;
+  let low = Infinity;
+  for (const candle of window) {
+    if (!(candle.low > 0)) return null;
+    if (candle.high > high) high = candle.high;
+    if (candle.low < low) low = candle.low;
+  }
+  const rangePct = (high - low) / lastClose;
+  const netPct = Math.abs(lastClose - firstClose) / firstClose;
+  if (!Number.isFinite(rangePct) || !Number.isFinite(netPct)) return null;
+  return { rangePct, netPct };
+}
+
+/**
+ * The 1D coarse screen: keep the instruments whose `rangePct` AND `|netPct|`
+ * both sit in the CURRENT pool's lowest `qR` / `qN` fraction. The thresholds are
+ * derived from `measures` on every call, which is what makes the pass rate
+ * structurally stable instead of decaying with the market (see `CoarseParams`).
+ *
+ * The ranking is the calibration's: ascending in-pool rank 1..N, and a tie group
+ * takes its MAXIMUM rank ("并列取最保守的秩"), so a pass needs `rank ≤ floor(q·N)`.
+ * Only one half of the user's judgement lives here — the screen is deliberately
+ * WIDE (≈44% of the 465 pool at the calibration point) and the precision is left
+ * to the small-timeframe stage; it exists to shrink the candidate set without
+ * dropping a label, not to be a good filter on its own.
+ */
+export function coarseScreen(
+  measures: readonly (CoarseMeasures | null)[],
+  params: CoarseParams = {},
+): CoarseScreening {
+  const pctRange = params.pctRange ?? DEFAULT_COARSE_PARAMS.pctRange;
+  const pctNet = params.pctNet ?? DEFAULT_COARSE_PARAMS.pctNet;
+  const present = measures.filter((measure): measure is CoarseMeasures => measure !== null);
+  const poolSize = present.length;
+  const rangeRanks = ascendingRanks(present.map((measure) => measure.rangePct));
+  const netRanks = ascendingRanks(present.map((measure) => measure.netPct));
+  const rangePctRank = Math.floor(pctRange * poolSize);
+  const netPctRank = Math.floor(pctNet * poolSize);
+  const passes: boolean[] = [];
+  let presentIndex = 0;
+  for (const measure of measures) {
+    if (measure === null) {
+      passes.push(false);
+      continue;
+    }
+    passes.push(rangeRanks[presentIndex] <= rangePctRank && netRanks[presentIndex] <= netPctRank);
+    presentIndex += 1;
+  }
+  return {
+    screen: {
+      rangePctThreshold: rankCutValue(present.map((measure) => measure.rangePct), rangePctRank),
+      netPctThreshold: rankCutValue(present.map((measure) => measure.netPct), netPctRank),
+      poolSize,
+      rangePctRank,
+      netPctRank,
+    },
+    passes,
+  };
+}
+
+/**
+ * Ascending in-pool ranks, 1-based, with a tie group sharing its MAXIMUM rank —
+ * the most conservative reading, and the one the percentile calibration used
+ * (`research/data/coarse-pct-*.csv`).
+ */
+function ascendingRanks(values: readonly number[]): number[] {
+  const order = values.map((_, index) => index).sort((a, b) => values[a] - values[b]);
+  const ranks = new Array<number>(values.length).fill(0);
+  let start = 0;
+  while (start < order.length) {
+    let end = start;
+    while (end + 1 < order.length && values[order[end + 1]] === values[order[start]]) end += 1;
+    for (let index = start; index <= end; index += 1) ranks[order[index]] = end + 1;
+    start = end + 1;
+  }
+  return ranks;
+}
+
+/** The ascending value at 1-based `rank`; `-Infinity` when the rank cut is 0. */
+function rankCutValue(values: readonly number[], rank: number): number {
+  if (rank < 1 || values.length === 0) return -Infinity;
+  return [...values].sort((a, b) => a - b)[Math.min(rank, values.length) - 1];
 }
 
 /**
@@ -125,7 +315,13 @@ export type ShrinkScanParams = {
    * are not silently compared).
    */
   source?: MarketDataSource;
-  topN: number;
+  /**
+   * Pool CAP (上限保护). Absent = the whole open pool of the scope — the default
+   * since 10/13, because the approved labels reach 24h-volume rank #319 and a
+   * top-N gate hid them entirely (see `scan-scope.ts`). A number still caps the
+   * pool, which is what the panel's 扫描数量 box sends when it is filled in.
+   */
+  topN?: number;
   minQuoteVolume24h: number;
   /** Scan anchor (epoch ms): bars whose close time <= anchor are treated as completed. Absent → now. */
   anchor?: number;
@@ -141,8 +337,26 @@ export type ShrinkScanParams = {
 };
 
 /**
- * One scanned coin. The scan covers all of `scanTimeframes`; a row exists only
- * when the coin converges on at least one timeframe (宁少勿滥).
+ * One row's share of the coarse screen. Row inclusion IS this screen, so `pass`
+ * is always true on a row that reached the response — it is echoed (together
+ * with the measures and this scan's cuts) so a row can be read on its own and so
+ * the panel can show WHY it is in the list.
+ */
+export type CoarseRow = {
+  pass: boolean;
+  rangePct: number;
+  netPct: number;
+  /** The cuts RECOMPUTED from this scan's own pool — identical on every row of one scan. */
+  rangePctThreshold: number;
+  netPctThreshold: number;
+};
+
+/**
+ * One scanned coin. A row exists when the coin passed the 1D coarse screen
+ * (池内分位, see `coarseScreen`) — that is the row criterion since 10/13; the
+ * per-timeframe convergence columns are reported for the survivors but no longer
+ * decide inclusion (a coarse-passing coin with no convergence anywhere still
+ * appears, with `convergedTimeframes` empty).
  */
 export type ScanRow = {
   instrument: string;
@@ -155,16 +369,38 @@ export type ScanRow = {
    * Timeframes whose structure is qualified AND whose `score` reaches that
    * level's effective threshold (`timeframeMinScore`); the 收敛结构 column.
    * Ascending `scanTimeframes` order, so the strongest level is the last entry.
+   * EMPTY when a coarse-passing coin converges nowhere.
    */
   convergedTimeframes: ReviewTimeframe[];
+  /** = `convergedTimeframes.length` (0 for a coarse-passing coin that converges nowhere). */
   qualifiedCount: number;
   /**
-   * Strongest score across the converged timeframes; a row always has >= 1
-   * (rows with none are dropped before this is computed).
+   * Strongest score across the converged timeframes, or 0 when there are none
+   * (only the converged entries can carry a score).
    */
   bestScore: number;
-  /** Always true (scanned rows only include coins with >= 1 converged timeframe). */
+  /** Always true (scanned rows only include coins that passed the coarse screen). */
   qualified: boolean;
+  /**
+   * The 1D coarse screen's verdict and measures. Always set by the service;
+   * optional so a pre-10/13 payload still type-checks.
+   */
+  coarse?: CoarseRow;
+};
+
+/** Response-level echo of the coarse screen: what ran, on how big a pool, with which cuts. */
+export type CoarseSummary = {
+  /** The window `T` (1D bars) the measures were taken over. */
+  windowDays: number;
+  pctRange: number;
+  pctNet: number;
+  /** Instruments that HAD a full window (the percentile base `N`; short histories excluded). */
+  poolSize: number;
+  /** The cuts derived from that pool for this scan — never constants. */
+  rangePctThreshold: number;
+  netPctThreshold: number;
+  /** The candidate pool the screen ran on (= the open pool, capped by `topN` when given). */
+  candidates: number;
 };
 
 export type ScanResponse = {
@@ -172,6 +408,8 @@ export type ScanResponse = {
   qualifiedCount: number;
   params: ShrinkScanParams;
   scannedAt: string;
+  /** The 1D coarse screen's parameters, base and cuts (see `CoarseSummary`). */
+  coarse?: CoarseSummary;
   /**
    * Rate-limit warnings raised DURING this scan (Binance HTTP 429 backoffs).
    * The scan still succeeded, but the pipeline had to pause for the IP's weight
@@ -180,10 +418,10 @@ export type ScanResponse = {
   warnings?: string[];
   /**
    * Instruments excluded because their underlying market was closed at the scan
-   * anchor (filtered after the 24h-volume gate and before the topN slice, so
-   * they never occupy a topN slot). Present only when at least one was skipped.
-   * Classes outside the scan pool (see `scan-pool.ts`) are NOT listed: they are
-   * a pool definition, not a per-scan omission.
+   * anchor (filtered after the 24h-volume gate, so a closed market never costs a
+   * candle request). Present only when at least one was skipped. Classes outside
+   * the scan pool (see `scan-pool.ts`) are NOT listed: they are a pool
+   * definition, not a per-scan omission.
    */
   skippedInstruments?: string[];
   /**
