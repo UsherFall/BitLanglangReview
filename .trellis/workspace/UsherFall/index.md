@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-10-12
+- **Total Sessions**: 23
+- **Last Active**: 2026-10-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1034 | Active |
+| `journal-1.md` | ~1057 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-10-14 | 选品扫描容错：单个标的取数失败不再中断整轮扫描 | `7d35a30`, `d23fa2f` | `master` |
 | 22 | 2026-10-12 | 选品扫描迁移 Bitget 行情源:源实现/默认切换/isRWA 两类分类/热度随源 | `abe34de`, `5d10576`, `220c703`, `ab68ba3`, `8c61759`, `d62d73b` | `master` |
 | 21 | 2026-09-20 | 收敛评分只保留收缩深度(删除长度项)与门槛重标定 | `37794c1`, `efc00f1` | `master` |
 | 20 | 2026-09-20 | 收敛扫描包含性闸门真正生效(排除被判定那根K线) | `490e983`, `d769cd8` | `master` |

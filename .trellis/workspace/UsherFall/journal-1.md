@@ -1032,3 +1032,26 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: 选品扫描容错：单个标的取数失败不再中断整轮扫描
+<!-- trellis-session: v=2 fp=600823a259a99bb8 -->
+
+**Date**: 2026-10-14
+**Task**: 选品扫描容错：单个标的取数失败不再中断整轮扫描
+**Branch**: `master`
+
+### Summary
+
+修 Bitget 12s 超时导致整轮选品扫描 502、结果全丢：两阶段逐标的隔离失败（stage1 复用无 measure 路径、stage2 整行淘汰），仅 418 经 gate 判定整轮中止，新增 ScanResponse.failedInstruments 与头部提示行；按用户决定不加重试/熔断、不动 12s。全量 524 测试 + tsc 通过，新测试已用 stash 回退验证非空转。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d35a30` | fix(coin-scan): 单个标的取数失败不再中断整轮扫描 |
+| `d23fa2f` | docs(spec): coin-scan 记录取数失败隔离与 failedInstruments 通道 |
+
+### Status
+
+[OK] **Completed**
