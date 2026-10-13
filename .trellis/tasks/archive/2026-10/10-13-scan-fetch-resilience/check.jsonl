@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "核对改动是否守住既有口径：粗筛阈值/排序/minScore 不动、skippedInstruments 语义不变、mapLimit 并发与 pacing 不变，且失败矩阵的 400/405/502 未被破坏。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本次跨层改 payload（服务层 → /api/scan JSON → CoinScanResults 渲染），其触发条件正是本指南列举的“feature changes payloads”一类，用于逐层核对契约是否贯通。"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查 UI 断言不耦合 mojibake 中文字面量，且不破坏 .detail-header / grid 结构断言。"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "检查新增可选字段没有引入 any / 非空断言，注入类型放宽后各处假 gate 仍类型完整。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否重复实现了既有 helper（提示行文案折叠、错误判定），以及 mapLimit 泛型放宽是否被写成了第二套容错原语。"}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "本次改动的权威契约：ScanResponse 字段语义、scanShrink 两阶段聚合伪码、并发=5 与限频 pacing 说明、错误矩阵、以及 skippedInstruments / warnings / metadataUnavailable 三条回报通道的既有分寸——新增 failedInstruments 必须与它们对齐。"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "取数失败来自哪一层：各 CandleSource 的 getCandlesticks 契约、缓存新鲜度/完整性门、以及失败时是抛错还是返回空数组——决定隔离点只能放在服务层的理由。"}
+{"file": ".trellis/spec/domain/index.md", "reason": "ScanResponse 定义在 src/domain/coin-scan.ts；域层是纯类型与确定性变换，不得引入 fetch/React，新增可选字段只能加类型与注释。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "加 isFatal/418 判定与 UI 提示行之前先确认没有既有 helper 可复用（formatSkippedNames、neutralStructure、.coin-scan-skip-hint 已存在的复用面）。"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 提示行的测试约定：本 checkout 部分中文字面量是 mojibake，断言必须写结构/名而非整句文案。"}
