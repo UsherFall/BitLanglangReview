@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-10-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1092 | Active |
+| `journal-1.md` | ~1126 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-10-15 | 标注窗口扩到 1 年：Bitget 往前翻页能力 | `68ca851` | `master` |
 | 24 | 2026-10-15 | 收敛标注工作台：三类候选抽样 + 可键盘快标的静态页 | `6ea86aa`, `a43e258` | `master` |
 | 23 | 2026-10-14 | 选品扫描容错：单个标的取数失败不再中断整轮扫描 | `7d35a30`, `d23fa2f` | `master` |
 | 22 | 2026-10-12 | 选品扫描迁移 Bitget 行情源:源实现/默认切换/isRWA 两类分类/热度随源 | `abe34de`, `5d10576`, `220c703`, `ab68ba3`, `8c61759`, `d62d73b` | `master` |

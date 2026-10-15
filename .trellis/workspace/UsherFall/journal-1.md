@@ -1090,3 +1090,37 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - 新任务：把「前期波幅够不够大」做进判据（检测器现在只算相对收缩，测不到这一轴）；用户将提供正面样本（如 2024-10 BTC 突破前高前的收敛）
+
+
+## Session 25: 标注窗口扩到 1 年：Bitget 往前翻页能力
+<!-- trellis-session: v=2 fp=6e3a65062f2580f9 -->
+
+**Date**: 2026-10-15
+**Task**: 标注窗口扩到 1 年：Bitget 往前翻页能力
+**Branch**: `master`
+
+### Summary
+
+给 BitgetCandleSource 加 opt-in 翻页取长历史（含只有最新页刷新的缓存策略），标注页改显示 1 年。踩到两个端点 endTime 语义不一致导致的死循环并修掉。
+
+### Main Changes
+
+- src/server/{bitget-candles,market-data}.ts 加 allowPaging 与 fetchEarlierPaged；tools/labeling 用 SlimBar + 紧凑 JSON + 1 年历史；新增 paging 单测；spec/server/market-data.md 记录契约与陷阱
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `68ca851` | feat(bitget): 往前翻页取长历史 + 标注窗口扩到 1 年 |
+
+### Testing
+
+- [OK] tsc；npm test 68 文件/530 全绿；AC1 同一快照 90 vs 365 的 candidates.csv 逐行一致；页面 jsdom 全绿；线上调用方零改动
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- structure-fullness：把判据改成以大行情为分界（依赖本轮翻页能力）；等用户提供正面样本
