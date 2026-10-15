@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import type { Candlestick } from '../../src/domain/candlestick';
+import type { ReviewTimeframe } from '../../src/domain/trade';
 
 /** Everything this tool writes lives here; the directory is gitignored. */
 export const OUT_DIR = fileURLToPath(new URL('./out/', import.meta.url));
@@ -48,8 +49,21 @@ export type Snapshot = {
   source: string;
   timeframe: string;
   fetchedAt: string;
-  /** instrument -> ascending 1D bars, forming bar and closed-market bars already dropped. */
-  candles: Record<string, Candlestick[]>;
+  /**
+   * The bars the DETECTORS see, for the whole pool: the newest ~90 (exactly the
+   * window the shipped scan gets, see `design.md` §2). Slimmed to `SlimBar`
+   * because the verbose `Candlestick` shape costs ~238 B/bar.
+   */
+  candles: Record<string, SlimBar[]>;
+  /**
+   * The bars the CHART sees, for the sampled candidates only: about a year, so a
+   * human can see whether a real prior move ("前戏") happened. Never fed to the
+   * detectors — that would move `posRange` and decouple the sample from the live
+   * scan.
+   */
+  history: Record<string, SlimBar[]>;
+  /** How many bars `history` was fetched for; lets a reuse run detect a changed `--history`. */
+  historyBars: number;
   /**
    * instrument -> its 24h volume reading AT THE SNAPSHOT. Frozen alongside the
    * bars because these come from a live ticker fetch: leaving them live would
@@ -57,6 +71,30 @@ export type Snapshot = {
    */
   volume: Record<string, { quoteVolume24h: number; volumeRank: number }>;
 };
+
+/** `[timestamp, open, high, low, close]` — the storage-friendly candle shape. */
+export type SlimBar = [number, number, number, number, number];
+
+export function toSlim(candles: readonly Candlestick[]): SlimBar[] {
+  return candles.map((candle) => [candle.timestamp, candle.open, candle.high, candle.low, candle.close]);
+}
+
+/**
+ * Rebuilds the domain shape for the detectors. `volume` is not read by
+ * `coarseStructure` / `probeStructure`, so it is not carried in `SlimBar`.
+ */
+export function toCandles(instrument: string, timeframe: ReviewTimeframe, bars: readonly SlimBar[]): Candlestick[] {
+  return bars.map(([timestamp, open, high, low, close]) => ({
+    instrument,
+    timeframe,
+    timestamp,
+    open,
+    high,
+    low,
+    close,
+    volume: 0,
+  }));
+}
 
 export function ensureOutDir(): void {
   fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -67,8 +105,13 @@ export function readJson<T>(file: string): T | null {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 }
 
-export function writeJson(file: string, value: unknown): void {
-  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+/**
+ * `indent` defaults to 2 for the small human-read files (candidates.json). The
+ * candle snapshot passes 0: with ~140k `SlimBar` arrays, pretty-printing costs
+ * more than twice as much (measured 14.3 MB vs 6.6 MB for 1 year × 285).
+ */
+export function writeJson(file: string, value: unknown, indent = 2): void {
+  fs.writeFileSync(file, `${JSON.stringify(value, null, indent)}\n`, 'utf8');
 }
 
 /** Deterministic 32-bit PRNG so the `reject` sample is reproducible per seed. */

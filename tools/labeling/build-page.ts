@@ -26,16 +26,19 @@ import {
   mulberry32,
   readJson,
   type Candidate,
+  type SlimBar,
   type Snapshot,
 } from './shared';
 
 const require = createRequire(import.meta.url);
 const CHART_LIB = 'lightweight-charts.js';
 
-/** Bars reduced to what a candlestick chart needs; keeps the HTML small. */
-type PageBar = { time: number; open: number; high: number; low: number; close: number };
-
-type PageItem = Candidate & { bars: PageBar[] };
+/**
+ * Bars are carried as `SlimBar` arrays all the way to the page and only turned
+ * into the chart's object shape inside the browser. At ~35 B/bar that keeps a
+ * year × ~230 candidates inside a few MB; the object form cost ~83 B/bar.
+ */
+type PageItem = Candidate & { bars: SlimBar[] };
 
 /** Deterministic shuffle so on-screen order is mixed but reproducible. */
 function shuffled<T>(items: readonly T[], seed: number): T[] {
@@ -54,7 +57,11 @@ function build(): void {
   const listing = readJson<{ candidates: Candidate[] }>(CANDIDATES_FILE);
   if (!listing) throw new Error(`no candidates at ${CANDIDATES_FILE} — run: npm run label:sample`);
 
-  const missing = listing.candidates.filter((candidate) => !snapshot.candles[candidate.instrument]);
+  // The chart shows the long series when the snapshot has one; the detector-only
+  // 90-bar series is the fallback for a snapshot taken before `--history`.
+  const history = snapshot.history ?? {};
+  const barsFor = (instrument: string) => history[instrument] ?? snapshot.candles[instrument];
+  const missing = listing.candidates.filter((candidate) => !barsFor(candidate.instrument));
   if (missing.length > 0) {
     throw new Error(
       `candidates.json and candles.json disagree for ${missing.length} instrument(s): ` +
@@ -64,13 +71,7 @@ function build(): void {
 
   const items: PageItem[] = shuffled(listing.candidates, snapshot.anchor).map((candidate) => ({
     ...candidate,
-    bars: snapshot.candles[candidate.instrument].map((bar) => ({
-      time: Math.floor(bar.timestamp / 1000),
-      open: bar.open,
-      high: bar.high,
-      low: bar.low,
-      close: bar.close,
-    })),
+    bars: barsFor(candidate.instrument)!,
   }));
 
   ensureOutDir();
@@ -225,7 +226,7 @@ const TEMPLATE = `<!doctype html>
     var item = ITEMS[index];
 
     document.getElementById('sym').textContent = item.instrument;
-    document.getElementById('meta').textContent = TF + ' · 快照 ' + '__SNAPSHOT__';
+    document.getElementById('meta').textContent = TF + ' · 快照 ' + '__SNAPSHOT__' + ' · ' + item.bars.length + ' 根';
     document.getElementById('progress').textContent = (index + 1) + ' / ' + ITEMS.length +
       '　已标 ' + labeledCount();
     document.getElementById('bar').style.width = ((index + 1) / ITEMS.length * 100) + '%';
@@ -233,7 +234,10 @@ const TEMPLATE = `<!doctype html>
       ? ('score ' + item.score.toFixed(3) + (item.converged ? ' · 判收敛' : '') + (item.passCoarse ? ' · 过粗筛' : ''))
       : '';
 
-    series.setData(item.bars);
+    // SlimBar: [timestamp, open, high, low, close] -> the chart's own shape.
+    series.setData(item.bars.map(function (bar) {
+      return { time: Math.floor(bar[0] / 1000), open: bar[1], high: bar[2], low: bar[3], close: bar[4] };
+    }));
     chart.timeScale().fitContent();
 
     var rec = labels[item.instrument];

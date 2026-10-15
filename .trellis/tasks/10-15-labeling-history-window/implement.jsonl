@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "K线取数与缓存契约——翻页必须遵守的命中/新鲜度规则"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "为何线上必须零变化:1D 请求 100 根但端点只回 90,自动翻页会改 posRange 从而改候选集"}
+{"file": ".trellis/spec/server/index.md", "reason": "server 层边界(本地中间件,不部署)"}
+{"file": ".trellis/tasks/archive/2026-10/10-14-labeling-workbench/design.md", "reason": "标注工具既有设计:快照格式/页面模板/理由集,本任务在其上扩窗口"}

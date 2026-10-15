@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对翻页与缓存语义是否符合契约"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "翻页能力必须落在 src/server 供线上复用,不得在工具里另造一份"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "静态页行为验证口径"}
+{"file": ".trellis/spec/server/index.md", "reason": "server 层边界检查"}

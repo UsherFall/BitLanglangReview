@@ -21,7 +21,22 @@ type BitgetCandlesResponse = {
 
 const BITGET_BASE_URL = 'https://api.bitget.com';
 const BITGET_CANDLES_PATH = '/api/v2/mix/market/candles';
+/**
+ * The deeper-history sibling of `/candles`. Measured 2026-10-15: `/candles` only
+ * serves back to ≈2023-10 on 1D while this one reaches ≈2019-10, both at 90 rows
+ * per request. Used for the OLD pages of a paged read; the newest page stays on
+ * `/candles` so the bars a paged caller sees first are byte-identical to what the
+ * single-request path (and therefore the coin scan) fetches.
+ */
+const BITGET_HISTORY_CANDLES_PATH = '/api/v2/mix/market/history-candles';
 const BITGET_PRODUCT_TYPE = 'USDT-FUTURES';
+
+/**
+ * Rows ONE request may return. The endpoint's `limit` is capped per granularity
+ * and 1D is capped at 90 (measured: `limit=200` still returns 90), so paging is
+ * the only way to reach a longer window on 1D.
+ */
+const BITGET_PAGE_BARS = 90;
 
 /** Bitget caps a single candles request's startTime~endTime span at 90 days. */
 const BITGET_MAX_RANGE_MS = 90 * 24 * 60 * 60_000;
@@ -72,6 +87,10 @@ export class BitgetCandleSource implements CandleSource {
       return cached;
     }
 
+    if (request.allowPaging && request.direction === 'earlier') {
+      return this.fetchEarlierPaged(request, cached);
+    }
+
     const step = timeframeMs(request.timeframe);
     const url = new URL(`${BITGET_BASE_URL}${BITGET_CANDLES_PATH}`);
     url.searchParams.set('productType', BITGET_PRODUCT_TYPE);
@@ -111,6 +130,80 @@ export class BitgetCandleSource implements CandleSource {
       .sort((a, b) => a.timestamp - b.timestamp);
     this.store.save(candles);
     return this.listCached(request);
+  }
+
+  /**
+   * Paged `earlier` read: the newest page always, then older pages only for the
+   * stretch the cache does not already hold. One request cannot satisfy a long
+   * `limit` on 1D (90-bar cap), so "give me `limit` bars" needs this loop.
+   *
+   * The cache is what makes it affordable: older bars never change, so only the
+   * NEWEST page is ever re-read on a refresh — a warm cache costs exactly one
+   * request per call, the same as the single-request path.
+   */
+  private async fetchEarlierPaged(request: CandleRequest, cached: Candlestick[]): Promise<Candlestick[]> {
+    const perPage = Math.min(BITGET_PAGE_BARS, request.limit);
+    const newestIsUsable = !request.refresh && cached.length > 0 && isCacheFresh(request, cached) && coversAnchorBar(request, cached);
+    if (!newestIsUsable) {
+      await this.requestEarlierPage(request, BITGET_CANDLES_PATH, request.anchor - 1, perPage);
+    }
+    // Walk back until the contiguous run reaches `limit` or the exchange runs out.
+    // `maxPages` is a runaway stop, not a budget: a healthy read needs
+    // ceil(limit / perPage) pages and every iteration advances the cursor.
+    const maxPages = Math.ceil(request.limit / perPage) + 2;
+    for (let page = 0; page < maxPages; page += 1) {
+      const have = this.listCached(request);
+      if (have.length >= request.limit) break;
+      const oldest = have[0]?.timestamp;
+      if (oldest === undefined) break;
+      // The cursor is `oldest` itself, NOT `oldest - 1`. The two endpoints do not
+      // agree on `endTime`: `/candles` returns the bar CONTAINING endTime while
+      // `/history-candles` returns only bars that had already CLOSED by it
+      // (measured 2026-10-15). Asking for `oldest - 1` therefore drops the bar
+      // right below the newest page and leaves a one-day hole, which
+      // `contiguousCandles` refuses to cross — so `oldest` never moves and the
+      // same page is re-requested forever. `oldest` is contiguous under both
+      // readings (the overlap is an upsert of a bar we already have).
+      const added = await this.requestEarlierPage(request, BITGET_HISTORY_CANDLES_PATH, oldest, perPage);
+      // Belt and braces: a page that saves rows but does not extend the
+      // contiguous run (a hole of any other shape) must stop the walk rather
+      // than spin. Without this, the bug above cost 19 minutes of refetching.
+      if (added === 0 || this.listCached(request).length <= have.length) break;
+    }
+    return this.listCached(request);
+  }
+
+  /**
+   * One `earlier` request against `path`, ending at `endTime` (inclusive — see
+   * the cursor note in `fetchEarlierPaged`). Bars are saved (primary-key upsert,
+   * so an overlapping page is harmless) and the count this page contributed is
+   * returned, which is how the paging loop detects "the exchange has no more".
+   */
+  private async requestEarlierPage(
+    request: CandleRequest,
+    path: string,
+    endTime: number,
+    limit: number,
+  ): Promise<number> {
+    const url = new URL(`${BITGET_BASE_URL}${path}`);
+    url.searchParams.set('productType', BITGET_PRODUCT_TYPE);
+    url.searchParams.set('symbol', request.instrument);
+    url.searchParams.set('granularity', request.timeframe);
+    url.searchParams.set('limit', String(limit));
+    url.searchParams.set('endTime', String(endTime));
+
+    const payload = (await this.fetchJson(url.toString())) as BitgetCandlesResponse;
+    if (payload?.code !== undefined && payload.code !== '00000') {
+      throw new Error(`Bitget 行情错误 code=${String(payload.code)}${payload.msg ? `: ${String(payload.msg)}` : ''}`);
+    }
+    const step = timeframeMs(request.timeframe);
+    const key = storeKey(request.instrument);
+    const candles = (Array.isArray(payload?.data) ? payload.data : [])
+      .map((row) => toCandlestick(key, request.timeframe, row))
+      .filter((candle) => candle.timestamp + step <= request.anchor)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    this.store.save(candles);
+    return candles.length;
   }
 
   private listCached(request: CandleRequest): Candlestick[] {

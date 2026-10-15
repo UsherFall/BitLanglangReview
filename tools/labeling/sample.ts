@@ -48,8 +48,11 @@ import {
   ensureOutDir,
   mulberry32,
   readJson,
+  toCandles,
+  toSlim,
   writeJson,
   type Candidate,
+  type SlimBar,
   type Snapshot,
 } from './shared';
 
@@ -68,6 +71,7 @@ type Options = {
   rejectCount: number;
   seed: number;
   minScore: number;
+  history: number;
 };
 
 const HELP = `Usage: npm run label:sample -- [options]
@@ -79,6 +83,7 @@ const HELP = `Usage: npm run label:sample -- [options]
   --reject <n>        random rejects to keep              (default 30)
   --seed <n>          PRNG seed for the reject sample     (default 20261014)
   --min-score <n>     the panel's 结构强度阈值 knob         (default 0.6)
+  --history <bars>    daily bars to CHART for each candidate (default 365 ≈ 1 year)
 `;
 
 function parseOptions(argv: readonly string[]): Options {
@@ -90,6 +95,7 @@ function parseOptions(argv: readonly string[]): Options {
     rejectCount: 30,
     seed: 20261014,
     minScore: 0.6,
+    history: 365,
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -115,6 +121,9 @@ function parseOptions(argv: readonly string[]): Options {
         break;
       case '--min-score':
         options.minScore = value();
+        break;
+      case '--history':
+        options.history = value();
         break;
       case '--help':
         process.stdout.write(HELP);
@@ -221,9 +230,9 @@ async function fetchSnapshot(tickers: readonly Ticker[], anchor: number): Promis
     }
   });
 
-  const candles: Record<string, Candlestick[]> = {};
+  const candles: Record<string, SlimBar[]> = {};
   for (const { instrument, bars } of fetched) {
-    if (bars.length > 0) candles[instrument] = bars;
+    if (bars.length > 0) candles[instrument] = toSlim(bars);
   }
   // Freeze the volume reading too, so a rerun from this file is reproducible.
   const volume: Snapshot['volume'] = {};
@@ -238,9 +247,11 @@ async function fetchSnapshot(tickers: readonly Ticker[], anchor: number): Promis
     timeframe: COARSE_TIMEFRAME,
     fetchedAt: new Date().toISOString(),
     candles,
+    history: {},
+    historyBars: 0,
     volume,
   };
-  writeJson(CANDLES_FILE, snapshot);
+  writeJson(CANDLES_FILE, snapshot, 0);
   process.stdout.write(
     `snapshot written: ${Object.keys(candles).length} instruments with bars` +
       (failures.length > 0 ? `, ${failures.length} failed (${failures.join(', ')})` : '') +
@@ -266,6 +277,66 @@ async function resolveSnapshot(options: Options): Promise<Snapshot> {
   const tickerSource = new BitgetTickerSource(undefined, bitgetInstrumentMetadata());
   const tickers = await tickerSource.listTickers();
   return fetchSnapshot(tickers, options.anchor ?? Date.now());
+}
+
+/**
+ * Fetches the CHART window (about a year) for the sampled candidates only, via
+ * the paged read. These bars are never fed to a detector — see `Snapshot.history`.
+ *
+ * A rerun without `--refresh` and with an unchanged `--history` costs nothing:
+ * the snapshot already holds the series. That is also why this is a separate
+ * stage rather than part of `fetchSnapshot` — the candidate set is not known
+ * until after the coarse screen.
+ */
+async function ensureHistory(snapshot: Snapshot, candidates: readonly Candidate[], options: Options): Promise<void> {
+  const existing = snapshot.history ?? {};
+  const covered =
+    snapshot.historyBars === options.history &&
+    candidates.length > 0 &&
+    candidates.every((candidate) => existing[candidate.instrument] !== undefined);
+  if (covered) {
+    process.stdout.write(`history reused: up to ${options.history} bars for ${candidates.length} candidates\n`);
+    return;
+  }
+
+  fs.mkdirSync(resolveDataPath(), { recursive: true });
+  const candleSource = new BitgetCandleSource(new CandlestickStore(resolveDataPath('labeling.sqlite')));
+  process.stdout.write(`history: paging up to ${options.history} bars for ${candidates.length} candidates\n`);
+  let done = 0;
+  const fetched = await mapLimit(candidates, FETCH_CONCURRENCY, async (candidate) => {
+    try {
+      // No extra completion filter here: the source already drops the
+      // still-forming bar with the same `timestamp + step <= anchor` rule.
+      const bars = await candleSource.getCandlesticks({
+        instrument: candidate.instrument,
+        timeframe: COARSE_TIMEFRAME,
+        anchor: snapshot.anchor,
+        direction: 'earlier',
+        limit: options.history,
+        refresh: true,
+        allowPaging: true,
+      });
+      done += 1;
+      if (done % PROGRESS_EVERY === 0) process.stdout.write(`  history ${done}/${candidates.length}\n`);
+      return { instrument: candidate.instrument, bars };
+    } catch (error) {
+      process.stdout.write(`  ! history ${candidate.instrument}: ${error instanceof Error ? error.message : String(error)}\n`);
+      return { instrument: candidate.instrument, bars: [] as Candlestick[] };
+    }
+  });
+
+  const history: Record<string, SlimBar[]> = {};
+  for (const { instrument, bars } of fetched) history[instrument] = toSlim(bars);
+  snapshot.history = history;
+  snapshot.historyBars = options.history;
+  writeJson(CANDLES_FILE, snapshot, 0);
+  const lengths = Object.values(history)
+    .map((bars) => bars.length)
+    .sort((a, b) => a - b);
+  process.stdout.write(
+    `history written: ${lengths.length} instruments, bars ${lengths[0]}–${lengths[lengths.length - 1]} ` +
+      `(median ${lengths[Math.floor(lengths.length / 2)]})\n`,
+  );
 }
 
 function toCsv(rows: readonly Candidate[]): string {
@@ -313,16 +384,18 @@ async function main(): Promise<void> {
   const snapshot = await resolveSnapshot(options);
   const anchor = snapshot.anchor;
   const instruments = Object.keys(snapshot.candles).sort();
+  // The detector input: the frozen ~90-bar series, rebuilt into the domain shape.
+  const candlesOf = (instrument: string) => toCandles(instrument, COARSE_TIMEFRAME, snapshot.candles[instrument]);
 
   // The same two calls the service makes, over the same snapshot.
   const coarseParams = DEFAULT_COARSE_PARAMS;
-  const measures = instruments.map((instrument) => coarseStructure(snapshot.candles[instrument], coarseParams));
+  const measures = instruments.map((instrument) => coarseStructure(candlesOf(instrument), coarseParams));
   const { screen, passes } = coarseScreen(measures, coarseParams);
   const structureParams = defaultStructureParams();
   const threshold = timeframeMinScore(COARSE_TIMEFRAME, options.minScore);
 
   const all: Candidate[] = instruments.map((instrument, index) => {
-    const structure = probeStructure(snapshot.candles[instrument], structureParams);
+    const structure = probeStructure(candlesOf(instrument), structureParams);
     const score = structure?.score ?? 0;
     const structureQualified = structure?.qualified ?? false;
     const measure = measures[index];
@@ -372,6 +445,7 @@ async function main(): Promise<void> {
   for (const candidate of reject) candidate.bucket = 'reject';
 
   const rows = [...qualified, ...boundary, ...reject];
+  await ensureHistory(snapshot, rows, options);
   writeJson(CANDIDATES_FILE, {
     anchor,
     source: SOURCE,

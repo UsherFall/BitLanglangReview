@@ -45,6 +45,19 @@ export type CandleRequest = {
   limit: number;
   /** Bypass the cache-freshness gate and always fetch from the market source. */
   refresh?: boolean;
+  /**
+   * Opt-in: keep requesting OLDER pages until `limit` bars are available (or the
+   * exchange runs out), instead of accepting whatever one request can return.
+   * Only `direction: 'earlier'`; ignored otherwise.
+   *
+   * Absent/false keeps the single-request behaviour every existing caller relies
+   * on. That default matters: the coin scan asks for `scanWindowFor()` = 100 bars
+   * on 1D while Bitget's 1D endpoint caps at 90 per request, so turning paging on
+   * for every caller would silently hand the detector a 100-bar series and move
+   * `coarseStructure`'s `posRange` — i.e. change the candidate set. Slower-moving
+   * callers opt in explicitly; see `server/market-data.md`.
+   */
+  allowPaging?: boolean;
 };
 
 export interface CandleSource {
