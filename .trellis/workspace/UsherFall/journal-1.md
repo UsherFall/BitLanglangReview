@@ -1124,3 +1124,37 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - structure-fullness：把判据改成以大行情为分界（依赖本轮翻页能力）；等用户提供正面样本
+
+
+## Session 26: 标注理由补「顺势」：判据扩到三点
+<!-- trellis-session: v=2 fp=76ac33dfb04ac4e4 -->
+
+**Date**: 2026-10-15
+**Task**: 标注理由补「顺势」：判据扩到三点
+**Branch**: `master`
+
+### Summary
+
+理由集加「还没顺势」，口径模板改成三点；写清「顺势」实际含义是偏向而非顺前一段（用户反例：跌完在箱体顶部收敛→看多）。
+
+### Main Changes
+
+- tools/labeling/{build-page.ts,label-rubric.md}；新增轻量任务 10-15-labeling-trend-bias
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `659263a` | feat(labeling): 理由集补「还没顺势」——判据从两轴扩到三点 |
+
+### Testing
+
+- [OK] tsc；npm test 530 全绿；src/ 零改动；jsdom 断言全绿且确认重生成页面后既有进度不丢
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- structure-fullness 仍在 planning，等正面样本；「顺势」做成可计算量也归它
