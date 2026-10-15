@@ -150,15 +150,16 @@ const TEMPLATE = `<!doctype html>
   <button class="dim" id="q">拿不准 <kbd>?</kbd></button>
   <button id="prev">上一张 <kbd>←</kbd></button>
   <span class="grow"></span>
-  <select id="reason" title="理由（可选），数字键 1-3 直选，0 清除">
+  <select id="reason" title="理由（可选），数字键 1-4 直选，0 清除">
     <option value="">（无理由）</option>
     <option value="前戏不足">前戏不足</option>
     <option value="收缩没到位">收缩没到位</option>
+    <option value="还没顺势">还没顺势</option>
     <option value="就是好">就是好</option>
     <option value="其他">其他</option>
   </select>
   <input type="text" id="note" placeholder="补充（可选）" size="14" />
-  <span class="hint">理由 <kbd>1</kbd>-<kbd>3</kbd>，<kbd>0</kbd> 清除</span>
+  <span class="hint">理由 <kbd>1</kbd>-<kbd>4</kbd>，<kbd>0</kbd> 清除</span>
   <button id="toggle">显示 score <kbd>S</kbd></button>
   <button id="export">导出 labels.csv</button>
   <button id="reset" title="清空本快照的本地进度">重置</button>
@@ -327,7 +328,7 @@ const TEMPLATE = `<!doctype html>
     else if (k === 'ArrowRight') { index += 1; save(); render(); }
     else if (k === 's' || k === 'S') { document.getElementById('toggle').click(); }
     else if (k === '0') { reasonEl.selectedIndex = 0; }
-    else if (k >= '1' && k <= '3') { reasonEl.selectedIndex = Number(k); }
+    else if (k >= '1' && k <= '4') { reasonEl.selectedIndex = Number(k); }
   });
 
   render();
