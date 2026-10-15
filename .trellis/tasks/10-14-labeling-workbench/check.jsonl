@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "核对采样脚本是否与线上池过滤/判定一致(不得出现第二份真相)"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "静态标注页的行为验证口径"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用优先:判定与取数必须调 src/,禁止复制"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "工具层与运行时层的边界检查"}

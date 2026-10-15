@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "label:sample": "tsx tools/labeling/sample.ts",
+    "label:page": "tsx tools/labeling/build-page.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -29,6 +31,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "jsdom": "latest",
+    "tsx": "^4.23.15",
     "vitest": "latest"
   }
 }

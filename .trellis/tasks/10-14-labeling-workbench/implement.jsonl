@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "池过滤顺序/粗筛与收敛判定的唯一真相——采样脚本必须逐行复用而非复制"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "Bitget 取数与缓存语义(limit 上限、refresh、1D 硬顶 90 根)"}
+{"file": ".trellis/spec/domain/index.md", "reason": "domain 层约定:纯函数、相对量口径"}
+{"file": ".trellis/tasks/10-12-coin-scan-absolute-convergence/research/labeling-sheet-1d.md", "reason": "现有 12 个 1D 标签即检测器合格名单——采样框偏置的根因,决定三类配比"}
+{"file": ".trellis/tasks/10-12-coin-scan-absolute-convergence/research/coarse-1d-percentile.md", "reason": "池内分位粗筛的标定(阈值/池率/边界)——边界带阈值 0.35 的依据"}

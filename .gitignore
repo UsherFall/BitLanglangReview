@@ -14,6 +14,9 @@ coverage/
 # Throwaway research probes / fetched-candle caches (also excluded from vite watch).
 .scratch/
 
+# Convergence labeling workbench outputs (snapshots, candidate lists, pages, labels).
+tools/labeling/out/
+
 # Local review data. Keep the database and archive export on this machine.
 data/
 data.zip
