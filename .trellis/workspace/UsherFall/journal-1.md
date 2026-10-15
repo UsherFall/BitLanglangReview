@@ -1055,3 +1055,38 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 24: 收敛标注工作台：三类候选抽样 + 可键盘快标的静态页
+<!-- trellis-session: v=2 fp=95fc19031ab59aa0 -->
+
+**Date**: 2026-10-15
+**Task**: 收敛标注工作台：三类候选抽样 + 可键盘快标的静态页
+**Branch**: `master`
+
+### Summary
+
+交付 tools/labeling（sample/build-page/rubric），把 1D 标签扩到几百个的前置工具；判定口径定为结构饱满度（前戏足 + 收缩到位），理由集收缩为 4 项。标签尚未实际采集。
+
+### Main Changes
+
+- 新增 tools/labeling/{shared,sample,build-page}.ts + label-rubric.md；tsx 开发依赖、package.json 两个脚本、tsconfig include 加 tools、.gitignore 忽略 out/
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6ea86aa` | feat(tools): 收敛标注工作台——三类候选抽样 + 可键盘快标的静态页 |
+| `a43e258` | refactor(labeling): 理由集收缩到用户的判定两轴（前戏/收缩） |
+
+### Testing
+
+- [OK] tsc --noEmit；npm test 67 文件/524 测试全绿；页面 jsdom 行为断言（键盘/回退/scoreShown/CSV/断点续标/理由键位）全绿；candidates.csv 连续 3 次 md5 相同
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 新任务：把「前期波幅够不够大」做进判据（检测器现在只算相对收缩，测不到这一轴）；用户将提供正面样本（如 2024-10 BTC 突破前高前的收敛）
