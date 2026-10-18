@@ -147,7 +147,13 @@ _Avoid_: market screener, strategy backtest
 
 **Shrink Method** (缩量方法):
 The first **Instrument Scan** method, available in both sub-modules. It scans the sub-module's **whole scan-pool universe** above a low 24h quote-volume floor (USDT-M perpetuals only) — there is **no top-N slice**; `扫描数量` is only an optional upper bound — and ranks the surviving rows by how much their recent volatility has shrunk relative to each instrument's own recent stretch. The pool applies the **Scan Pool Policy**, the sub-module's **Scan Scope**, and **Session Gating**; a **Coarse Screen** then decides which instruments become rows, and each row's window holds only **Session-only Series** candles.
-_Avoid_: volume drop filter, low volume watch**Coarse Screen** (粗筛):
+_Avoid_: volume drop filter, low volume watch
+
+**Box-braces** (箱体蓄力 / squeeze):
+The shape the reviewer scans for that the **Shrink Method** cannot express (10/18): a box measured by **height**, not volatility. A window qualifies when its close is still inside the box (**not broken yet**), its high does not exceed the high of the move that preceded it (**under a move**, not a new leg), and its height is at most 0.65 of that move's travel (**squeezed**); the reported box is the longest qualifying window. It is deliberately look-ahead free — the scan fires on the bar BEFORE the breakout — and judges only the last `SQUEEZE_MAX_RUN` (30) bars, so a structure spanning months is described by its tail. Implemented as `detectBoxBrace` in `src/domain/box-brace.ts` and served as `/api/scan?method=box` (`CoinScanService.scanBoxBrace`, `BoxScanResults` panel). Measured 10/18: it fires on a median of ~244 instruments per day, so it is a description of the shape, not a shortlist on its own.
+_Avoid_: triangle, triangle apex, trendline structure, swing geometry
+
+**Coarse Screen** (粗筛):
 The **Instrument Scan**'s row gate: on the daily series, an instrument becomes a row only when its recent window is **long enough, tight enough, and no longer trending** — expressed **relative to the rest of the pool** (a rank against the pool's own range and net-drift distribution), never as a fixed absolute range. This keeps the gate self-calibrating as the market changes; precision is deliberately left to the per-timeframe convergence readings, and a wide-range structure (see ACE) is not expected to pass. The one deliberate exception is a fixed near-zero FLOOR under where the price sits inside its whole daily series (排除趴在序列绝对底部者, 10/13) — an absolute rail on **position**, not on range, and a precision patch rather than a screen (~97.6% of the pool passes it).
 _Avoid_: absolute range threshold, top-N slice
 

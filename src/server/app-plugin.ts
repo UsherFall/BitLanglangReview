@@ -330,7 +330,7 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           }
           return;
         }
-        if (method !== 'shrink') {
+        if (method !== 'shrink' && method !== 'box') {
           return send(res, 400, { error: 'Unsupported scan method' });
         }
         // The volume floor is per `source × scope` (`SCAN_PARAM_DEFAULTS`); an
@@ -356,6 +356,39 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         }
         if (minScore !== undefined && minScore < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
+        }
+        if (method === 'box') {
+          // 箱体蓄力: box shape knobs are optional and defaulted in the domain;
+          // a present value must still be sane, so a typo cannot scan nothing.
+          const minRun = parseOptionalNumber(url.searchParams.get('minRun'));
+          const maxRun = parseOptionalNumber(url.searchParams.get('maxRun'));
+          const maxHeightRatio = parseOptionalNumber(url.searchParams.get('maxHeightRatio'));
+          if (
+            (minRun !== undefined && minRun < 3) ||
+            (maxRun !== undefined && maxRun < 3) ||
+            (maxRun !== undefined && minRun !== undefined && maxRun < minRun) ||
+            (maxHeightRatio !== undefined && (maxHeightRatio <= 0 || maxHeightRatio > 2))
+          ) {
+            return send(res, 400, { error: 'Invalid scan parameters' });
+          }
+          try {
+            send(
+              res,
+              200,
+              await coinScanServices[source].scanBoxBrace({
+                scope,
+                source,
+                minQuoteVolume24h,
+                anchor,
+                minRun,
+                maxRun,
+                maxHeightRatio,
+              }),
+            );
+          } catch (error) {
+            send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
+          }
+          return;
         }
         try {
           const result = await coinScanServices[source].scanShrink({

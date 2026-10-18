@@ -1,5 +1,11 @@
 import type { Candlestick } from '../domain/candlestick';
 import {
+  SQUEEZE_LOOKBACKS,
+  SQUEEZE_MAX_RUN,
+  detectBoxBrace,
+  type BoxBrace,
+} from '../domain/box-brace';
+import {
   COARSE_TIMEFRAME,
   DEFAULT_COARSE_PARAMS,
   coarseScreen,
@@ -16,7 +22,7 @@ import {
 import { isCandleInSession, isMarketOpen, marketSession } from '../domain/market-session';
 import type { MarketClass } from '../domain/market-class';
 import { isScannable } from '../domain/scan-pool';
-import { scanScopeOf } from '../domain/scan-scope';
+import { scanScopeOf, type MarketDataSource, type ScanScope } from '../domain/scan-scope';
 import type { ReviewTimeframe } from '../domain/trade';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, Ticker, TickerSource } from './market-data';
@@ -46,6 +52,44 @@ const SCAN_WINDOW = 100;
  * staying inside Binance's cheapest klines weight band (< 500 → weight 2).
  */
 const GATED_SCAN_WINDOW = SCAN_WINDOW * 2;
+
+/** Parameters of the box-braces method (see `detectBoxBrace`). */
+export type BoxBraceScanParams = {
+  scope?: ScanScope;
+  /** Echoed only: the route resolves and validates the source. */
+  source?: MarketDataSource;
+  minQuoteVolume24h: number;
+  /** Scan anchor (epoch ms); absent → now, and the candles are refreshed. */
+  anchor?: number;
+  /** Box length bounds and the height/travel ceiling, defaulted by `detectBoxBrace`. */
+  minRun?: number;
+  maxRun?: number;
+  maxHeightRatio?: number;
+};
+
+/** One row of the box-braces scan. */
+export type BoxBraceRow = {
+  instrument: string;
+  lastPrice: number;
+  change24h: number;
+  quoteVolume24h: number;
+  /** 1-based rank inside this scan's open pool (24h volume order). */
+  volumeRank: number;
+  box: BoxBrace;
+};
+
+/** Response of the box-braces scan: the rows plus the same footnotes the shrink scan reports. */
+export type BoxBraceScanResponse = {
+  rows: BoxBraceRow[];
+  params: BoxBraceScanParams & { scope: ScanScope; anchor: number };
+  scannedAt: string;
+  /** Open pool size the scan ran on. */
+  scanned: number;
+  warnings?: string[];
+  skippedInstruments?: string[];
+  failedInstruments?: string[];
+  metadataUnavailable?: boolean;
+};
 
 /** Neutral placeholders for a timeframe with no convergence structure. */
 function neutralStructure(): StructureResult {
@@ -272,6 +316,99 @@ export class CoinScanService {
     // visible, because these are valid candidates missing from the result.
     if (failedInstruments.size > 0) response.failedInstruments = [...failedInstruments];
     return response;
+  }
+
+  /**
+   * Box-braces scan (箱体蓄力): the second method, and the one the shrink
+   * method cannot express. Every open pool member gets ONE 1D read; the box is
+   * detected on the bars up to the anchor, so the scan fires BEFORE a breakout
+   * and never uses bars the reviewer could not have seen at that anchor.
+   *
+   * The daily bar count is capped by `SQUEEZE_MAX_RUN` plus the move lookbacks,
+   * which is why this method is CHEAPER than the shrink scan: one request per
+   * instrument, no second stage, no coarse screen. That also means it does NOT
+   * depend on the coarse screen's pool cuts: a box under a move is exactly the
+   * structure the coarse screen rejects for being wide.
+   */
+  async scanBoxBrace(params: BoxBraceScanParams): Promise<BoxBraceScanResponse> {
+    this.rateLimitGate.takeWarnings();
+    const tickers = await this.tickerSource.listTickers();
+    const anchor = params.anchor ?? Date.now();
+    const scope = params.scope ?? 'crypto';
+    const rows: BoxBraceRow[] = [];
+    const open: Ticker[] = [];
+    const skippedInstruments: string[] = [];
+    for (const ticker of tickers) {
+      if (ticker.quoteVolume24h < params.minQuoteVolume24h) continue;
+      if (!isScannable(ticker.marketClass)) continue;
+      if (scanScopeOf(ticker.marketClass) !== scope) continue;
+      if (isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor)) open.push(ticker);
+      else skippedInstruments.push(ticker.instrument);
+    }
+    // One 1D read per instrument, no second stage: the same isolation contract
+    // as the shrink scan (a failed fetch is the instrument's own problem).
+    const order = new Map(open.map((ticker, index) => [ticker, index + 1] as const));
+    const failedInstruments = new Set<string>();
+    const fetched = await mapLimit(open, SCAN_CONCURRENCY, async (ticker) => {
+      try {
+        return { ticker, box: await this.boxBraceOf(ticker, anchor, params) };
+      } catch (error) {
+        if (isIpBanned(this.rateLimitGate)) throw error;
+        failedInstruments.add(ticker.instrument);
+        return { ticker, box: null };
+      }
+    });
+    for (const { ticker, box } of fetched) {
+      if (box === null) continue;
+      rows.push({
+        instrument: ticker.instrument,
+        lastPrice: ticker.lastPrice,
+        change24h: ticker.change24h,
+        quoteVolume24h: ticker.quoteVolume24h,
+        volumeRank: order.get(ticker) ?? 0,
+        box,
+      });
+    }
+    // Tightest box first: `squeeze` is a ratio, so it orders across coins of any
+    // size. Ties keep the pool order (24h volume), because `Array#sort` is stable.
+    rows.sort((a, b) => a.box.squeeze - b.box.squeeze);
+    const response: BoxBraceScanResponse = {
+      rows,
+      params: { ...params, scope, anchor },
+      scannedAt: new Date().toISOString(),
+      scanned: open.length,
+    };
+    if (this.tickerSource.metadataAvailable?.() === false) response.metadataUnavailable = true;
+    if (skippedInstruments.length > 0) response.skippedInstruments = skippedInstruments;
+    if (failedInstruments.size > 0) response.failedInstruments = [...failedInstruments];
+    const warnings = this.rateLimitGate.takeWarnings();
+    if (warnings.length > 0) response.warnings = warnings;
+    return response;
+  }
+
+  /** Reads the 1D history this method can see and returns the box, or null. */
+  private async boxBraceOf(ticker: Ticker, anchor: number, params: BoxBraceScanParams): Promise<BoxBrace | null> {
+    // The window the detector needs: the box plus the widest move lookback.
+    const limit = SQUEEZE_MAX_RUN + Math.max(...SQUEEZE_LOOKBACKS) + 10;
+    const step = timeframeMs('1D');
+    const candles = await this.candleSource.getCandlesticks({
+      instrument: ticker.instrument,
+      timeframe: '1D',
+      anchor,
+      direction: 'earlier',
+      limit,
+      refresh: params.anchor === undefined,
+      // Paging ON: venues that cap a page at 90 daily bars need 2 pages for this.
+      allowPaging: true,
+    });
+    const completed = candles.filter((candle) => candle.timestamp + step <= anchor);
+    const marketClass = ticker.marketClass ?? 'CRYPTO';
+    const tradable = completed.filter((candle) => isCandleInSession(marketClass, candle.timestamp, step));
+    return detectBoxBrace(tradable, {
+      minRun: params.minRun,
+      maxRun: params.maxRun,
+      maxHeightRatio: params.maxHeightRatio,
+    });
   }
 
   /**

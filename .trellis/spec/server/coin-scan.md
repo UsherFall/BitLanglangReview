@@ -168,6 +168,30 @@ Duration is deliberately unscored: see "Score is the shrink depth alone (09/20)"
 | `DEFAULT_CONVERGENCE_FLAT_RATIO` | 2.0 | band flatness: edge regression drift `<= this × runMed` (the band's own noise) |
 | `CONVERGENCE_CONFIRMED_TAIL` | 1 | bars at the band's tail EXCLUDED from the containment range (1 = test the newest bar against the `runLen - 1` bars before it). Structural, not a calibration knob |
 
+### Algorithm: box-braces / squeeze (`detectBoxBrace`, `src/domain/box-brace.ts`)
+
+The second shape the user scans for (2026-10-18), and the one `detectConvergence` cannot express: **a box under a move**, measured by HEIGHT rather than by volatility. On a hand-picked set of 26 "good stretches" from the labeling notes it fires on the bar before the breakout 22/25 times; the shipped `detectConvergence` finds few of them.
+
+For the series ending at the decision bar (look-ahead free), every window `[last-len+1 .. last]`, `SQUEEZE_MIN_RUN <= len <= SQUEEZE_MAX_RUN`, qualifies when:
+
+1. **Contained** — the decision bar's close is inside the window's `[low, high]`. A broken box is not 蓄力 any more; the scan is meant to fire BEFORE the breakout.
+2. **Under a move** — the window's high does not exceed the high of the move it followed (`precedingMove`: the widest high-low travel over 10 / 20 / 40 bars before the window). A window poking above its own move is a new leg, not a pause. Measured: without this gate any rising box is "squeezed" against its own right edge.
+3. **Squeezed** — `boxHeight <= maxHeightRatio × moveTravel`.
+
+The reported box is the **longest** qualifying window (ties → tightest squeeze); a window that is both several bars longer and several times wider than the tightest one is rejected as "the move, not the box".
+
+| Constant | Value | Meaning |
+| --- | --- | --- |
+| `SQUEEZE_MIN_RUN` | 5 | shortest box (bars) |
+| `SQUEEZE_MAX_RUN` | 30 | longest box; a longer structure is judged by its last 30 bars |
+| `SQUEEZE_MAX_HEIGHT_RATIO` | 0.65 | box height / move travel ceiling (the 26 user stretches measure 0.34–0.64) |
+| `SQUEEZE_LOOKBACKS` | `[10, 20, 40]` | move lookbacks; the widest travel wins |
+| `SQUEEZE_BOUNDARY_GROWTH` / `SQUEEZE_BOUNDARY_SPAN` | 10 / 1 | "same box, longer" tolerance used by `selectWindow` |
+
+**Wiring**: `GET /api/scan?method=box` (params `minQuoteVolume24h`, optional `anchor` / `minRun` / `maxRun` / `maxHeightRatio`); `CoinScanService.scanBoxBrace` issues ONE paged 1D read per open-pool instrument, drops the still-forming bar, and reports `{ rows, params, scannedAt, scanned, warnings?, skippedInstruments?, failedInstruments?, metadataUnavailable? }` with rows ordered by `box.squeeze` ascending. The UI adds a `箱体蓄力` option to the scan method selector and renders `BoxScanResults`.
+
+**Measured volume (10/18, 427-instrument snapshot): the per-day list is WIDE — median ≈ 244 instruments/day.** The detector is a description, not a final screen; a usable shortlist needs a downstream ranking or a tighter `maxHeightRatio`. Do not present the raw list as "the picks".
+
 ### Service aggregation
 
 ```

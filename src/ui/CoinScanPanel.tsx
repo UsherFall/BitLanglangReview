@@ -16,11 +16,13 @@ import {
   type MarketDataSource,
   type ScanScope,
 } from '../domain/scan-scope';
+import type { BoxBraceScanResponse } from '../server/coin-scan-service';
 import { orderScanRows } from './coin-scan-rows';
 
 /** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显。 */
 export type ScanResult =
   | { method: 'shrink'; data: ScanResponse }
+  | { method: 'box'; data: BoxBraceScanResponse }
   | { method: 'heat'; data: MarketHeatResult; anchorLabel: string };
 
 export type CoinScanPanelProps = {
@@ -58,7 +60,7 @@ function topNInput(value: number | undefined): string {
 }
 
 export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanelProps) {
-  const [method, setMethod] = useState<'shrink' | 'heat'>('shrink');
+  const [method, setMethod] = useState<'shrink' | 'heat' | 'box'>('shrink');
   // 行情源: 初值 = 共享默认源, 挂载后由服务端启动源校正(见下)。
   const [source, setSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
   // 参数默认值按「源 × 品种」推导(成交额下限分级: 各源体量不同)。扫描数量留空 =

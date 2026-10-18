@@ -19,6 +19,7 @@ import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, 
 import { CoinScanPanel, CoinScanResults, type ScanResult } from './CoinScanPanel';
 import { nextMagnetMode, snapDrawingPoint, type MagnetMode } from './drawing-snap';
 import { HeatScanResults } from './HeatScanResults';
+import { BoxScanResults } from './BoxScanResults';
 import { BitgetControlBar } from './BitgetControlBar';
 import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
 import { LeaderCoinPanel } from './LeaderCoinPanel';
@@ -842,6 +843,8 @@ export function App() {
         ) : reviewMode === 'scan' ? (
           scanResult && scanResult.method === 'heat' ? (
             <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} />
+          ) : scanResult && scanResult.method === 'box' ? (
+            <BoxScanResults result={scanResult.data} />
           ) : (
             <CoinScanResults result={scanResult ? scanResult.data : null} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} demotedCoins={demotedCoins} onToggleDemotedCoin={toggleDemotedCoin} />
           )
