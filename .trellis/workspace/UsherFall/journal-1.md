@@ -1260,3 +1260,37 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - structure-fullness: 按分析结论重设判据(不用 score，前戏+位置做排序，36 正例不拟合权重)
+
+
+## Session 30: 只关注收敛: s20 成立、score 反向的根因
+<!-- trellis-session: v=2 fp=e5fa120b3bbd38a4 -->
+
+**Date**: 2026-10-18
+**Task**: 只关注收敛: s20 成立、score 反向的根因
+**Branch**: `master`
+
+### Summary
+
+四种口径试完只有固定窗口的 s20(最近20根/前20根振幅)成立:最低四分位 Y=19.4% vs 最高 7.1%。检测器 score 反向的根因是它搜索一条最优带、偏爱暴跌后停顿。页面加收敛度显示与排序。
+
+### Main Changes
+
+- tools/labeling/build-page.ts；structure-fullness/research/label-analysis-285.md 补第 7 节
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b64b756` | feat(labeling): 页头显示收敛度 s20、n20 超 75 分位打警示，加「按收敛度」排序 |
+
+### Testing
+
+- [OK] tsc；npm test 530 全绿；src/ 零改动；jsdom 断言全绿（显示值/⚠标记数69/N排序/标签不丢）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 让用户在真实候选上按收敛度排序扫一遍，确认前几张是否真的更像；再决定是否进扫描排序
