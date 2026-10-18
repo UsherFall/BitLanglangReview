@@ -38,7 +38,31 @@ const CHART_LIB = 'lightweight-charts.js';
  * into the chart's object shape inside the browser. At ~35 B/bar that keeps a
  * year × ~230 candidates inside a few MB; the object form cost ~83 B/bar.
  */
-type PageItem = Candidate & { bars: SlimBar[] };
+type PageItem = Candidate & { bars: SlimBar[]; pos90: number; priorMove: number };
+
+/**
+ * The two measurable proxies that actually separated the hand labels (2026-10-18,
+ * 285 labels: base rate of Y is 12.6%). `pos90` at its 80th percentile lifted the
+ * Y rate to 29.8%; `priorMove` moved it 17.5% → 21.1%. Both are SORT keys only —
+ * neither is a verdict, and `score` is deliberately NOT used as the default
+ * because raising it LOWERED the Y rate (29.3% → 6.9%), i.e. it ranks backwards.
+ *
+ *  pos90      (lastClose − min low of last 90) / (max high − min low of last 90)
+ *  priorMove  (close[-24] − close[-90]) / close[-90]  — the move BEFORE the recent
+ *             23 days, i.e. the "前戏" that the user judges as 结构饱满
+ */
+function metricsFor(bars: readonly SlimBar[]): { pos90: number; priorMove: number } {
+  const closes = bars.map((bar) => bar[4]);
+  const last = closes[closes.length - 1] ?? 0;
+  const window = bars.slice(-90);
+  const high = Math.max(...window.map((bar) => bar[2]));
+  const low = Math.min(...window.map((bar) => bar[3]));
+  const pos90 = high > low ? (last - low) / (high - low) : 0.5;
+  const back = (n: number) => closes[Math.max(0, closes.length - 1 - n)] ?? 0;
+  const base = back(90);
+  const priorMove = base > 0 ? (back(23) - base) / base : 0;
+  return { pos90, priorMove };
+}
 
 /** Deterministic shuffle so on-screen order is mixed but reproducible. */
 function shuffled<T>(items: readonly T[], seed: number): T[] {
@@ -69,10 +93,10 @@ function build(): void {
     );
   }
 
-  const items: PageItem[] = shuffled(listing.candidates, snapshot.anchor).map((candidate) => ({
-    ...candidate,
-    bars: barsFor(candidate.instrument)!,
-  }));
+  const items: PageItem[] = shuffled(listing.candidates, snapshot.anchor).map((candidate) => {
+    const bars = barsFor(candidate.instrument)!;
+    return { ...candidate, bars, ...metricsFor(bars) };
+  });
 
   ensureOutDir();
   // The dist subpath is not in the package's `exports` map, but `package.json`
@@ -146,6 +170,7 @@ const TEMPLATE = `<!doctype html>
   <span class="sym" id="sym">—</span>
   <span class="dim" id="meta"></span>
   <span class="grow"></span>
+  <span class="dim" id="feat"></span>
   <span id="mark"></span>
   <span id="score"></span>
   <span class="dim" id="progress"></span>
@@ -168,6 +193,12 @@ const TEMPLATE = `<!doctype html>
   </select>
   <input type="text" id="note" placeholder="补充（可选）" size="14" />
   <span class="hint">理由 <kbd>1</kbd>-<kbd>4</kbd>，<kbd>0</kbd> 清除</span>
+  <select id="sort" title="排序方式；切换后回到第 1 张，已标结论不丢">
+    <option value="shuffle">打散</option>
+    <option value="pos90">按 90日位置</option>
+    <option value="prior">按 前戏幅度</option>
+    <option value="score">按 score（已知反向）</option>
+  </select>
   <button id="toggle">显示 score <kbd>S</kbd></button>
   <button id="export">导出 labels.csv</button>
   <button id="import" title="读回导出的 labels.csv，按 anchor 校验后合并">导入 labels.csv</button>
@@ -181,7 +212,8 @@ const TEMPLATE = `<!doctype html>
 <script>
 (function () {
   var DATA = JSON.parse(document.getElementById('data').textContent);
-  var ITEMS = DATA.items;
+  var BASE = DATA.items;
+  var VIEW = BASE.slice();
   var ANCHOR = DATA.anchor;
   var STORE_KEY = 'labeling:' + ANCHOR;
   var TF = DATA.timeframe;
@@ -256,6 +288,22 @@ const TEMPLATE = `<!doctype html>
     toastTimer = setTimeout(function () { toastEl.style.opacity = '0'; }, 1600);
   }
 
+  // The detector's score is offered only as a comparison: it ranked BACKWARDS
+  // against the hand labels (raising it lowered the Y rate), which is why it is
+  // not the default order.
+  function applySort(mode) {
+    if (mode === 'pos90') VIEW = BASE.slice().sort(function (a, b) { return b.pos90 - a.pos90; });
+    else if (mode === 'prior') VIEW = BASE.slice().sort(function (a, b) { return b.priorMove - a.priorMove; });
+    else if (mode === 'score') VIEW = BASE.slice().sort(function (a, b) { return b.score - a.score; });
+    else VIEW = BASE.slice();
+    index = 0;
+    render();
+    reasonEl.value = '';
+    noteEl.value = '';
+    var sortEl = document.getElementById('sort');
+    status('已按「' + sortEl.options[sortEl.selectedIndex].textContent + '」排序，共 ' + VIEW.length + ' 张；已标结论不受影响。');
+  }
+
   function labeledCount() {
     var n = 0;
     for (var k in labels) if (labels[k] && labels[k].label) n++;
@@ -263,16 +311,19 @@ const TEMPLATE = `<!doctype html>
   }
 
   function render() {
-    if (ITEMS.length === 0) return;
+    if (VIEW.length === 0) return;
     if (index < 0) index = 0;
-    if (index > ITEMS.length - 1) index = ITEMS.length - 1;
-    var item = ITEMS[index];
+    if (index > VIEW.length - 1) index = VIEW.length - 1;
+    var item = VIEW[index];
 
     document.getElementById('sym').textContent = item.instrument;
     document.getElementById('meta').textContent = TF + ' · 快照 ' + '__SNAPSHOT__' + ' · ' + item.bars.length + ' 根';
-    document.getElementById('progress').textContent = (index + 1) + ' / ' + ITEMS.length +
+    document.getElementById('progress').textContent = (index + 1) + ' / ' + VIEW.length +
       '　已标 ' + labeledCount();
-    document.getElementById('bar').style.width = ((index + 1) / ITEMS.length * 100) + '%';
+    document.getElementById('bar').style.width = ((index + 1) / VIEW.length * 100) + '%';
+    document.getElementById('feat').textContent =
+      '90日位置 ' + (item.pos90 * 100).toFixed(0) + '%　前戏 ' +
+      (item.priorMove >= 0 ? '+' : '') + (item.priorMove * 100).toFixed(0) + '%';
     document.getElementById('score').textContent = showScore
       ? ('score ' + item.score.toFixed(3) + (item.converged ? ' · 判收敛' : '') + (item.passCoarse ? ' · 过粗筛' : ''))
       : '';
@@ -292,7 +343,7 @@ const TEMPLATE = `<!doctype html>
   }
 
   function record(label) {
-    var item = ITEMS[index];
+    var item = VIEW[index];
     labels[item.instrument] = {
       label: label,
       reason: reasonEl.value,
@@ -305,8 +356,13 @@ const TEMPLATE = `<!doctype html>
     index += 1;
     save();
     render();
+    // Start the next chart with a clean slate. Without this, re-labelling an
+    // already-answered chart kept its old reason (21 of the 285 Y rows ended up
+    // carrying a negative reason).
+    reasonEl.value = '';
+    noteEl.value = '';
     if (!storageOk) status('已记录「' + label + '」，但本地存储不可用 —— 刷新会丢，记得导出。');
-    if (at === ITEMS.length - 1) toast('最后一张了 — 记得导出 labels.csv');
+    if (at === VIEW.length - 1) toast('最后一张了 — 记得导出 labels.csv');
   }
 
   function back() { index -= 1; save(); render(); }
@@ -319,8 +375,8 @@ const TEMPLATE = `<!doctype html>
   function exportCsv() {
     var head = ['instrument', 'timeframe', 'anchor', 'label', 'reason', 'note', 'scoreShown', 'labeledAt'];
     var lines = [head.join(',')];
-    for (var i = 0; i < ITEMS.length; i++) {
-      var it = ITEMS[i];
+    for (var i = 0; i < VIEW.length; i++) {
+      var it = VIEW[i];
       var rec = labels[it.instrument] || {};
       lines.push([
         csvCell(it.instrument), '1D', ANCHOR,
@@ -338,7 +394,7 @@ const TEMPLATE = `<!doctype html>
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-    toast('已导出 ' + labeledCount() + ' / ' + ITEMS.length + ' 条标签');
+    toast('已导出 ' + labeledCount() + ' / ' + VIEW.length + ' 条标签');
   }
 
   // Minimal RFC4180-ish parser: the note column is free text, so a naive
@@ -446,6 +502,7 @@ const TEMPLATE = `<!doctype html>
   document.getElementById('n').onclick = function () { record('N'); };
   document.getElementById('q').onclick = function () { record('?'); };
   document.getElementById('prev').onclick = back;
+  document.getElementById('sort').onchange = function () { applySort(this.value); };
   document.getElementById('export').onclick = exportCsv;
   document.getElementById('toggle').onclick = function () {
     showScore = !showScore;
