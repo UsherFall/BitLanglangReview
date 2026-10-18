@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
-- **Last Active**: 2026-10-15
+- **Total Sessions**: 27
+- **Last Active**: 2026-10-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1160 | Active |
+| `journal-1.md` | ~1194 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-10-18 | 标注页支持导入 labels.csv（跨机器续标） | `a0a41a4` | `master` |
 | 26 | 2026-10-15 | 标注理由补「顺势」：判据扩到三点 | `659263a` | `master` |
 | 25 | 2026-10-15 | 标注窗口扩到 1 年：Bitget 往前翻页能力 | `68ca851` | `master` |
 | 24 | 2026-10-15 | 收敛标注工作台：三类候选抽样 + 可键盘快标的静态页 | `6ea86aa`, `a43e258` | `master` |

@@ -1158,3 +1158,37 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - structure-fullness 仍在 planning，等正面样本；「顺势」做成可计算量也归它
+
+
+## Session 27: 标注页支持导入 labels.csv（跨机器续标）
+<!-- trellis-session: v=2 fp=e8545acc988fd281 -->
+
+**Date**: 2026-10-18
+**Task**: 标注页支持导入 labels.csv（跨机器续标）
+**Branch**: `master`
+
+### Summary
+
+进度只存 localStorage 且 out/ 与 data/ 都 gitignored，换机器带不走标签。加导入：按表头认列、anchor 校验后覆盖式合并，CSV 解析支持 BOM/引号/字段内逗号/CRLF。
+
+### Main Changes
+
+- tools/labeling/build-page.ts 加导入按钮 + parseCsv/importCsv；新增轻量任务 10-18-labeling-import
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a0a41a4` | feat(labeling): 标注页支持导入 labels.csv，可跨机器续标 |
+
+### Testing
+
+- [OK] tsc；npm test 530 全绿；src/ 零改动；jsdom 9 项断言全绿（往返保真、anchor 跳过、坏表头拒收、位置不跳）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 代理恢复后 push（本地领先 origin/master 17 个提交）；structure-fullness 等正面样本
