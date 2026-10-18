@@ -38,20 +38,36 @@ const CHART_LIB = 'lightweight-charts.js';
  * into the chart's object shape inside the browser. At ~35 B/bar that keeps a
  * year × ~230 candidates inside a few MB; the object form cost ~83 B/bar.
  */
-type PageItem = Candidate & { bars: SlimBar[]; pos90: number; priorMove: number };
+type PageItem = Candidate & {
+  bars: SlimBar[]; pos90: number; priorMove: number; s20: number; n20: number; wide20: boolean;
+};
 
 /**
- * The two measurable proxies that actually separated the hand labels (2026-10-18,
- * 285 labels: base rate of Y is 12.6%). `pos90` at its 80th percentile lifted the
- * Y rate to 29.8%; `priorMove` moved it 17.5% → 21.1%. Both are SORT keys only —
- * neither is a verdict, and `score` is deliberately NOT used as the default
- * because raising it LOWERED the Y rate (29.3% → 6.9%), i.e. it ranks backwards.
+ * The measurable proxies that actually separated the hand labels (2026-10-18,
+ * 285 labels, base rate of Y is 12.6%):
  *
- *  pos90      (lastClose − min low of last 90) / (max high − min low of last 90)
- *  priorMove  (close[-24] − close[-90]) / close[-90]  — the move BEFORE the recent
- *             23 days, i.e. the "前戏" that the user judges as 结构饱满
+ *  pos90      lastClose's position inside the last 90 bars — the best directional
+ *             proxy (80th percentile → Y rate 29.8%).
+ *  priorMove  (close[-24] − close[-90]) / close[-90] — the "前戏" before the
+ *             recent 23 days (80th percentile → 21.1%).
+ *  s20        range(last 20) / range(previous 20); SMALLER = tighter. The only
+ *             measure of "convergence itself" that came out monotonic: lowest
+ *             quartile 19.4% Y vs highest 7.1%.
+ *  n20        range(last 20) / range(last 90); a HIGH value means the last 20
+ *             bars are WIDER than the last 90 — that quartile had only 4.3% Y,
+ *             so it is surfaced as a warning, not a gate.
+ *
+ * `score` is deliberately absent from the display: raising it LOWERED the Y rate
+ * (14.0% → 6.9%), so it ranks backwards.
  */
-function metricsFor(bars: readonly SlimBar[]): { pos90: number; priorMove: number } {
+function metricsFor(bars: readonly SlimBar[]): { pos90: number; priorMove: number; s20: number; n20: number } {
+  const rangeOf = (xs: readonly SlimBar[]) => {
+    if (xs.length === 0) return 0;
+    const hi = Math.max(...xs.map((bar) => bar[2]));
+    const lo = Math.min(...xs.map((bar) => bar[3]));
+    const mean = xs.reduce((a, bar) => a + bar[4], 0) / xs.length;
+    return mean > 0 ? (hi - lo) / mean : 0;
+  };
   const closes = bars.map((bar) => bar[4]);
   const last = closes[closes.length - 1] ?? 0;
   const window = bars.slice(-90);
@@ -61,7 +77,14 @@ function metricsFor(bars: readonly SlimBar[]): { pos90: number; priorMove: numbe
   const back = (n: number) => closes[Math.max(0, closes.length - 1 - n)] ?? 0;
   const base = back(90);
   const priorMove = base > 0 ? (back(23) - base) / base : 0;
-  return { pos90, priorMove };
+
+  const last20 = bars.slice(-20);
+  const prev20 = bars.slice(-40, -20);
+  const prevRange = rangeOf(prev20);
+  const s20 = prev20.length === 20 && prevRange > 0 ? rangeOf(last20) / prevRange : 1;
+  const range90 = rangeOf(window);
+  const n20 = bars.length >= 90 && range90 > 0 ? rangeOf(last20) / range90 : Number.NaN;
+  return { pos90, priorMove, s20, n20 };
 }
 
 /** Deterministic shuffle so on-screen order is mixed but reproducible. */
@@ -95,8 +118,14 @@ function build(): void {
 
   const items: PageItem[] = shuffled(listing.candidates, snapshot.anchor).map((candidate) => {
     const bars = barsFor(candidate.instrument)!;
-    return { ...candidate, bars, ...metricsFor(bars) };
+    return { ...candidate, bars, ...metricsFor(bars), wide20: false };
   });
+
+  // The "wider than the last 90 bars" warning is relative to THIS batch: the pool
+  // changes between snapshots, so a frozen constant would drift.
+  const n20s = items.map((item) => item.n20).filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  const n20Q75 = n20s.length > 0 ? n20s[Math.floor(n20s.length * 0.75)] : Number.POSITIVE_INFINITY;
+  for (const item of items) item.wide20 = Number.isFinite(item.n20) && item.n20 > n20Q75;
 
   ensureOutDir();
   // The dist subpath is not in the package's `exports` map, but `package.json`
@@ -195,6 +224,7 @@ const TEMPLATE = `<!doctype html>
   <span class="hint">理由 <kbd>1</kbd>-<kbd>4</kbd>，<kbd>0</kbd> 清除</span>
   <select id="sort" title="排序方式；切换后回到第 1 张，已标结论不丢">
     <option value="shuffle">打散</option>
+    <option value="conv">按 收敛度</option>
     <option value="pos90">按 90日位置</option>
     <option value="prior">按 前戏幅度</option>
     <option value="score">按 score（已知反向）</option>
@@ -292,7 +322,12 @@ const TEMPLATE = `<!doctype html>
   // against the hand labels (raising it lowered the Y rate), which is why it is
   // not the default order.
   function applySort(mode) {
-    if (mode === 'pos90') VIEW = BASE.slice().sort(function (a, b) { return b.pos90 - a.pos90; });
+    if (mode === 'conv') VIEW = BASE.slice().sort(function (a, b) {
+      var x = isFinite(a.s20) ? a.s20 : 9e9;
+      var y = isFinite(b.s20) ? b.s20 : 9e9;
+      return x - y;
+    });
+    else if (mode === 'pos90') VIEW = BASE.slice().sort(function (a, b) { return b.pos90 - a.pos90; });
     else if (mode === 'prior') VIEW = BASE.slice().sort(function (a, b) { return b.priorMove - a.priorMove; });
     else if (mode === 'score') VIEW = BASE.slice().sort(function (a, b) { return b.score - a.score; });
     else VIEW = BASE.slice();
@@ -322,7 +357,8 @@ const TEMPLATE = `<!doctype html>
       '　已标 ' + labeledCount();
     document.getElementById('bar').style.width = ((index + 1) / VIEW.length * 100) + '%';
     document.getElementById('feat').textContent =
-      '90日位置 ' + (item.pos90 * 100).toFixed(0) + '%　前戏 ' +
+      '收敛 ' + (item.s20 * 100).toFixed(0) + '%' + (item.wide20 ? ' ⚠比90日宽' : '') +
+      '　90日位置 ' + (item.pos90 * 100).toFixed(0) + '%　前戏 ' +
       (item.priorMove >= 0 ? '+' : '') + (item.priorMove * 100).toFixed(0) + '%';
     document.getElementById('score').textContent = showScore
       ? ('score ' + item.score.toFixed(3) + (item.converged ? ' · 判收敛' : '') + (item.passCoarse ? ' · 过粗筛' : ''))
