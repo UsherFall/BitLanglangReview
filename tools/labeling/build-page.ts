@@ -130,15 +130,23 @@ const TEMPLATE = `<!doctype html>
   #toast { position: fixed; right: 16px; bottom: 64px; background: #21262D;
            border: 1px solid #30363D; border-radius: 6px; padding: 8px 12px;
            opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #banner { padding: 8px 16px; background: #3A1D1D; border-bottom: 1px solid #7F1D1D;
+            color: #FCA5A5; font-size: 13px; flex: none; }
+  #banner[hidden] { display: none; }
+  #status { flex: none; padding: 6px 16px 10px; color: #8B949E; font-size: 12px;
+            border-top: 1px solid #2D333B; }
+  #mark { color: #16A34A; font-size: 13px; }
   kbd { background: #21262D; border: 1px solid #30363D; border-bottom-width: 2px;
         border-radius: 4px; padding: 1px 5px; font-family: inherit; font-size: 12px; }
 </style>
 </head>
 <body>
+<div id="banner" hidden></div>
 <header>
   <span class="sym" id="sym">—</span>
   <span class="dim" id="meta"></span>
   <span class="grow"></span>
+  <span id="mark"></span>
   <span id="score"></span>
   <span class="dim" id="progress"></span>
 </header>
@@ -166,6 +174,7 @@ const TEMPLATE = `<!doctype html>
   <input type="file" id="file" accept=".csv,text/csv" style="display:none" />
   <button id="reset" title="清空本快照的本地进度">重置</button>
 </footer>
+<div id="status"></div>
 <div id="toast"></div>
 <script type="application/json" id="data">__DATA__</script>
 <script src="__LIB__"></script>
@@ -190,26 +199,57 @@ const TEMPLATE = `<!doctype html>
     wickUpColor: '#16A34A', wickDownColor: '#DC2626'
   });
 
+  // Must be declared BEFORE the first load(): a read that throws flips it and
+  // shows the banner, and hoisting would have it read as undefined there.
+  var storageOk = true;
   var labels = load().labels;
   var index = load().index;
   var showScore = false;
   var reasonEl = document.getElementById('reason');
   var noteEl = document.getElementById('note');
   var toastEl = document.getElementById('toast');
+  var statusEl = document.getElementById('status');
   var toastTimer = null;
 
   function load() {
     try {
-      var raw = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {};
+      var raw = JSON.parse(readStore() || '{}') || {};
       return {
         index: typeof raw.index === 'number' ? raw.index : 0,
         labels: raw.labels && typeof raw.labels === 'object' ? raw.labels : {}
       };
     } catch (e) { return { index: 0, labels: {} }; }
   }
-  function save() { localStorage.setItem(STORE_KEY, JSON.stringify({ index: index, labels: labels })); }
+
+  // localStorage throws on file:// in some browsers. An unguarded setItem used
+  // to abort the whole import callback, which is why "选完文件没反应" happened.
+  function readStore() {
+    try { return window.localStorage.getItem(STORE_KEY); }
+    catch (e) { markStorageBroken(); return null; }
+  }
+
+  function save() {
+    if (!storageOk) return false;
+    try {
+      window.localStorage.setItem(STORE_KEY, JSON.stringify({ index: index, labels: labels }));
+      return true;
+    } catch (e) { markStorageBroken(); return false; }
+  }
+
+  function markStorageBroken() {
+    if (!storageOk) return;
+    storageOk = false;
+    var banner = document.getElementById('banner');
+    banner.textContent = '⚠ 浏览器禁用了本地存储（file:// 下常见）。进度只存在内存里，刷新或关页就会丢 —— '
+      + '请用「导出 labels.csv」当记录，换机器时用「导入」恢复。';
+    banner.hidden = false;
+  }
+
+  // The floating toast fades in 1.6s and is easy to miss; this line stays.
+  function status(msg) { statusEl.textContent = msg; }
 
   function toast(msg) {
+    status(msg);
     toastEl.textContent = msg;
     toastEl.style.opacity = '1';
     clearTimeout(toastTimer);
@@ -244,6 +284,9 @@ const TEMPLATE = `<!doctype html>
     chart.timeScale().fitContent();
 
     var rec = labels[item.instrument];
+    document.getElementById('mark').textContent = rec && rec.label
+      ? '已标：' + rec.label + (rec.reason ? ' · ' + rec.reason : '')
+      : '';
     reasonEl.value = rec && rec.reason ? rec.reason : '';
     noteEl.value = rec && rec.note ? rec.note : '';
   }
@@ -262,6 +305,7 @@ const TEMPLATE = `<!doctype html>
     index += 1;
     save();
     render();
+    if (!storageOk) status('已记录「' + label + '」，但本地存储不可用 —— 刷新会丢，记得导出。');
     if (at === ITEMS.length - 1) toast('最后一张了 — 记得导出 labels.csv');
   }
 
@@ -339,13 +383,16 @@ const TEMPLATE = `<!doctype html>
     }
     var added = 0;
     var otherAnchor = 0;
+    var skippedNoLabel = 0;
+    var seenAnchors = {};
     for (var r = 0; r < rows.length; r += 1) {
       var line = rows[r];
       var instrument = String(line[col.instrument] || '').trim();
       var label = String(line[col.label] || '').trim();
-      if (!instrument || !label) continue;
+      if (!instrument || !label) { skippedNoLabel += 1; continue; }
       // Never let another snapshot's labels leak into this one.
-      if (String(line[col.anchor] || '').trim() !== String(ANCHOR)) { otherAnchor += 1; continue; }
+      var rowAnchor = String(line[col.anchor] || '').trim();
+      if (rowAnchor !== String(ANCHOR)) { otherAnchor += 1; seenAnchors[rowAnchor] = 1; continue; }
       labels[instrument] = {
         label: label,
         reason: col.reason === undefined ? '' : String(line[col.reason] || ''),
@@ -355,22 +402,44 @@ const TEMPLATE = `<!doctype html>
       };
       added += 1;
     }
-    save();
+    var persisted = save();
     render();
-    toast('导入 ' + added + ' 条' + (otherAnchor > 0 ? '，跳过 ' + otherAnchor + ' 条（属于别的快照）' : ''));
+    var msg = '导入 ' + added + ' 条';
+    if (otherAnchor > 0) {
+      msg += '；跳过 ' + otherAnchor + ' 条（CSV 的 anchor 是 ' + Object.keys(seenAnchors).join('/') + '，本页是 ' + ANCHOR + '）';
+    }
+    if (skippedNoLabel > 0) msg += '；' + skippedNoLabel + ' 条没有 label';
+    if (added === 0) msg = '⚠ 没有导入任何标签 —— ' + msg;
+    if (!persisted) msg += '　（本地存储不可用：只在本页有效，刷新会丢）';
+    toast(msg);
   }
 
   document.getElementById('import').onclick = function () { document.getElementById('file').click(); };
   document.getElementById('file').onchange = function () {
     var input = this;
     var file = input.files && input.files[0];
-    if (!file) return;
+    if (!file) { status('没有选到文件'); return; }
     var reader = new FileReader();
+    // Any throw inside the callback used to abort silently — that was the whole
+    // "选完文件没反应" symptom. Nothing inside here may escape unreported.
     reader.onload = function () {
-      importCsv(String(reader.result));
+      try {
+        importCsv(String(reader.result));
+      } catch (err) {
+        toast('导入出错：' + (err && err.message ? err.message : String(err)));
+      }
       input.value = '';
     };
-    reader.readAsText(file, 'utf-8');
+    reader.onerror = function () {
+      toast('读取文件失败：' + (reader.error && reader.error.name ? reader.error.name : '未知错误'));
+      input.value = '';
+    };
+    try {
+      reader.readAsText(file, 'utf-8');
+    } catch (err) {
+      toast('无法读取文件：' + (err && err.message ? err.message : String(err)));
+      input.value = '';
+    }
   };
 
   document.getElementById('y').onclick = function () { record('Y'); };
