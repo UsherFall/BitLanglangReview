@@ -1192,3 +1192,37 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - 代理恢复后 push（本地领先 origin/master 17 个提交）；structure-fullness 等正面样本
+
+
+## Session 28: 标注页加固：localStorage 不可用不再静默中断
+<!-- trellis-session: v=2 fp=f6c5a5ecc843255c -->
+
+**Date**: 2026-10-18
+**Task**: 标注页加固：localStorage 不可用不再静默中断
+**Branch**: `master`
+
+### Summary
+
+导入无反应的根因是 save() 未保护，setItem 抛异常打断 FileReader 回调。改为存储全 try/catch + 内存兜底 + 常驻横幅/状态行 + 已标徽标 + 分类型报错。
+
+### Main Changes
+
+- tools/labeling/build-page.ts
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ff8aa96` | fix(labeling): localStorage 不可用时不再静默中断导入 |
+
+### Testing
+
+- [OK] tsc；npm test 530 全绿；src/ 零改动；node --check 通过；jsdom 双场景 12 项断言全绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 用户 git pull + npm run label:page 后重开页面即可看到问题原因
