@@ -1226,3 +1226,37 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - 用户 git pull + npm run label:page 后重开页面即可看到问题原因
+
+
+## Session 29: 标注页: 显示 90日位置/前戏幅度 + 排序; 285 条标签分析
+<!-- trellis-session: v=2 fp=7451aa11f65ca163 -->
+
+**Date**: 2026-10-18
+**Task**: 标注页: 显示 90日位置/前戏幅度 + 排序; 285 条标签分析
+**Branch**: `master`
+
+### Summary
+
+285 条手工标签证明现有 converged 精确率 8.6% 低于 12.6% 基线、score 排序方向反了; pos90 80 分位把 Y 占比提到 29.8%。页面改为显示 pos90/priorMove 并支持排序,记录后清空理由。
+
+### Main Changes
+
+- tools/labeling/build-page.ts；新增 structure-fullness/research/label-analysis-285.md 与 labels-285.csv
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `863ed15` | feat(labeling): 页头显示 90日位置/前戏幅度，支持按它们排序 |
+
+### Testing
+
+- [OK] tsc；npm test 530 全绿；src/ 零改动；node --check；jsdom 断言全绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- structure-fullness: 按分析结论重设判据(不用 score，前戏+位置做排序，36 正例不拟合权重)
