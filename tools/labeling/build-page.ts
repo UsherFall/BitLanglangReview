@@ -162,6 +162,8 @@ const TEMPLATE = `<!doctype html>
   <span class="hint">理由 <kbd>1</kbd>-<kbd>4</kbd>，<kbd>0</kbd> 清除</span>
   <button id="toggle">显示 score <kbd>S</kbd></button>
   <button id="export">导出 labels.csv</button>
+  <button id="import" title="读回导出的 labels.csv，按 anchor 校验后合并">导入 labels.csv</button>
+  <input type="file" id="file" accept=".csv,text/csv" style="display:none" />
   <button id="reset" title="清空本快照的本地进度">重置</button>
 </footer>
 <div id="toast"></div>
@@ -294,6 +296,82 @@ const TEMPLATE = `<!doctype html>
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     toast('已导出 ' + labeledCount() + ' / ' + ITEMS.length + ' 条标签');
   }
+
+  // Minimal RFC4180-ish parser: the note column is free text, so a naive
+  // split(',') would shift every column after a comma. Handles the BOM, quoted
+  // fields, doubled quotes and CRLF line endings.
+  function parseCsv(text) {
+    var rows = [];
+    var row = [];
+    var field = '';
+    var quoted = false;
+    var src = text.replace(/^\\uFEFF/, '');
+    for (var i = 0; i < src.length; i += 1) {
+      var ch = src.charAt(i);
+      if (quoted) {
+        if (ch === '"') {
+          if (src.charAt(i + 1) === '"') { field += '"'; i += 1; }
+          else quoted = false;
+        } else field += ch;
+      } else if (ch === '"') {
+        quoted = true;
+      } else if (ch === ',') {
+        row.push(field); field = '';
+      } else if (ch === '\\n') {
+        row.push(field); rows.push(row); row = []; field = '';
+      } else if (ch === '\\r') {
+        // \\n ends the record
+      } else field += ch;
+    }
+    if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  function importCsv(text) {
+    var rows = parseCsv(text);
+    if (rows.length < 2) { toast('CSV 里没有数据行'); return; }
+    var header = rows.shift().map(function (cell) { return cell.trim(); });
+    var col = {};
+    for (var c = 0; c < header.length; c += 1) col[header[c]] = c;
+    if (col.instrument === undefined || col.anchor === undefined || col.label === undefined) {
+      toast('不是 labels.csv（缺 instrument / anchor / label 列）');
+      return;
+    }
+    var added = 0;
+    var otherAnchor = 0;
+    for (var r = 0; r < rows.length; r += 1) {
+      var line = rows[r];
+      var instrument = String(line[col.instrument] || '').trim();
+      var label = String(line[col.label] || '').trim();
+      if (!instrument || !label) continue;
+      // Never let another snapshot's labels leak into this one.
+      if (String(line[col.anchor] || '').trim() !== String(ANCHOR)) { otherAnchor += 1; continue; }
+      labels[instrument] = {
+        label: label,
+        reason: col.reason === undefined ? '' : String(line[col.reason] || ''),
+        note: col.note === undefined ? '' : String(line[col.note] || ''),
+        scoreShown: Number(line[col.scoreShown] || 0) ? 1 : 0,
+        labeledAt: col.labeledAt === undefined ? new Date().toISOString() : String(line[col.labeledAt] || new Date().toISOString())
+      };
+      added += 1;
+    }
+    save();
+    render();
+    toast('导入 ' + added + ' 条' + (otherAnchor > 0 ? '，跳过 ' + otherAnchor + ' 条（属于别的快照）' : ''));
+  }
+
+  document.getElementById('import').onclick = function () { document.getElementById('file').click(); };
+  document.getElementById('file').onchange = function () {
+    var input = this;
+    var file = input.files && input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      importCsv(String(reader.result));
+      input.value = '';
+    };
+    reader.readAsText(file, 'utf-8');
+  };
 
   document.getElementById('y').onclick = function () { record('Y'); };
   document.getElementById('n').onclick = function () { record('N'); };
