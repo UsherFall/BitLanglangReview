@@ -5,9 +5,13 @@ import {
   DEFAULT_CONVERGENCE_FLAT_RATIO,
   DEFAULT_CONVERGENCE_MIN_RUN,
   DEFAULT_CONVERGENCE_RATIO,
+  DEFAULT_CONVERGENCE_SHORT_TIGHT_RATIO,
+  CONVERGENCE_MIN_RATIO,
+  CONVERGENCE_SHORT_RUN,
   TIMEFRAME_SCORE_OFFSET,
   defaultStructureParams,
   detectConvergence,
+  effectiveConvergenceRatio,
   probeStructure,
   scanTimeframes,
   timeframeMinScore,
@@ -196,6 +200,40 @@ describe('detectConvergence (band vs preceding volatility)', () => {
     expect(detectConvergence(mild, defaultStructureParams())).not.toBeNull();
     expect(detectConvergence(mild, strict)).toBeNull();
   });
+
+  it('tightens the shrink gate for short bands only (the crash-then-pause at 16 bars is untouched)', () => {
+    // The 10/15 snapshot's failure mode: a SHORT band's same-length baseline can
+    // land on one huge dump bar, so a handful of quiet bars read as a deep shrink.
+    // The gate ramps from the tight ratio at minRun to the calibrated one at
+    // CONVERGENCE_SHORT_RUN (see effectiveConvergenceRatio), so the long
+    // crash-then-pause MUST still pass.
+    const crashPause = candles([
+      ...Array.from({ length: 16 }, () => [90, 98] as const),
+      ...Array.from({ length: 16 }, () => [95, 97] as const),
+    ]);
+    expect(detectConvergence(crashPause, defaultStructureParams())).not.toBeNull();
+    // A short quiet band is judged against a TIGHTER ratio than 0.9 ...
+    expect(effectiveConvergenceRatio(8, 0.9, 0.6)).toBeGreaterThan(CONVERGENCE_MIN_RATIO);
+    // ... while the same calm at 16 bars is a real pause and still passes.
+    const quiet = [99.5, 100.5] as const;
+    const lead = Array.from({ length: 40 }, () => [94, 100] as const);
+    expect(
+      detectConvergence(candles([...lead, ...Array.from({ length: 16 }, () => quiet)]), defaultStructureParams()),
+    ).not.toBeNull();
+  });
+
+  it('tightens the shrink gate only below CONVERGENCE_SHORT_RUN and leaves long bands untouched', () => {
+    // Ramp start: at minRun the gate demands the tight floor.
+    expect(effectiveConvergenceRatio(DEFAULT_CONVERGENCE_MIN_RUN, 0.9, 0.6)).toBeCloseTo(CONVERGENCE_MIN_RATIO);
+    // Ramp end and beyond: the calibrated ratio, unchanged.
+    expect(effectiveConvergenceRatio(CONVERGENCE_SHORT_RUN, 0.9, 0.6)).toBe(0.9);
+    expect(effectiveConvergenceRatio(90, 0.9, 0.6)).toBe(0.9);
+    // Tightened in between, never past the floor.
+    expect(effectiveConvergenceRatio(20, 0.9, 0.6)).toBeGreaterThan(CONVERGENCE_MIN_RATIO);
+    expect(effectiveConvergenceRatio(20, 0.9, 0.6)).toBeLessThan(0.9);
+    // A "tight" ratio that is not lower than the base never loosens the gate.
+    expect(effectiveConvergenceRatio(15, 0.9, 1.2)).toBe(0.9);
+  });
 });
 
 describe('probeStructure', () => {
@@ -234,6 +272,7 @@ describe('Coin Scan structure defaults and types', () => {
     expect(params).toEqual({
       minRun: DEFAULT_CONVERGENCE_MIN_RUN,
       convergenceRatio: DEFAULT_CONVERGENCE_RATIO,
+      shortTightRatio: DEFAULT_CONVERGENCE_SHORT_TIGHT_RATIO,
       flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
     });
     expect(defaultStructureParams({ minRun: 7 }).minRun).toBe(7);

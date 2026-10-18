@@ -339,6 +339,12 @@ export type StructureParams = {
    */
   convergenceRatio?: number;
   /**
+   * Shrink ratio applied at `minRun` bars, ramping back to `convergenceRatio` by
+   * `CONVERGENCE_SHORT_RUN` bars (see `effectiveConvergenceRatio`). Absent →
+   * `DEFAULT_CONVERGENCE_SHORT_TIGHT_RATIO`.
+   */
+  shortTightRatio?: number;
+  /**
    * Flatness tolerance for the band, scaled by the band's own median bar
    * volatility (runMed): an edge (low or high regression) counts as flat when its
    * total drift is <= this × runMed. A rising/falling trend (whose relative
@@ -533,11 +539,47 @@ export const DEFAULT_CONVERGENCE_FLAT_RATIO = 2.0;
  * the `runLen - 1` bars before it.
  */
 export const CONVERGENCE_CONFIRMED_TAIL = 1;
+/**
+ * Shrink ratio demanded of a SHORT band at `minRun`, ramping back to
+ * `DEFAULT_CONVERGENCE_RATIO` by `CONVERGENCE_SHORT_RUN` bars (see
+ * `effectiveConvergenceRatio`). A short band's shrink depth is mostly LUCK: its
+ * same-length baseline can land on a single huge bar (a dump or a liquidation
+ * wick), so a handful of quiet bars after a crash reads as a deep "convergence".
+ * Measured on the 10/15 snapshot (427 instruments, 321 detected): median band
+ * length 7 bars, score p50 0.30, and the band's median volatility sat at the 53rd
+ * percentile of the instrument's OWN series — at the default the detector accepts
+ * a band that is ordinary for that instrument.
+ *
+ * Duration still does NOT enter the score (09/20 decision): it only decides how
+ * much shrink is required to call something a convergence.
+ */
+export const DEFAULT_CONVERGENCE_SHORT_TIGHT_RATIO = 0.6;
+/** Band length at which the shrink gate returns to `convergenceRatio` (no tightening). */
+export const CONVERGENCE_SHORT_RUN = 30;
+/** Floor of the effective shrink ratio over `minRun`…`CONVERGENCE_SHORT_RUN`. */
+export const CONVERGENCE_MIN_RATIO = 0.85;
 
 function clamp01(value: number): number {
   if (value < 0) return 0;
   if (value > 1) return 1;
   return value;
+}
+
+/**
+ * The shrink ratio a band of `runLen` bars must beat. A band at `minRun` demands
+ * `CONVERGENCE_SHORT_TIGHT_RATIO`, ramping linearly to `base` (the calibrated
+ * `convergenceRatio`) at `CONVERGENCE_SHORT_RUN` bars; longer bands are unchanged.
+ * The ramp is linear in LENGTH, not in depth, so a multi-bar band landing at the
+ * default is not escalated into an impossible demand. The result never exceeds
+ * `base` (the gate never loosens); a `tightRatio` that is not lower than `base`
+ * means "no tightening".
+ */
+export function effectiveConvergenceRatio(runLen: number, base: number, tightRatio: number): number {
+  if (tightRatio >= base || runLen >= CONVERGENCE_SHORT_RUN) return base;
+  const floor = Math.max(tightRatio, CONVERGENCE_MIN_RATIO);
+  const span = Math.max(CONVERGENCE_SHORT_RUN - DEFAULT_CONVERGENCE_MIN_RUN, 1);
+  const progress = Math.min(Math.max((runLen - DEFAULT_CONVERGENCE_MIN_RUN) / span, 0), 1);
+  return Math.min(base, floor + (base - floor) * progress);
 }
 
 /** Median of an array; 0 for an empty array. Robust to spikes. */
@@ -626,6 +668,7 @@ export function detectConvergence(candles: readonly Candlestick[], params: Struc
 
   const vol = sorted.map((candle) => (candle.high - candle.low) / candle.low);
   const convergenceRatio = params.convergenceRatio ?? DEFAULT_CONVERGENCE_RATIO;
+  const shortTightRatio = params.shortTightRatio ?? DEFAULT_CONVERGENCE_SHORT_TIGHT_RATIO;
   const flatRatio = params.flatRatio ?? DEFAULT_CONVERGENCE_FLAT_RATIO;
   const last = sorted.length - 1;
   const lastPrice = sorted[last].close;
@@ -644,8 +687,13 @@ export function detectConvergence(candles: readonly Candlestick[], params: Struc
     const flatTol = flatRatio * runMed;
     if (Math.max(edgeDrift(band.map((c) => c.low), start), edgeDrift(band.map((c) => c.high), start)) > flatTol) continue;
     const preMed = median(vol.slice(preStart, start));
-    // ---- volatility shrink: band quieter than the same-length stretch before ----
-    if (runMed >= convergenceRatio * preMed) continue;
+    // ---- volatility shrink: band quieter than the same-length stretch before.
+    // SHORT bands must be much quieter: a same-length baseline of a few bars is
+    // one spike away from being huge, so the gate tightens as the band shortens
+    // (see SHORT_TIGHT_RATIO). Flat at the calibrated ratio from
+    // CONVERGENCE_SHORT_RUN bars up, so long bands behave exactly as before. ----
+    const effectiveRatio = effectiveConvergenceRatio(runLen, convergenceRatio, shortTightRatio);
+    if (runMed >= effectiveRatio * preMed) continue;
     // ---- containment: the newest bar must still sit inside the range the band
     // was CONFIRMED at. That range comes from the band's first `runLen -
     // CONVERGENCE_CONFIRMED_TAIL` bars — i.e. WITHOUT the newest bar, which is
@@ -693,6 +741,7 @@ export function defaultStructureParams(overrides?: Partial<StructureParams>): St
   return {
     minRun: DEFAULT_CONVERGENCE_MIN_RUN,
     convergenceRatio: DEFAULT_CONVERGENCE_RATIO,
+    shortTightRatio: DEFAULT_CONVERGENCE_SHORT_TIGHT_RATIO,
     flatRatio: DEFAULT_CONVERGENCE_FLAT_RATIO,
     ...overrides,
   };
