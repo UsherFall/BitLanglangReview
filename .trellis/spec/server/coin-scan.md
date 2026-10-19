@@ -478,3 +478,46 @@ Whole-pool pass rate of the floor alone: **97.63%** snapshot / **96.31%** live �
 ⇒ Shipped as `COARSE_POS_RANGE_FLOOR = 0.03` inside the same pass condition (an absolute rail next to the two pool-relative cuts), with `posRange` on `coarseStructure`/`CoarseRow` and rendered as 位 in the panel's 结构 column. **R1 is final**: no further structure criterion is to be automated. The small-timeframe stage was ALSO calibrated and came out **negative**, so it is NOT the place to push precision either: per-timeframe "absolute convergence" (small body / narrow range) has no discriminating power — whole-pool pass rates **52–96%** ("everyone has a narrow range"), and the two quietest instruments in the whole 465 pool are BGB and TRX, i.e. approved labels; "position in the box + preceding direction" is **mathematically non-separable** (approved labels span 0.063…0.766, negatives sit on BOTH sides). Precision beyond this rail is therefore the panel's manual 降权 and the user's eye — **not another gate**.
 
 > **Do NOT re-attempt scalarizing the user's "structure" judgement.** Six rules were tried (10/13) and every one failed — each either missed approved labels or degenerated to "everyone passes" (pool pass 44.7%–96%): (1) impulse-anchored band + shrinking volatility (overfit — 0 of 28.4M parameter sets separated the labels); (2) big move + proportionate consolidation + swing triangle (7/9 at best; ACE/SYN contradictory); (3) "trend walked out" + triangle-vs-box typology (6/8, or 66.7% pool when forced to 8/8); (4) stopped-falling + decent rebound + consolidation (rebound direction came out **reversed**: negatives 448% vs positives 107%); (5) consolidation-length-over-decline ratio (labels overlap; exhaustive 17×1D + 14-pair×2D searches found NO rule reaching 6/7 approved ∧ 0 of the 7 newly-named negatives); (6) position + preceding direction (non-separable). The judgement is visual/holistic — new "this isn't a good structure" feedback is a **manual-tagging input, not a missing scalar**. See the "Algorithm: 1D coarse screen" section for the exact definition, the whole-series window and the degenerate cases.
+
+## Convergence criterion research (10/19) — position, not "quieter than before"
+
+Trigger: CFX came out #1 in the live scan while the user read it as "fake breakout, fell back, never held" (no re-test). Recomputing confirmed it: after the 10/09–10/10 spike (+55%) the price bled back down and BOTH detectors still passed it — `detectConvergence` (score 0.716) and `detectBoxBrace` (box height only 0.36 of a "preceding move" that is exactly the two spike bars).
+
+Root cause: both measure "**the recent stretch is quieter than what came before**". Neither knows what the preceding stretch was, nor where the price is sitting. "Spike then bleed-and-drift" and "a finished rally consolidating high" are identical to them.
+
+Already measured and REJECTED — do not re-try (evidence: `.trellis/tasks/10-19-fakeout-retest-quality/research/findings.md`):
+
+| Route | Result |
+| --- | --- |
+| Re-test quality (retest position + bearish drift) | User-rejected as over-complex; premise also wrong (WAL is a REAL breakout) |
+| Segmenting by "the most recent move" (z-score / efficiency ratio / min size) | CFX slips through every segmentation; the 12 replay cards are the CURRENT detector's own output, so they are not a baseline |
+| Absolute convergence (last N-day range ≤ x%) | Only 8/33 user-marked stretches covered (20d ≤25%); approved stretches run 26–60% wide |
+| Contraction measures (20d/90d height, stepwise narrowing) | 7.1–10.7% top-10% precision ≈ random base 12.8%; multiplying by position is WORSE than position alone |
+| "First time back at the top" event | Kills WAL/BEAM/AXL/TIA/OPG/STRK — good structures sit high for one to two weeks |
+
+Recommended (studied only; NOT shipped): `retention`
+
+```
+window  = last 60 daily bars (initial calibration, tunable)
+lo      = lowest low in the window
+hi      = highest high AFTER lo
+retention = (lastClose - lo) / (hi - lo)   // 1 = still at the top, 0 = back at the start
+offHigh%  = (1 - lastClose / hi) * 100
+```
+
+- No hard-coded 90 days: the range STARTS at a data-given point (the window low);
+- WAL 0.87 vs CFX **0.07**;
+- 285 hand labels: top 10% precision **35.7%** (baseline 12.8%), worst quartile 4.2%;
+- Full-pool ranking (679 Bitget symbols × 410 days, anchor day): keeping the day's top **10%** (≈64 names/day) gives **40%** precision; top 5% (34 names) 25%;
+- 33 marked stretches replayed day by day: top 10% covers **12/18**.
+
+Usage MUST be a same-day cross-sectional top-X% cut, never an absolute threshold: only ~4% of the pool ever sits at retention ≥0.6, so any fixed cut drifts with the market and the instrument.
+
+Known properties that must be remembered with it:
+
+1. It is a **strength filter**: 30 of the 36 approved labels have a >60% leg over the last 60 days (only GWEI 28% and TRX 9% are small). That is the user's actual preference; screening for "coins that just left a base" removes 34/36 approved labels.
+2. Relative ranking still emits ~64 names in a bear market ("least bad" ones).
+3. It cannot tell "waiting high for a breakout" from "topping" — that stays manual.
+4. Hand-drawn lines (水平线/射线) have NO evidence of improving selection yet (the wanted "rally off a base into a box top, then converge" shape exists in only GWEI of the 36); they stay a labelling / trade-plan tool.
+
+Implementation constraints if adopted: add a screen/rank layer, do NOT change `score` or the `StructureResult` row contract (10/12); leave the coarse screen, `posRange ≥ 0.03` and the pool untouched; full-pool history MUST page `/candles` then `/history-candles` with `endTime = oldest` (see the market-data TRAP note).
