@@ -1,0 +1,4 @@
+# Register the Trellis skill provider and the dashboard page on the host.
+- insert:
+    - id: trellis
+      name: dsh-trellis

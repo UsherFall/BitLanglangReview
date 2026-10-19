@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Trellis Board</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #0f1117; color: #e2e6ef; }
+header { padding: 20px 28px; border-bottom: 1px solid #232838; display: flex; align-items: baseline; gap: 16px; }
+header h1 { margin: 0; font-size: 20px; }
+header .counts { color: #8b93a7; font-size: 13px; }
+header .root { margin-left: auto; color: #5b6478; font-size: 12px; font-family: Consolas, monospace; }
+main { padding: 24px 28px; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.card { background: #171b26; border: 1px solid #262c3e; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.card h3 { margin: 0; font-size: 15px; line-height: 1.4; }
+.card .meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #232a3d; color: #aab3c8; }
+.pill.planning { background: #3a3418; color: #e6c85a; }
+.pill.in_progress { background: #16344a; color: #5cb8f0; }
+.pill.completed { background: #163a28; color: #58d68d; }
+.pill.archived { background: #22252e; color: #6a7284; }
+.card .desc { margin: 0; font-size: 12.5px; color: #9aa3b8; line-height: 1.5; flex: 1; }
+.card .foot { display: flex; justify-content: space-between; font-size: 11px; color: #5b6478; font-family: Consolas, monospace; }
+.card.completed, .card.archived { opacity: .55; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Trellis Board</h1>
+  <span class="counts">__COUNTS__</span>
+  <span class="root">__ROOT__</span>
+</header>
+<main>
+/*__CARDS__*/
+</main>
+</body>
+</html>
