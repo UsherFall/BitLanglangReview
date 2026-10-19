@@ -1,6 +1,7 @@
 # 选品收敛:1D 粗筛 + 小级别绝对收敛
 
 > 本文档已做收敛整理(2026-10-12),合并了六轮讨论。历史过程与全部实跑数字在 `research/` 下。
+> **2026-10-19 合并**:任务 `10-15-structure-fullness`(收敛判据补「前戏」维度 / 大行情分段式判据重写)并入本任务。其 PRD 见 `merged-structure-fullness/prd.md`,研究产物(`label-analysis-285.md`、`labels-285.csv`)已入 `research/`。下一步的开发方向以该文档为准:把 `detectConvergence` 从「等长前段相对收缩」改为「上一段大行情分界 + 带内逐步收缩」的判据级重写(依赖长历史翻页能力,注意其依赖任务 `10-15-labeling-history-window` 未包含在本任务内)。
 
 ## Goal
 

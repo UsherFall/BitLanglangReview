@@ -1,0 +1,28 @@
+{
+  "id": "coin-scan-absolute-convergence",
+  "name": "coin-scan-absolute-convergence",
+  "title": "选品收敛:绝对幅度门槛与收敛位置分类",
+  "description": "让选品收敛判定加入绝对收敛维度(实体小、价格在窄区间震荡),并在此基础上引入收敛位置分类(反弹后收住 / 砸穿上涨趋势后收住),以剔除当前纯相对判定混入的低波动漂移与涨跌后休眠的假阳性(TRX 型、新上市票型)。2026-10-19 合并 10-15-structure-fullness(判据补「前戏」维度:大行情分段式判据重写),合并文档见 merged-structure-fullness/prd.md,下一步以判据重写为开发主线。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "fupan",
+  "assignee": "fupan",
+  "createdAt": "2026-10-12",
+  "completedAt": "2026-10-19",
+  "branch": "master",
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "structure-fullness (merged 2026-10-19)"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
