@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Check conventions: no coupling to Chinese literals that may be mojibake, tests assert structure, tsc + npm test must be clean."}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "What the check must prove is UNCHANGED: detectConvergence / detectBoxBrace behaviour, StructureResult contract, coarse screen (池内分位 + posRange >= 0.03), and the pool."}
+{"file": ".trellis/tasks/10-19-fakeout-retest-quality/prd.md", "reason": "Acceptance criteria AC1-AC6 to verify one by one, including the causal hold-rate regression (AC3) and the column header list (AC5)."}
+{"file": ".trellis/tasks/10-19-fakeout-retest-quality/research/findings.md", "reason": "Numbers to reproduce for AC3 (§4.5 G: retention top10% hold-rate 64.7% vs baseline 30.3% at 2026-09-30) and the 15-stretch coverage figure (§4.5 C)."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "This change crosses domain (measure) → service (ranking/cut) → route (param) → UI (columns); use the guide to check every layer is updated consistently."}
