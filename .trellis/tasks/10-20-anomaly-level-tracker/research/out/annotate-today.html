@@ -76,6 +76,7 @@ kbd{background:#21262d;border:1px solid #30363d;border-radius:3px;padding:0 4px;
         <button data-v="missed">错过了</button>
       </div>
     </div>
+<div class="row"><label>备注 · 这个币 / 这张图的想法（自动保存，会随导出一起出去）</label><textarea id="note" placeholder="例如：这种才是想要的 / 拉太急不行 / 这里量没跟上 / 后面该看哪里……" style="width:100%;height:84px;resize:vertical;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:7px 9px;font:12px/1.6 inherit;box-sizing:border-box"></textarea><div style="font-size:10.5px;color:#6e7681;margin-top:3px" id="note-state"></div></div>
     <div id="hint">
       默认<b>浏览</b>：滚轮缩放、拖动平移。<br>
       画线先点按钮（或 <kbd>1</kbd><kbd>2</kbd>）；按 <kbd>3</kbd> 拖选一段新增区间。<br>
@@ -123,7 +124,8 @@ function cur(){ return CARDS[idx]; }
 function key(){ return cur().inst + '|' + cur().markDate; }
 function st(){
   var c = cur();
-  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ] };
+  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ], note: '' };
+  if (typeof state[key()].note !== 'string') state[key()].note = '';
   return state[key()];
 }
 function seg(){ var s = st(); return s.segments[segSel]; }
@@ -207,6 +209,7 @@ function buildChart(){
   segSel = Math.min(segSel, Math.max(0, st().segments.length - 1));
   lineSel = -1;
   renderDrawn(); drawOverlay(); setTool(null); renderList();
+  if (window.__syncNote) window.__syncNote();
 }
 
 function xOfDay(d){ var i = candles.findIndex(function(b){ return b.d >= d; }); return i < 0 ? null : chart.timeScale().logicalToCoordinate(i); }
@@ -349,7 +352,7 @@ el('export').onclick = function(){
   var out = CARDS.map(function(c){
     var k = c.inst + '|' + c.markDate;
     var s = state[k] || { segments: [] };
-    return { inst:c.inst, markDate:c.markDate, quote:c.quote, segments: s.segments.map(function(g){ return { region:g.region, source:g.source, verdict:g.verdict, lines:g.lines }; }) };
+    return { inst:c.inst, markDate:c.markDate, quote:c.quote, note: s.note || '', segments: s.segments.map(function(g){ return { region:g.region, source:g.source, verdict:g.verdict, lines:g.lines }; }) };
   });
   var blob = new Blob([JSON.stringify(out, null, 2)], { type:'application/json' });
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'annotations-34.json'; a.click();
@@ -364,5 +367,23 @@ document.addEventListener('keydown', function(e){
   if (e.key === 'ArrowLeft') go(idx-1);
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedLine(); }
 });
+
+window.__syncNote = function(){
+  var ta = el('note'); if (!ta) return;
+  var want = st().note || '';
+  if (ta.value !== want) ta.value = want;
+  el('note-state').textContent = want.trim() ? '已保存' : '';
+};
+window.__bindNote = function(){
+  var ta = el('note'); if (!ta || ta.__bound) return;
+  ta.__bound = true;
+  ta.addEventListener('input', function(){
+    st().note = ta.value;
+    localStorage.setItem(KEY, JSON.stringify(state));
+    el('note-state').textContent = ta.value.trim() ? '已保存 ' + new Date().toLocaleTimeString() : '';
+  });
+  ta.addEventListener('keydown', function(e){ e.stopPropagation(); });
+};
+window.__bindNote();
 buildChart(); renderList();
 </script></body></html>

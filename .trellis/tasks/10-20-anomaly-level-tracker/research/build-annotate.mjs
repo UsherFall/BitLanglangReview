@@ -87,6 +87,73 @@ const viewAfter = `
 if (!out.includes(viewBefore)) throw new Error('模板初始视野代码变了，请更新 build-annotate.mjs 里的补丁');
 out = out.replace(viewBefore, viewAfter);
 
+/**
+ * 加备注（用户 10/20 要求"给我个备注功能吧，我把意见都写上"）。
+ *
+ * 设计：
+ *   - 备注挂在「卡片」上（inst|markDate），不挂在段上 —— 因为意见常常是说这币/这张图整体的事
+ *   - 输入即存（本地 localStorage，刷新不丢），随「导出标注」一起出现在 json 里
+ *   - 每张卡一个 textarea，回车换行不触发翻页
+ */
+const noteHtml =
+  '<div class="row"><label>备注 · 这个币 / 这张图的想法（自动保存，会随导出一起出去）</label>' +
+  '<textarea id="note" placeholder="例如：这种才是想要的 / 拉太急不行 / 这里量没跟上 / 后面该看哪里……" ' +
+  'style="width:100%;height:84px;resize:vertical;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;' +
+  'border-radius:6px;padding:7px 9px;font:12px/1.6 inherit;box-sizing:border-box"></textarea>' +
+  '<div style="font-size:10.5px;color:#6e7681;margin-top:3px" id="note-state"></div></div>';
+
+const asideAnchor = '    <div id="hint">';
+if (!out.includes(asideAnchor)) throw new Error('模板侧栏结构变了，请更新 build-annotate.mjs 里的备注补丁');
+out = out.replace(asideAnchor, noteHtml + '\n' + asideAnchor);
+
+// st() 里补上 note 字段（新建卡片时）
+const stBefore =
+  "  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ] };";
+const stAfter =
+  "  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ], note: '' };\n" +
+  '  if (typeof state[key()].note !== \'string\') state[key()].note = \'\';';
+if (!out.includes(stBefore)) throw new Error('模板 st() 结构变了，请更新 build-annotate.mjs 里的备注补丁');
+out = out.replace(stBefore, stAfter);
+
+// 备注读写 + 随 buildChart 回填（buildChart 每张卡都会跑）
+// 注意：'buildChart(); renderList();' 在模板里出现两次（renderList 里一次、文件末尾一次），
+// 必须只改最后那处启动行，否则会把代码塞进 renderList 函数体中间。
+const bindBefore = '  renderDrawn(); drawOverlay(); setTool(null); renderList();';
+const bindAfter =
+  "  renderDrawn(); drawOverlay(); setTool(null); renderList();\n  if (window.__syncNote) window.__syncNote();";
+if (!out.includes(bindBefore)) throw new Error('模板 buildChart 结构变了，请更新 build-annotate.mjs 里的备注补丁');
+out = out.replace(bindBefore, bindAfter);
+
+const noteJs = `
+window.__syncNote = function(){
+  var ta = el('note'); if (!ta) return;
+  var want = st().note || '';
+  if (ta.value !== want) ta.value = want;
+  el('note-state').textContent = want.trim() ? '已保存' : '';
+};
+window.__bindNote = function(){
+  var ta = el('note'); if (!ta || ta.__bound) return;
+  ta.__bound = true;
+  ta.addEventListener('input', function(){
+    st().note = ta.value;
+    localStorage.setItem(KEY, JSON.stringify(state));
+    el('note-state').textContent = ta.value.trim() ? '已保存 ' + new Date().toLocaleTimeString() : '';
+  });
+  ta.addEventListener('keydown', function(e){ e.stopPropagation(); });
+};`;
+const bootAnchor = 'buildChart(); renderList();';
+const bootIdx = out.lastIndexOf(bootAnchor);
+if (bootIdx < 0) throw new Error('模板启动行变了，请更新 build-annotate.mjs 里的备注补丁');
+out = out.slice(0, bootIdx) + noteJs + '\nwindow.__bindNote();\n' + bootAnchor + out.slice(bootIdx + bootAnchor.length);
+
+// 导出时带上备注
+const exportBefore =
+  "    return { inst:c.inst, markDate:c.markDate, quote:c.quote, segments: s.segments.map(function(g){ return { region:g.region, source:g.source, verdict:g.verdict, lines:g.lines }; }) };";
+const exportAfter =
+  "    return { inst:c.inst, markDate:c.markDate, quote:c.quote, note: s.note || '', segments: s.segments.map(function(g){ return { region:g.region, source:g.source, verdict:g.verdict, lines:g.lines }; }) };";
+if (!out.includes(exportBefore)) throw new Error('模板导出结构变了，请更新 build-annotate.mjs 里的备注补丁');
+out = out.replace(exportBefore, exportAfter);
+
 const target = path.join(OUT, 'annotate-today.html');
 fs.writeFileSync(target, out);
 console.log(`写出 ${target}（${cards.length} 张卡，${(out.length / 1024 / 1024).toFixed(2)} MB）`);
