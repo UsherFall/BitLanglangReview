@@ -93,6 +93,6 @@
 | `research/fetch-pool.mjs` | 拉池（含成交量），每日可复跑 |
 | `research/build-tape.mjs` | 产线入口：粗筛 + 按线回放 + 自检 + 可读名单 |
 | `research/diag-levels.mjs` | 三种距离口径交叉验证 |
-| `research/discovery/scan-rally.mjs` `scan-rally2.mjs` | v1/v2 失败记录（保留证据） |
+| `research/scan-rally.mjs` `scan-rally2.mjs` | v1/v2 失败记录（保留证据） |
 | `research/out/list-2026-10-19.html` | ⭐ 给用户看的名单页 |
 | `research/out/<date>.json` `level-replay.json` | 名单与回放数据 |
