@@ -264,10 +264,14 @@ overlay.addEventListener('pointerup', function(ev){
   if (!regionDrag) return;
   var s = st();
   var x1 = Math.min(regionDrag.a, regionDrag.b), x2 = Math.max(regionDrag.a, regionDrag.b);
-  var t1 = chart.timeScale().coordinateToTime(x1), t2 = chart.timeScale().coordinateToTime(x2);
+  var i1 = Math.round(chart.timeScale().coordinateToLogical(x1));
+  var i2 = Math.round(chart.timeScale().coordinateToLogical(x2));
   regionDrag = null;
-  if (t1 != null && t2 != null) {
-    var r = [ new Date(t1*1000).toISOString().slice(0,10), new Date(t2*1000).toISOString().slice(0,10) ];
+  i1 = Math.max(0, Math.min(candles.length - 1, i1));
+  i2 = Math.max(0, Math.min(candles.length - 1, i2));
+  if (i2 < i1) { var _s = i1; i1 = i2; i2 = _s; }
+  if (true) {
+    var r = [ candles[i1].d, candles[i2].d ];
     // 新增一段（而不是覆盖）—— 这是 Bug 2 的修复
     s.segments.push({ region:r, source:'edited', verdict:null, lines:[] });
     segSel = s.segments.length - 1;

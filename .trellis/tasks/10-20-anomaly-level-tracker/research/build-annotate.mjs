@@ -154,6 +154,28 @@ const exportAfter =
 if (!out.includes(exportBefore)) throw new Error('模板导出结构变了，请更新 build-annotate.mjs 里的备注补丁');
 out = out.replace(exportBefore, exportAfter);
 
+/**
+ * 修画段（用户 10/20：画完就飘到不知道哪里去了）。
+ *
+ * 原因：coordinateToTime 在留白处会返回"超出数据范围"的时间，
+ * new Date(t*1000).toISOString() 直接抛 Invalid time value，
+ * 于是段落没存下、只有 overlay 上那一下的高亮，看着就是"飘了"。
+ * 修法：把拖选的两端都夹到真实 K 线范围内，取整根，绝不产生非法日期。
+ */
+const segPat = /var t1 = chart\.timeScale\(\)\.coordinateToTime\(x1\), t2 = chart\.timeScale\(\)\.coordinateToTime\(x2\);\s*\n\s*regionDrag = null;\s*\n\s*if \(t1 != null && t2 != null\) \{\s*\n\s*var r = \[ new Date\(t1\*1000\)\.toISOString\(\)\.slice\(0,10\), new Date\(t2\*1000\)\.toISOString\(\)\.slice\(0,10\) \];/;
+if (!segPat.test(out)) throw new Error('模板画段代码变了，请更新 build-annotate.mjs 里的画段补丁');
+out = out.replace(
+  segPat,
+  `var i1 = Math.round(chart.timeScale().coordinateToLogical(x1));
+  var i2 = Math.round(chart.timeScale().coordinateToLogical(x2));
+  regionDrag = null;
+  i1 = Math.max(0, Math.min(candles.length - 1, i1));
+  i2 = Math.max(0, Math.min(candles.length - 1, i2));
+  if (i2 < i1) { var _s = i1; i1 = i2; i2 = _s; }
+  if (true) {
+    var r = [ candles[i1].d, candles[i2].d ];`,
+);
+
 const target = path.join(OUT, 'annotate-today.html');
 fs.writeFileSync(target, out);
 console.log(`写出 ${target}（${cards.length} 张卡，${(out.length / 1024 / 1024).toFixed(2)} MB）`);
