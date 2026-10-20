@@ -47,6 +47,25 @@ const RALLY_LOOKBACK = 90;   // 往回找拉升的范围（天）
 const RALLY_MIN = 0.3;       // 这段涨幅至少多少（相对量：涨了 30%）
 const RALLY_MIN_DAYS = 4;    // 至少几天（过滤单根插针）
 const RALLY_MAX_HOLD = 0.6;  // 顶之后最多回吐拉升的几成（跌回一半以下 = 这波已经废了）
+const SKIP_BREAKOUTS = process.env.KEEP_BREAKOUTS !== '1'; // 用户 10/20：已突破的不报
+
+/**
+ * 顶之后的状态（用户 10/20 定口径）：
+ *   brokeOut  顶之后有没有创过新高（哪怕后来跌回来）—— 这是"已经拉起来突破了"
+ *   pos       现价在"顶后区间"里的位置 0=底 1=顶
+ */
+function postPeak(arr, pAt, E, peak) {
+  const after = arr.slice(pAt, E + 1);
+  const hi = Math.max(...after.map((b) => b.h));
+  const lo = Math.min(...after.map((b) => b.l));
+  const close = arr[E].c;
+  return {
+    brokeOut: hi > peak * 1.0001,
+    pos: hi > lo ? +((close - lo) / (hi - lo)).toFixed(2) : 1,
+    afterHi: hi,
+    afterLo: lo,
+  };
+}
 
 function rally(arr, E) {
   if (E < RALLY_LOOKBACK) return null;
@@ -68,6 +87,7 @@ function rally(arr, E) {
   if (giveback > RALLY_MAX_HOLD) return null;   // 拉起来又全跌回去 → 这波不算"还在"
   const now = arr[E].c;
   const close = arr[E - 1]?.c;
+  const post = postPeak(arr, best.pAt, E, P);
   return {
     inst: null,
     s0: arr[best.sAt].d,
@@ -79,23 +99,34 @@ function rally(arr, E) {
     todayPct: close ? +(((now - close) / close) * 100).toFixed(2) : null,
     price: now,
     peak: P,
+    brokeOut: post.brokeOut,                     // 顶后创过新高
+    pos: post.pos,                               // 现价在顶后区间的位置
   };
 }
 
 const list = [];
+let droppedBreakouts = 0;
 for (const [inst, { arr }] of bars) {
   const E = arr.findIndex((x) => x.d === AS_OF_DAY);
   if (E < 0) continue;
   const r = rally(arr, E);
-  if (r) list.push({ ...r, inst: inst.replace(/USDT$/, ''), asOf: arr[E].d });
+  if (!r) continue;
+  if (SKIP_BREAKOUTS && r.brokeOut) { droppedBreakouts++; continue; }
+  list.push({ ...r, inst: inst.replace(/USDT$/, ''), asOf: arr[E].d });
 }
-list.sort((a, b) => a.fromPeak - b.fromPeak);
+
+// 用户 10/20 定口径：按"回踩后离顶最近"排，刚突破的往后放。
+// 排序键 = 离顶 %（已经是"回踩深度"），升序；已突破的永远垫底。
+list.sort((a, b) => {
+  if (a.brokeOut !== b.brokeOut) return a.brokeOut ? 1 : -1;
+  return a.fromPeak - b.fromPeak;
+});
 fs.writeFileSync(path.join(OUT, 'rally-list.json'), JSON.stringify(list, null, 1));
-console.log(`\n=== 1. 粗筛名单（${AS_OF_DAY}）：${list.length} 个币 ===`);
-console.log(`${'币'.padEnd(10)}${'拉升起点'.padStart(12)}${'顶'.padStart(12)}${'涨幅'.padStart(7)}${'离顶'.padStart(7)}${'顶后'.padStart(5)}${'今日'.padStart(8)}`);
+console.log(`\n=== 1. 粗筛名单（${AS_OF_DAY}）：${list.length} 个币${droppedBreakouts ? `（已剔除突破 ${droppedBreakouts} 个）` : ''} ===`);
+console.log(`${'币'.padEnd(10)}${'拉升起点'.padStart(12)}${'顶'.padStart(12)}${'涨幅'.padStart(7)}${'离顶'.padStart(7)}${'顶后位'.padStart(7)}${'顶后'.padStart(5)}${'今日'.padStart(8)}`);
 for (const r of list.slice(0, 20)) {
   console.log(
-    `${r.inst.padEnd(10)}${r.s0.padStart(12)}${r.p.padStart(12)}${(r.gain + '%').padStart(7)}${(r.fromPeak + '%').padStart(7)}${String(r.holdDays).padStart(5)}${(r.todayPct ?? '-').toString().padStart(8)}`,
+    `${r.inst.padEnd(10)}${r.s0.padStart(12)}${r.p.padStart(12)}${(r.gain + '%').padStart(7)}${(r.fromPeak + '%').padStart(7)}${String(r.pos).padStart(7)}${String(r.holdDays).padStart(5)}${(r.todayPct ?? '-').toString().padStart(8)}`,
   );
 }
 console.log(`... 共 ${list.length} 个，详见 out/rally-list.json`);

@@ -79,20 +79,57 @@
 | 算法猜“顶在哪” | 用户画线 |
 | 算法打分排序推荐 | 只报两个数，不推荐 |
 
-## 四、待用户确认
+## 四、用户 10/20 看图后的三条反馈（已修）
 
-**看 `out/list-2026-10-19.html`**：85 个候选（页面前 60 个）是否值得标压力位？
+> "要我标啥，这个我单看图还行，但是不是真的行要看更多k线，而且这些有点像已经拉起来突破的币"
 
-- 如果**偏多** → 收紧（例如拉升 ≥50%、回吐 ≤40%）
-- 如果**偏少/漏了你关心的** → 放宽，或允许手动加币（第 3 步不依赖粗筛）
+### 4.1 "要我标啥" —— 我原来给的是缩略图
 
-## 五、产物清单
+缩略图不能画线。改成用现成的标注页（可缩放、可拖、能画水平线/射线），
+把今天 82 个候选灌进去：`out/annotate-today.html`。
+
+### 4.2 "要看更多 k 线" —— 我原来的画法把回踩截掉了
+
+旧版每张卡只画到「拉升顶后几天」，把后面的回踩整段裁掉了，所以看着都像突破。
+实测（`diag-buckets.mjs`）：
+
+| 顶之后的状态 | 数量 |
+|---|---|
+| 已破顶 / 创新高 | 2（ZEC、SOL） |
+| 顶后横在偏上 | 5（JST、BEAM、ALT、XMR、METIS） |
+| **顶后回落明显** | **77（91%）** |
+
+⇒ 你看到的"像突破"是**画法**造成的，不是候选的问题。新版画完整 200 根 + 高低影线（`out/overview.html`）。
+
+### 4.3 "有点像已经拉起来突破的币" —— 排序确实把突破排在最前
+
+原排序是「离拉升顶最近」，这正好把刚突破的排前面。你定的新口径：
+
+1. **排序** = 按「回踩后离顶最近」（`fromPeak` 升序）
+2. **突破币直接不报**（顶之后创过新高的，剔除）
+3. 标线用现有标注页
+
+实施结果：85 → **82 个**（剔除 ZEC / SOL / AVAX 三个顶后创过新高的）。
+
+## 五、待用户确认
+
+**打开 `out/annotate-today.html`**（82 张，可缩放）：
+
+- 在拉升区间里画水平线标压力位，画完点「导出标注」
+- 把导出的 json 放到 `research/draw/labels.json`，重跑 `build-page.mjs`，
+  名单页就会多出「距线 %」一列（口径 = 上方最近一条）
+
+## 六、产物清单
 
 | 文件 | 说明 |
 |---|---|
 | `research/fetch-pool.mjs` | 拉池（含成交量），每日可复跑 |
-| `research/build-tape.mjs` | 产线入口：粗筛 + 按线回放 + 自检 + 可读名单 |
+| `research/build-tape.mjs` | 产线入口：粗筛 + 突破剔除 + 按回踩排序 + 回放 + 自检 |
+| `research/build-annotate.mjs` | 用候选生成标注页 `out/annotate-today.html` |
+| `research/build-page.mjs` | 名单页（缩略卡）；有 `draw/labels.json` 时显示「距线」 |
+| `research/build-overview.mjs` | 全貌页（完整 200 根 + 影线） |
+| `research/diag-buckets.mjs` | 突破/回踩分档统计 |
 | `research/diag-levels.mjs` | 三种距离口径交叉验证 |
 | `research/scan-rally.mjs` `scan-rally2.mjs` | v1/v2 失败记录（保留证据） |
-| `research/out/list-2026-10-19.html` | ⭐ 给用户看的名单页 |
-| `research/out/<date>.json` `level-replay.json` | 名单与回放数据 |
+| `research/out/annotate-today.html` | ⭐ 给用户标压力位 |
+| `research/out/list-<date>.html` `overview.html` | 名单页 / 全貌页 |

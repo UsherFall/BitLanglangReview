@@ -1,44 +1,5 @@
 [
  {
-  "inst": "ZEC",
-  "s0": "2026-07-30",
-  "p": "2026-09-03",
-  "e": "2026-10-19",
-  "gain": 126.5,
-  "fromPeak": -9.7,
-  "holdDays": 46,
-  "todayPct": 0.33,
-  "price": "1129.13",
-  "peak": 1028.96,
-  "asOf": "2026-10-19"
- },
- {
-  "inst": "SOL",
-  "s0": "2026-07-31",
-  "p": "2026-08-24",
-  "e": "2026-10-19",
-  "gain": 41.8,
-  "fromPeak": -0.9,
-  "holdDays": 56,
-  "todayPct": 0.03,
-  "price": "104.113",
-  "peak": 103.17,
-  "asOf": "2026-10-19"
- },
- {
-  "inst": "AVAX",
-  "s0": "2026-07-23",
-  "p": "2026-09-18",
-  "e": "2026-10-19",
-  "gain": 53.1,
-  "fromPeak": 0.3,
-  "holdDays": 31,
-  "todayPct": -0.98,
-  "price": "9.465",
-  "peak": 9.492,
-  "asOf": "2026-10-19"
- },
- {
   "inst": "JST",
   "s0": "2026-08-29",
   "p": "2026-10-08",
@@ -49,6 +10,8 @@
   "todayPct": 0.45,
   "price": "0.14079",
   "peak": 0.14314,
+  "brokeOut": false,
+  "pos": 0.81,
   "asOf": "2026-10-19"
  },
  {
@@ -62,6 +25,8 @@
   "todayPct": 3.96,
   "price": "0.00307",
   "peak": 0.003147,
+  "brokeOut": false,
+  "pos": 0.83,
   "asOf": "2026-10-19"
  },
  {
@@ -75,6 +40,8 @@
   "todayPct": 25.99,
   "price": "0.010732",
   "peak": 0.011091,
+  "brokeOut": false,
+  "pos": 0.86,
   "asOf": "2026-10-19"
  },
  {
@@ -88,6 +55,8 @@
   "todayPct": 3.55,
   "price": "614.75",
   "peak": 636.41,
+  "brokeOut": false,
+  "pos": 0.82,
   "asOf": "2026-10-19"
  },
  {
@@ -101,6 +70,8 @@
   "todayPct": 10.9,
   "price": "4.101",
   "peak": 4.365,
+  "brokeOut": false,
+  "pos": 0.74,
   "asOf": "2026-10-19"
  },
  {
@@ -114,6 +85,8 @@
   "todayPct": -0.59,
   "price": "81428.7",
   "peak": 87373,
+  "brokeOut": false,
+  "pos": 0.22,
   "asOf": "2026-10-19"
  },
  {
@@ -127,6 +100,8 @@
   "todayPct": 2.46,
   "price": "2.329",
   "peak": 2.508,
+  "brokeOut": false,
+  "pos": 0.51,
   "asOf": "2026-10-19"
  },
  {
@@ -140,6 +115,8 @@
   "todayPct": 0.41,
   "price": "8.57",
   "peak": 9.434,
+  "brokeOut": false,
+  "pos": 0.47,
   "asOf": "2026-10-19"
  },
  {
@@ -153,6 +130,8 @@
   "todayPct": -3.48,
   "price": "0.003851",
   "peak": 0.004243,
+  "brokeOut": false,
+  "pos": 0.6,
   "asOf": "2026-10-19"
  },
  {
@@ -166,6 +145,8 @@
   "todayPct": -0.36,
   "price": "8.266",
   "peak": 9.148,
+  "brokeOut": false,
+  "pos": 0.09,
   "asOf": "2026-10-19"
  },
  {
@@ -179,6 +160,8 @@
   "todayPct": 0.58,
   "price": "728.33",
   "peak": 809.82,
+  "brokeOut": false,
+  "pos": 0.22,
   "asOf": "2026-10-19"
  },
  {
@@ -192,6 +175,8 @@
   "todayPct": -4.07,
   "price": "0.3979",
   "peak": 0.4468,
+  "brokeOut": false,
+  "pos": 0.28,
   "asOf": "2026-10-19"
  },
  {
@@ -205,6 +190,8 @@
   "todayPct": 7.91,
   "price": "0.19641",
   "peak": 0.22388,
+  "brokeOut": false,
+  "pos": 0.52,
   "asOf": "2026-10-19"
  },
  {
@@ -218,6 +205,8 @@
   "todayPct": -0.63,
   "price": "0.3645",
   "peak": 0.4154,
+  "brokeOut": false,
+  "pos": 0.51,
   "asOf": "2026-10-19"
  },
  {
@@ -231,6 +220,8 @@
   "todayPct": 6.21,
   "price": "0.5374",
   "peak": 0.6186,
+  "brokeOut": false,
+  "pos": 0.5,
   "asOf": "2026-10-19"
  },
  {
@@ -244,6 +235,8 @@
   "todayPct": -1.31,
   "price": "1.132",
   "peak": 1.306,
+  "brokeOut": false,
+  "pos": 0.42,
   "asOf": "2026-10-19"
  },
  {
@@ -257,6 +250,8 @@
   "todayPct": -1.67,
   "price": "0.06483",
   "peak": 0.07529,
+  "brokeOut": false,
+  "pos": 0.25,
   "asOf": "2026-10-19"
  },
  {
@@ -270,6 +265,8 @@
   "todayPct": -0.53,
   "price": "0.01865",
   "peak": 0.02186,
+  "brokeOut": false,
+  "pos": 0.19,
   "asOf": "2026-10-19"
  },
  {
@@ -283,6 +280,8 @@
   "todayPct": -0.23,
   "price": "0.12373",
   "peak": 0.1452,
+  "brokeOut": false,
+  "pos": 0.32,
   "asOf": "2026-10-19"
  },
  {
@@ -296,6 +295,8 @@
   "todayPct": -0.31,
   "price": "2385.83",
   "peak": 2806.73,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -309,6 +310,8 @@
   "todayPct": 1.45,
   "price": "0.07005",
   "peak": 0.08239,
+  "brokeOut": false,
+  "pos": 0.45,
   "asOf": "2026-10-19"
  },
  {
@@ -322,6 +325,8 @@
   "todayPct": -0.57,
   "price": "2.093",
   "peak": 2.505,
+  "brokeOut": false,
+  "pos": 0.45,
   "asOf": "2026-10-19"
  },
  {
@@ -335,6 +340,8 @@
   "todayPct": 2.26,
   "price": "0.7073",
   "peak": 0.849,
+  "brokeOut": false,
+  "pos": 0.35,
   "asOf": "2026-10-19"
  },
  {
@@ -348,6 +355,8 @@
   "todayPct": -2.31,
   "price": "1.733",
   "peak": 2.0833,
+  "brokeOut": false,
+  "pos": 0.24,
   "asOf": "2026-10-19"
  },
  {
@@ -361,6 +370,8 @@
   "todayPct": -4.12,
   "price": "0.05416",
   "peak": 0.06542,
+  "brokeOut": false,
+  "pos": 0.19,
   "asOf": "2026-10-19"
  },
  {
@@ -374,6 +385,8 @@
   "todayPct": 0.57,
   "price": "0.07601",
   "peak": 0.0919,
+  "brokeOut": false,
+  "pos": 0.26,
   "asOf": "2026-10-19"
  },
  {
@@ -387,6 +400,8 @@
   "todayPct": 4.08,
   "price": "0.6331",
   "peak": 0.7676,
+  "brokeOut": false,
+  "pos": 0.26,
   "asOf": "2026-10-19"
  },
  {
@@ -400,6 +415,8 @@
   "todayPct": -0.95,
   "price": "0.6754",
   "peak": 0.8207,
+  "brokeOut": false,
+  "pos": 0.36,
   "asOf": "2026-10-19"
  },
  {
@@ -413,6 +430,8 @@
   "todayPct": 12.01,
   "price": "0.09491",
   "peak": 0.11633,
+  "brokeOut": false,
+  "pos": 0.34,
   "asOf": "2026-10-19"
  },
  {
@@ -426,6 +445,8 @@
   "todayPct": 4.25,
   "price": "0.8048",
   "peak": 0.9919,
+  "brokeOut": false,
+  "pos": 0.18,
   "asOf": "2026-10-19"
  },
  {
@@ -439,6 +460,8 @@
   "todayPct": 0.56,
   "price": "0.1075",
   "peak": 0.133,
+  "brokeOut": false,
+  "pos": 0.19,
   "asOf": "2026-10-19"
  },
  {
@@ -452,6 +475,8 @@
   "todayPct": 0.19,
   "price": "0.216",
   "peak": 0.269,
+  "brokeOut": false,
+  "pos": 0.13,
   "asOf": "2026-10-19"
  },
  {
@@ -465,6 +490,8 @@
   "todayPct": -0.52,
   "price": "1.79",
   "peak": 2.2304,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -478,6 +505,8 @@
   "todayPct": -0.21,
   "price": "78.504",
   "peak": 97.999,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -491,6 +520,8 @@
   "todayPct": 0.59,
   "price": "0.7673",
   "peak": 0.9648,
+  "brokeOut": false,
+  "pos": 0.15,
   "asOf": "2026-10-19"
  },
  {
@@ -504,6 +535,8 @@
   "todayPct": 0.23,
   "price": "21.5",
   "peak": 27.06,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -517,6 +550,8 @@
   "todayPct": 0.99,
   "price": "148.7",
   "peak": 187.45,
+  "brokeOut": false,
+  "pos": 0.07,
   "asOf": "2026-10-19"
  },
  {
@@ -530,6 +565,8 @@
   "todayPct": -0.2,
   "price": "1.01",
   "peak": 1.276,
+  "brokeOut": false,
+  "pos": 0.06,
   "asOf": "2026-10-19"
  },
  {
@@ -543,6 +580,8 @@
   "todayPct": -3.23,
   "price": "4.7452",
   "peak": 6.02,
+  "brokeOut": false,
+  "pos": 0.15,
   "asOf": "2026-10-19"
  },
  {
@@ -556,6 +595,8 @@
   "todayPct": -0.96,
   "price": "0.00474",
   "peak": 0.006013,
+  "brokeOut": false,
+  "pos": 0.1,
   "asOf": "2026-10-19"
  },
  {
@@ -569,6 +610,8 @@
   "todayPct": -1.26,
   "price": "2.816",
   "peak": 3.61,
+  "brokeOut": false,
+  "pos": 0.06,
   "asOf": "2026-10-19"
  },
  {
@@ -582,6 +625,8 @@
   "todayPct": 0,
   "price": "0.02844",
   "peak": 0.03659,
+  "brokeOut": false,
+  "pos": 0.2,
   "asOf": "2026-10-19"
  },
  {
@@ -595,6 +640,8 @@
   "todayPct": 1.98,
   "price": "0.11114",
   "peak": 0.14345,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -608,6 +655,8 @@
   "todayPct": 2.27,
   "price": "0.05717",
   "peak": 0.07393,
+  "brokeOut": false,
+  "pos": 0.32,
   "asOf": "2026-10-19"
  },
  {
@@ -621,6 +670,8 @@
   "todayPct": -1.82,
   "price": "263.41",
   "peak": 341.07,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -634,6 +685,8 @@
   "todayPct": -1.83,
   "price": "0.01452",
   "peak": 0.01881,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -647,6 +700,8 @@
   "todayPct": 2.62,
   "price": "0.03996",
   "peak": 0.05191,
+  "brokeOut": false,
+  "pos": 0.38,
   "asOf": "2026-10-19"
  },
  {
@@ -660,6 +715,8 @@
   "todayPct": -0.16,
   "price": "0.1247",
   "peak": 0.1622,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -673,6 +730,8 @@
   "todayPct": 1.36,
   "price": "0.2981",
   "peak": 0.3879,
+  "brokeOut": false,
+  "pos": 0.2,
   "asOf": "2026-10-19"
  },
  {
@@ -686,6 +745,8 @@
   "todayPct": -1.81,
   "price": "0.3526",
   "peak": 0.4601,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -699,6 +760,8 @@
   "todayPct": -0.3,
   "price": "0.988",
   "peak": 1.2946,
+  "brokeOut": false,
+  "pos": 0.15,
   "asOf": "2026-10-19"
  },
  {
@@ -712,6 +775,8 @@
   "todayPct": -0.55,
   "price": "1.8898",
   "peak": 2.4792,
+  "brokeOut": false,
+  "pos": 0.22,
   "asOf": "2026-10-19"
  },
  {
@@ -725,6 +790,8 @@
   "todayPct": -1.26,
   "price": "4.163",
   "peak": 5.471,
+  "brokeOut": false,
+  "pos": 0.08,
   "asOf": "2026-10-19"
  },
  {
@@ -738,6 +805,8 @@
   "todayPct": 1.03,
   "price": "0.1868",
   "peak": 0.2454,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -751,6 +820,8 @@
   "todayPct": 0.92,
   "price": "0.645",
   "peak": 0.8488,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -764,6 +835,8 @@
   "todayPct": -1.59,
   "price": "0.010775",
   "peak": 0.014255,
+  "brokeOut": false,
+  "pos": 0.04,
   "asOf": "2026-10-19"
  },
  {
@@ -777,6 +850,8 @@
   "todayPct": -0.06,
   "price": "2.1656",
   "peak": 2.8774,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -790,6 +865,8 @@
   "todayPct": -2.29,
   "price": "0.19106",
   "peak": 0.2555,
+  "brokeOut": false,
+  "pos": 0.31,
   "asOf": "2026-10-19"
  },
  {
@@ -803,6 +880,8 @@
   "todayPct": -2.16,
   "price": "0.1857",
   "peak": 0.2492,
+  "brokeOut": false,
+  "pos": 0.1,
   "asOf": "2026-10-19"
  },
  {
@@ -816,6 +895,8 @@
   "todayPct": 0.76,
   "price": "0.02528",
   "peak": 0.03398,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -829,6 +910,8 @@
   "todayPct": 0.92,
   "price": "0.03948",
   "peak": 0.0531,
+  "brokeOut": false,
+  "pos": 0.09,
   "asOf": "2026-10-19"
  },
  {
@@ -842,6 +925,8 @@
   "todayPct": 0.46,
   "price": "0.1525",
   "peak": 0.2083,
+  "brokeOut": false,
+  "pos": 0.11,
   "asOf": "2026-10-19"
  },
  {
@@ -855,6 +940,8 @@
   "todayPct": -1.63,
   "price": "1.8765",
   "peak": 2.5694,
+  "brokeOut": false,
+  "pos": 0.2,
   "asOf": "2026-10-19"
  },
  {
@@ -868,6 +955,8 @@
   "todayPct": -0.29,
   "price": "0.623",
   "peak": 0.8555,
+  "brokeOut": false,
+  "pos": 0.19,
   "asOf": "2026-10-19"
  },
  {
@@ -881,6 +970,8 @@
   "todayPct": -1.67,
   "price": "0.01883",
   "peak": 0.02592,
+  "brokeOut": false,
+  "pos": 0.03,
   "asOf": "2026-10-19"
  },
  {
@@ -894,6 +985,8 @@
   "todayPct": -0.8,
   "price": "0.1365",
   "peak": 0.1891,
+  "brokeOut": false,
+  "pos": 0.08,
   "asOf": "2026-10-19"
  },
  {
@@ -907,6 +1000,8 @@
   "todayPct": -1.89,
   "price": "0.07249",
   "peak": 0.10079,
+  "brokeOut": false,
+  "pos": 0.04,
   "asOf": "2026-10-19"
  },
  {
@@ -920,6 +1015,8 @@
   "todayPct": 3.47,
   "price": "0.035003",
   "peak": 0.048757,
+  "brokeOut": false,
+  "pos": 0.1,
   "asOf": "2026-10-19"
  },
  {
@@ -933,6 +1030,8 @@
   "todayPct": 0.71,
   "price": "0.06967",
   "peak": 0.09735,
+  "brokeOut": false,
+  "pos": 0.06,
   "asOf": "2026-10-19"
  },
  {
@@ -946,6 +1045,8 @@
   "todayPct": -0.8,
   "price": "0.01726",
   "peak": 0.02412,
+  "brokeOut": false,
+  "pos": 0.08,
   "asOf": "2026-10-19"
  },
  {
@@ -959,6 +1060,8 @@
   "todayPct": -0.69,
   "price": "3.749",
   "peak": 5.275,
+  "brokeOut": false,
+  "pos": 0.1,
   "asOf": "2026-10-19"
  },
  {
@@ -972,6 +1075,8 @@
   "todayPct": 4.56,
   "price": "0.61013",
   "peak": 0.88949,
+  "brokeOut": false,
+  "pos": 0.17,
   "asOf": "2026-10-19"
  },
  {
@@ -985,6 +1090,8 @@
   "todayPct": -2.78,
   "price": "0.001435",
   "peak": 0.002178,
+  "brokeOut": false,
+  "pos": 0.04,
   "asOf": "2026-10-19"
  },
  {
@@ -998,6 +1105,8 @@
   "todayPct": 0.87,
   "price": "0.1847",
   "peak": 0.2817,
+  "brokeOut": false,
+  "pos": 0.07,
   "asOf": "2026-10-19"
  },
  {
@@ -1011,6 +1120,8 @@
   "todayPct": -1.7,
   "price": "7.163",
   "peak": 10.936,
+  "brokeOut": false,
+  "pos": 0.1,
   "asOf": "2026-10-19"
  },
  {
@@ -1024,6 +1135,8 @@
   "todayPct": 1.37,
   "price": "0.04155",
   "peak": 0.0635,
+  "brokeOut": false,
+  "pos": 0.07,
   "asOf": "2026-10-19"
  },
  {
@@ -1037,6 +1150,8 @@
   "todayPct": -0.49,
   "price": "0.004432",
   "peak": 0.0068,
+  "brokeOut": false,
+  "pos": 0.2,
   "asOf": "2026-10-19"
  },
  {
@@ -1050,6 +1165,8 @@
   "todayPct": -0.81,
   "price": "0.18629",
   "peak": 0.2946,
+  "brokeOut": false,
+  "pos": 0.1,
   "asOf": "2026-10-19"
  },
  {
@@ -1063,6 +1180,8 @@
   "todayPct": 0.84,
   "price": "0.335",
   "peak": 0.5457,
+  "brokeOut": false,
+  "pos": 0.09,
   "asOf": "2026-10-19"
  },
  {
@@ -1076,6 +1195,8 @@
   "todayPct": -0.86,
   "price": "4.7983",
   "peak": 7.8827,
+  "brokeOut": false,
+  "pos": 0.14,
   "asOf": "2026-10-19"
  },
  {
@@ -1089,6 +1210,8 @@
   "todayPct": -3.09,
   "price": "0.09415",
   "peak": 0.16346,
+  "brokeOut": false,
+  "pos": 0.05,
   "asOf": "2026-10-19"
  },
  {
@@ -1102,6 +1225,8 @@
   "todayPct": -5.17,
   "price": "0.119504",
   "peak": 0.216408,
+  "brokeOut": false,
+  "pos": 0.12,
   "asOf": "2026-10-19"
  }
 ]
