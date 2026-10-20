@@ -1,0 +1,103 @@
+{
+ "asOf": "2026-10-20",
+ "fresh": [],
+ "watching": [
+  {
+   "inst": "JST",
+   "verdict": "structure",
+   "note": "整体还是看空但不做空，因为前面涨了很多波了，需要调整",
+   "price": "0.14079",
+   "pct": 0.44948630136985707,
+   "nLines": 1,
+   "nearest": {
+    "kind": "h",
+    "p": 0.14302022435148398
+   },
+   "toLine": 1.5840786643113742
+  },
+  {
+   "inst": "BTC",
+   "verdict": "good",
+   "note": "这里是做反弹的机会，可以看小级别有没有在射线附近收敛",
+   "price": "81428.7",
+   "pct": -0.586746559914449,
+   "nLines": 1,
+   "nearest": {
+    "kind": "r",
+    "p": 82869.24842252862
+   },
+   "toLine": 1.7690917606797358
+  },
+  {
+   "inst": "BNB",
+   "verdict": "good",
+   "note": "这里弹上来就要开始看了",
+   "price": "728.33",
+   "pct": 0.5841734567048775,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  },
+  {
+   "inst": "LINEA",
+   "verdict": "good",
+   "note": "同样的这里弹上来关注，虽然这根日线突破了，但小级别找机会",
+   "price": "0.002724",
+   "pct": 1.1511325659116145,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  },
+  {
+   "inst": "ETH",
+   "verdict": "good",
+   "note": "区间末尾这里弹上来就要看了",
+   "price": "2385.83",
+   "pct": -0.3062895920038747,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  },
+  {
+   "inst": "ZRX",
+   "verdict": "good",
+   "note": "弹上来小级别找机会",
+   "price": "0.1075",
+   "pct": 0.5612722170252603,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  },
+  {
+   "inst": "BAND",
+   "verdict": "good",
+   "note": "同样弹上来小级别找机会",
+   "price": "0.216",
+   "pct": 0.18552875695732082,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  },
+  {
+   "inst": "RENDER",
+   "verdict": "good",
+   "note": "",
+   "price": "1.79",
+   "pct": -0.516867670760844,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  },
+  {
+   "inst": "APT",
+   "verdict": "good",
+   "note": "这个底部箱体还可以，但也只能去小级别找机会",
+   "price": "0.7673",
+   "pct": 0.5899318300996261,
+   "nLines": 1,
+   "nearest": null,
+   "toLine": null
+  }
+ ],
+ "stillCount": 83
+}
