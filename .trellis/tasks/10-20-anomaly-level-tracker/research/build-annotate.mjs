@@ -1,11 +1,15 @@
 /**
- * 给标注页搭桥：把今天候选的「拉升区间」做成标注卡，写进 annotate.html 的 CARDS。
+ * 给标注页搭桥：把候选做成标注卡，写进 annotate.html 的 CARDS。
  *
- * 只在 CARDS 那一行做替换，其余 HTML/JS 原样保留。
- * 蜡烛数据给到最新一天；hideAfter = 这份数据的最新一天（不会把后面变灰）。
+ * 方向 C（2026-10-20）：主线是第 3 步警报，粗筛降级。
+ * 所以卡片来源改为：
+ *   ① 你已经标过线的币（持续关注）—— 排在最前
+ *   ② 粗筛参考的新币 —— 少量，供参考
  *
- * 输出 out/annotate-today.html —— 用浏览器打开，缩放开到最大看细节，画水平线标压力位，
- * 导出后把 json 放到 research/draw/labels.json，再跑 build-page.mjs 就会显示「距线 %」。
+ * 同时在页面上直接显示"当天距线 + 警报状态"（AC8），不用导出再回看。
+ *
+ * 输出 out/annotate-today.html —— 用浏览器打开，缩放看细节，画线标压力位，
+ * 导出后把 json 放到 research/draw/labels.json。
  *
  * Run: node .trellis/tasks/10-20-anomaly-level-tracker/research/build-annotate.mjs
  */
@@ -20,26 +24,68 @@ const TEMPLATE = '.trellis/tasks/10-19-fakeout-retest-quality/research/annotate.
 // 所以要 +8h 再取日期，不能直接 toISOString().slice(0,10)（那样会早一天）。
 const dayOf = (t) => new Date(Number(t) + 8 * 3600 * 1000).toISOString().slice(0, 10);
 
-const list = JSON.parse(fs.readFileSync(path.join(OUT, 'bottom-list.json'), 'utf8'));
-const SHOW = Number(process.env.SHOW ?? 200);
+const med = (xs) => {
+  const v = xs.filter(Number.isFinite).sort((a, b) => a - b);
+  return v.length ? v[Math.floor(v.length / 2)] : NaN;
+};
+function rayAt(r, ms) {
+  const t1 = Number(r.p1.t), t2 = Number(r.p2.t);
+  if (t2 === t1) return r.p2.price;
+  return r.p2.price + ((r.p2.price - r.p1.price) / (t2 - t1)) * (ms - t2);
+}
+
+const pool = new Map();
+for (const f of fs.readdirSync(path.join(DIR, 'pool'))) {
+  if (!f.endsWith('.json')) continue;
+  const raw = JSON.parse(fs.readFileSync(path.join(DIR, 'pool', f), 'utf8'));
+  if (raw.length < 120) continue;
+  pool.set(f.replace(/\.json$/, ''), raw.map(([t, o, h, l, c]) => ({ t: Number(t), o, h, l, c, d: dayOf(t) })));
+}
+
+// ---- ① 你已标过线的币（优先）
+const LABEL_FILE = path.join(DIR, 'draw', 'labels.json');
+const labeled = fs.existsSync(LABEL_FILE) ? JSON.parse(fs.readFileSync(LABEL_FILE, 'utf8')) : [];
+const watchInsts = new Set();
+for (const c of labeled) watchInsts.add(c.inst.replace(/USDT$/, ''));
+
+// ---- ② 粗筛参考（少量）
+let refList = [];
+try {
+  refList = JSON.parse(fs.readFileSync(path.join(OUT, 'rally-list.json'), 'utf8'));
+} catch {
+  // 没有就算了
+}
+const REF = Number(process.env.REF ?? 12);
+const refs = refList.filter((r) => !watchInsts.has(r.inst)).slice(0, REF);
+
+// ---- 组装卡片
+function makeCard(inst, quote) {
+  const arr = pool.get(`${inst}USDT`);
+  if (!arr) return null;
+  const lastDay = arr[arr.length - 1].d;
+  return {
+    inst: `${inst}USDT`,
+    short: inst,
+    quote,
+    markDate: lastDay,
+    defaultRegion: null,        // 用户 10/20：去掉默认段，全部自己画
+    hideAfter: lastDay,
+    bars: arr,
+  };
+}
 
 const cards = [];
-for (const r of list.slice(0, SHOW)) {
-  const f = path.join(DIR, 'pool', `${r.inst}USDT.json`);
-  if (!fs.existsSync(f)) continue;
-  const raw = JSON.parse(fs.readFileSync(f, 'utf8'));
-  const bars = raw.map(([t, o, h, l, c]) => ({ t: Number(t), o, h, l, c, d: dayOf(t) }));
-  const lastDay = bars[bars.length - 1].d;
-  cards.push({
-    inst: `${r.inst}USDT`,
-    short: r.inst,
-    quote: `拉升 ${r.s0.slice(5)}→${r.p.slice(5)} 涨${r.gain}% · 回到${r.fromBase}% · 离顶${r.fromPeak}% · 顶后${r.holdDays}天`,
-    markDate: lastDay,
-    // 用户 10/20：去掉默认段，全部自己画
-    defaultRegion: null,
-    hideAfter: lastDay,
-    bars,
-  });
+for (const inst of watchInsts) {
+  const c = labeled.find((x) => x.inst.replace(/USDT$/, '') === inst);
+  const segs = c?.segments ?? [];
+  const nLines = segs.reduce((n, s) => n + (s.lines?.length ?? 0), 0);
+  const verdicts = [...new Set(segs.map((s) => s.verdict).filter(Boolean))];
+  const card = makeCard(inst, `你在盯 · ${nLines} 条线 · ${verdicts.join('/') || '未表态'}`);
+  if (card) cards.push(card);
+}
+for (const r of refs) {
+  const card = makeCard(r.inst, `参考 · 拉升 ${r.s0.slice(5)}→${r.p.slice(5)} 涨${r.gain}% · 离顶${r.fromPeak}%`);
+  if (card) cards.push(card);
 }
 
 const html = fs.readFileSync(TEMPLATE, 'utf8');
@@ -109,6 +155,19 @@ const asideAnchor = '    <div id="hint">';
 if (!out.includes(asideAnchor)) throw new Error('模板侧栏结构变了，请更新 build-annotate.mjs 里的备注补丁');
 out = out.replace(asideAnchor, noteHtml + '\n' + asideAnchor);
 
+/**
+ * AC8：页面上直接显示"当天距线 + 警报状态"，不用导出再回看。
+ *
+ * 尺子与 alert.mjs 一致：日内振幅中位数（有射线用射线起点之后那段，否则最近 60 根）
+ *   距线 ≤ 0.5 尺子 → 报警；≤ 1.0 → 观察中
+ *
+ * 注意：本段的 distJs 注入在文件末尾统一做（因为它依赖前面注入的 __syncNote 钩子）。
+ */
+const statusHtml =
+  '<div class="row"><label>今天的状态（距你标的线）</label>' +
+  '<div id="dist-box" style="font-size:12px;color:#8b949e;padding:2px 0">（还没画线）</div></div>';
+out = out.replace(asideAnchor, statusHtml + '\n' + asideAnchor);
+
 // st() 里补上 note 字段（新建卡片时）
 const stBefore =
   "  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ] };";
@@ -144,10 +203,59 @@ window.__bindNote = function(){
   });
   ta.addEventListener('keydown', function(e){ e.stopPropagation(); });
 };`;
+
+/**
+ * AC8 的页面逻辑：在侧栏直接显示"当天距线 + 警报状态"，不用导出再回看。
+ * 尺子与 alert.mjs 一致：日内振幅中位数（有射线用射线起点之后那段，否则最近 60 根）
+ */
+const distJs = `
+window.__syncDist = function(){
+  var box = el('dist-box'); if (!box) return;
+  var s = st();
+  var all = [];
+  (s.segments||[]).forEach(function(g){ (g.lines||[]).forEach(function(L){ all.push(L); }); });
+  if (!all.length) { box.innerHTML = '<span style="color:#6e7681">（还没画线）</span>'; return; }
+  // 尺子：与 alert.mjs 完全一致 —— 有射线就用"射线起点之后那段"的日内振幅中位，
+  //      否则用最近 60 根。页面里没有"线画好日"，用起点那天近似。
+  var seg = s.segments[segSel] || s.segments[0];
+  var ray = seg && (seg.lines||[]).filter(function(L){ return L.kind === 'r'; })[0];
+  var from = 0;
+  if (ray) {
+    var t1 = Number(ray.p1.t);
+    for (var i = 0; i < candles.length; i++) { if (candles[i].t >= t1) { from = i; break; } }
+  } else {
+    from = Math.max(0, candles.length - 60);
+  }
+  var rngs = candles.slice(from).map(function(b){ return (b.h - b.l) / b.c; }).sort(function(a,b){return a-b;});
+  var scale = rngs[Math.floor(rngs.length/2)] || 0.02;
+  var curSeg = s.segments[segSel];
+  var use = (curSeg && curSeg.lines && curSeg.lines.length) ? curSeg.lines : all;
+  var last = candles[candles.length - 1];
+  var price = last.c;
+  var dists = [];
+  use.forEach(function(L){
+    var p;
+    if (L.kind === 'h') p = L.price;
+    else { var t1=Number(L.p1.t), t2=Number(L.p2.t);
+           p = (t2===t1) ? L.p2.price : L.p2.price + (L.p2.price-L.p1.price)/(t2-t1) * (last.t - t2); }
+    dists.push({ kind: (L.kind === 'h' ? '水平线' : '趋势线'), d: (price - p)/p*100 });
+  });
+  dists.sort(function(a,b){ return Math.abs(a.d) - Math.abs(b.d); });
+  var nearest = dists[0];
+  var mult = Math.abs(nearest.d) / (scale*100);
+  var st2 = mult <= 0.5 ? '<b style="color:#f85149">&#128276; 报警（已贴近）</b>'
+           : mult <= 1.0 ? '<b style="color:#d29922">· 观察中（还没到）</b>'
+           : '<span style="color:#6e7681">不接近</span>';
+  var prev = candles[candles.length-2] ? candles[candles.length-2].c : price;
+  var pct = (price - prev)/prev*100;
+  box.innerHTML = st2 + '<br>距 ' + nearest.kind + ' <b>' + (nearest.d>=0?'+':'') + nearest.d.toFixed(2) + '%</b>'
+    + '（该币尺子 ' + (scale*100).toFixed(2) + '%，' + mult.toFixed(2) + '×）<br>'
+    + '现价 ' + price + '　当日 <b style="color:' + (pct>=0?'#3fb950':'#f85149') + '">' + (pct>=0?'+':'') + pct.toFixed(2) + '%</b>';
+};`;
 const bootAnchor = 'buildChart(); renderList();';
 const bootIdx = out.lastIndexOf(bootAnchor);
 if (bootIdx < 0) throw new Error('模板启动行变了，请更新 build-annotate.mjs 里的备注补丁');
-out = out.slice(0, bootIdx) + noteJs + '\nwindow.__bindNote();\n' + bootAnchor + out.slice(bootIdx + bootAnchor.length);
+out = out.slice(0, bootIdx) + noteJs + '\n' + distJs + '\nwindow.__bindNote();\n' + bootAnchor + out.slice(bootIdx + bootAnchor.length);
 
 // 导出时带上备注
 const exportBefore =
@@ -181,6 +289,15 @@ out = out.replace(
 
 const target = path.join(OUT, 'annotate-today.html');
 
+/**
+ * 画线 / 删线 / 切换段之后刷新"今天的状态"（AC8）。
+ *
+ * 注意顺序：这段全局替换会命中判定按钮里的 save(); renderList();，
+ * 所以判定按钮的补丁必须放在它之后（下面的代码就是）。
+ */
+const refreshDist = `if (window.__syncDist) window.__syncDist();`;
+out = out.replace(/save\(\); renderDrawn\(\); setTool\(null\);/g, `save(); renderDrawn(); setTool(null); ${refreshDist}`);
+
 // 空段的显示：别让它显示成空白的"段 N"
 out = out.split("(g.region ? g.region.join(' → ') : '')").join("(g.region ? g.region.join(' → ') : '（未框区间）')");
 
@@ -191,7 +308,9 @@ out = out.split("(g.region ? g.region.join(' → ') : '')").join("(g.region ? g.
  * 没有段时点判定，自动建一个空段（region: null）承载结论，用户再画线/框段时挂上去。
  * 空段的卡也算"已表态"，导出时带 verdict，粗筛就能拿到负样本和原因。
  */
-const verdictPat = /b\.onclick = function\(\)\{\s*\n\s*var g = seg\(\); if \(!g\) return;\s*\n\s*g\.verdict = b\.getAttribute\('data-v'\); g\.source = 'edited'; save\(\); renderList\(\);\s*\n\s*\};/;
+// 注意：模板是 LF 换行、4 空格缩进。
+// 这里用更宽松的模式：只要还是原来的那三行就匹配。
+const verdictPat = /b\.onclick = function\(\)\{\s*var g = seg\(\); if \(!g\) return;\s*g\.verdict = b\.getAttribute\('data-v'\); g\.source = 'edited'; save\(\); renderList\(\);[^}]*\};/;
 if (!verdictPat.test(out)) throw new Error('模板判定按钮代码变了，请更新 build-annotate.mjs');
 out = out.replace(
   verdictPat,
