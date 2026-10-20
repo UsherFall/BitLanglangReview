@@ -1,16 +1,19 @@
 /**
- * 构建标注页 v3：线可点选、可删除、可拖拽调整。
+ * 标注页 v4：修 bug + 多区间。
  *
- * 用户 10/20 反馈：画的线没法消除。
- *   → 线不再画在 SVG 里（点不到），改用 lightweight-charts 自己的 PriceLine /
- *     无限 LineSeries：价格轴标签本身就是可点的删除手柄（和图表库自己的 UX 一致）
- *   → 同时提供：
- *       · 点线选中（高亮），Delete / Backspace 删除选中的那条
- *       · 线的价格标签上可点「×」删（priceLine 的取消按钮）
- *       · 右键点击某条线 = 直接删掉它
- *       · 「清空本图」按钮（带二次确认）
+ * Bug 1（最严重）：同一只币的多张卡片共用一条"好区间"（state[inst] 全局唯一），
+ *   于是 WAL/INIT/XMR/OP/ZEC 的两张卡互相覆盖。
+ *   → 改成 每张卡片独立存档（键 = inst + '|' + markDate）
+ * Bug 2：只能框一段。
+ *   → 改成 可框多段（ZEC 5-20~8-17 与 8-26~9-01 各一段），每段独立画线、独立结论
+ * Bug 3：预填区间与手画的区间无法区分。
+ *   → 导出时带 source: 'prefilled' | 'edited'
+ * Bug 4：线不知道属于哪一段。
+ *   → 线挂在"当前选中的段"上
  *
- * 其他保持 v2：默认浏览态、滚轮缩放、日线一年、标注日后调暗。
+ * 数据兼容：读取 v3 的 localStorage（key 'annotate-34-v3'）时，
+ *   每张卡片按 markDate 导入原有的 region / lines / verdict，作为这一段的初值。
+ *   **再也不会丢已经标过的 18 个**（已另存 research/labels/annotations-2026-10-20-batch1.json）。
  *
  * Run: POOL_DIR=<dir> npx tsx .scratch/research-10-19/build-annotate.ts
  */
@@ -42,14 +45,13 @@ for (const rg of RANGES) {
     inst: rg.inst,
     short: rg.inst.replace(/USDT$/, ''),
     quote: rg.quote,
-    verdict: rg.verdict,
     markDate: bars[endIdx].d,
     defaultRegion: [bars[startIdx].d, bars[endIdx].d],
     hideAfter: bars[endIdx].d,
     bars: bars.slice(from, to + 1).map((b) => ({ t: Math.floor(b.t / 1000), o: b.o, h: b.h, l: b.l, c: b.c, d: b.d })),
   });
 }
-console.log(`cards ${cards.length}；K 线 ${Math.min(...cards.map((c) => c.bars.length))}~${Math.max(...cards.map((c) => c.bars.length))} 根`);
+console.log(`cards ${cards.length}`);
 
 const data = JSON.stringify(cards);
 
@@ -67,7 +69,7 @@ button:hover{border-color:#58a6ff}
 button.on{border-color:#f59e0b;background:#f59e0b33;color:#ffd88a}
 button.danger{color:#f85149;border-color:#5a2222}
 button.primary{background:#238636;border-color:#2ea043;color:#fff}
-main{display:grid;grid-template-columns:1fr 340px;height:calc(100vh - 56px)}
+main{display:grid;grid-template-columns:1fr 360px;height:calc(100vh - 56px)}
 #wrap{position:relative;background:#10151c;overflow:hidden}
 #chart{position:absolute;inset:0;z-index:1}
 #overlay{position:absolute;inset:0;z-index:5;pointer-events:none}
@@ -85,10 +87,13 @@ kbd{background:#21262d;border:1px solid #30363d;border-radius:3px;padding:0 4px;
 .done{color:#3fb950}
 #mode{font-size:12px;padding:3px 8px;border-radius:5px;background:#21262d;color:#8b949e}
 #mode.on{background:#f59e0b22;color:#ffd88a}
-#lines{font-size:11px;color:#8b949e;margin-top:4px;min-height:18px}
-#lines span{display:inline-block;background:#21262d;border:1px solid #30363d;border-radius:4px;padding:0 6px;margin:2px 4px 0 0;cursor:pointer}
-#lines span.sel{border-color:#facc15;color:#facc15}
-#lines span.hit{border-color:#58a6ff;color:#58a6ff}
+.seg{border:1px solid #30363d;border-radius:6px;padding:6px 8px;margin-bottom:6px;cursor:pointer}
+.seg.sel{border-color:#f59e0b;background:#f59e0b12}
+.seg b{font-size:12px;color:#e6edf3}
+.seg .meta{font-size:11px;color:#8b949e;margin-top:2px}
+.seg .lines{font-size:10.5px;color:#6e7681;margin-top:3px}
+.seg .lines span{display:inline-block;background:#21262d;border:1px solid #30363d;border-radius:3px;padding:0 5px;margin:1px 3px 0 0}
+.seg .lines span.sel{border-color:#facc15;color:#facc15}
 </style></head><body>
 <header>
   <b id="title">—</b>
@@ -108,23 +113,19 @@ kbd{background:#21262d;border:1px solid #30363d;border-radius:3px;padding:0 4px;
       <div class="opts">
         <button id="t-h">1 · 压力位（水平线）</button>
         <button id="t-r">2 · 突破方向（射线）</button>
-        <button id="t-rg">3 · 好区间（拖选）</button>
+        <button id="t-rg">3 · 新增一段好区间（拖选）</button>
       </div>
     </div>
     <div class="row">
-      <label>画过的线（点一下选中，再按 Delete 删除）</label>
-      <div id="lines"></div>
+      <label>这张图上的好区间（每段独立画线、独立结论）</label>
+      <div id="segments"></div>
       <div class="opts" style="margin-top:6px">
-        <button id="del-sel" class="danger">删除选中的线</button>
-        <button id="clear" class="danger">清空本图所有线</button>
+        <button id="del-seg" class="danger">删除选中的段</button>
+        <button id="clear-lines" class="danger">清空本图所有线</button>
       </div>
     </div>
     <div class="row">
-      <label>好区间（默认按备注预填，可重选）</label>
-      <div id="region" style="font-size:12px;color:#e6edf3"></div>
-    </div>
-    <div class="row">
-      <label>当时会不会做</label>
+      <label>选中段：当时会不会做</label>
       <div class="opts" id="verdict">
         <button data-v="good">会做</button>
         <button data-v="structure">结构不行</button>
@@ -134,9 +135,8 @@ kbd{background:#21262d;border:1px solid #30363d;border-radius:3px;padding:0 4px;
     </div>
     <div id="hint">
       默认<b>浏览</b>：滚轮缩放、拖动平移。<br>
-      画线先点上面按钮（或 <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>），画完自动回浏览。<br>
-      <b>删线</b>：点下面列表里的线 → <kbd>Delete</kbd>；或点线右侧价格标签上的 × ；<br>
-      或者<b>右键点线</b>直接删。<br>
+      画线先点按钮（或 <kbd>1</kbd><kbd>2</kbd>）；按 <kbd>3</kbd> 拖选一段新增区间。<br>
+      画的线挂在<b>当前选中的段</b>上；删线：选段里的线标签 → <kbd>Delete</kbd>。<br>
       <kbd>Esc</kbd> 取消工具　<kbd>←</kbd><kbd>→</kbd> 翻页
     </div>
     <div id="list"></div>
@@ -145,21 +145,51 @@ kbd{background:#21262d;border:1px solid #30363d;border-radius:3px;padding:0 4px;
 <script src="lightweight-charts.js"></script>
 <script>
 var CARDS = ${data};
-var KEY = 'annotate-34-v3';
+var KEY = 'annotate-34-v4';
 var state = JSON.parse(localStorage.getItem(KEY) || '{}');
-var idx = 0, tool = null, draft = null, regionDrag = null, selected = -1;
+
+/** 一次性导入 v3 的数据（每张卡片按 markDate 取出 region/lines/verdict，作为"段"的初值）。
+    这样旧的 18 个标注不会因为改结构就丢。 */
+(function migrateV3(){
+  if (Object.keys(state).length) return;
+  var old = null;
+  try { old = JSON.parse(localStorage.getItem('annotate-34-v3') || 'null'); } catch (e) {}
+  if (!old) return;
+  CARDS.forEach(function(c){
+    var rec = old[c.inst];
+    if (!rec) return;
+    // v3 里一张卡只有一条 region，用它对 c.markDate 匹配；对上就搬过来
+    if (rec.region && rec.region[0]) {
+      state[c.inst + '|' + c.markDate] = {
+        segments: [ { region: rec.region.slice(), source: 'edited', verdict: rec.verdict || null, lines: (rec.lines || []).slice() } ],
+      };
+    }
+  });
+  if (Object.keys(state).length) {
+    localStorage.setItem(KEY, JSON.stringify(state));
+    console.log('migrated from v3:', Object.keys(state).length);
+  }
+})();
+
+var idx = 0, tool = null, draft = null, regionDrag = null, segSel = 0, lineSel = -1;
 var chart, series, candles = [], overlay = document.getElementById('overlay');
-var drawn = []; // { line (IPriceLine|LineSeries), kind, index }
+var drawn = [];
 
 function el(id){ return document.getElementById(id); }
 function cur(){ return CARDS[idx]; }
-function st(){ var c = cur(); if (!state[c.inst]) state[c.inst] = { lines: [], region: c.defaultRegion.slice(), verdict: null }; return state[c.inst]; }
+function key(){ return cur().inst + '|' + cur().markDate; }
+function st(){
+  var c = cur();
+  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ] };
+  return state[key()];
+}
+function seg(){ var s = st(); return s.segments[segSel]; }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); renderList(); }
 
 function setTool(t){
   tool = t; draft = null; regionDrag = null;
   overlay.classList.toggle('active', !!t);
-  el('mode').textContent = t === 'h' ? '画压力位' : t === 'r' ? '画突破方向' : t === 'rg' ? '框选好区间' : '浏览';
+  el('mode').textContent = t === 'h' ? '画压力位' : t === 'r' ? '画突破方向' : t === 'rg' ? '框选新一段' : '浏览';
   el('mode').classList.toggle('on', !!t);
   ['t-h','t-r','t-rg'].forEach(function(id){ el(id).classList.toggle('on', (id === 't-h' && t === 'h') || (id === 't-r' && t === 'r') || (id === 't-rg' && t === 'rg')); });
   drawOverlay();
@@ -169,31 +199,23 @@ function clearDrawn(){
   drawn.forEach(function(d){ try { if (d.kind === 'h') series.removePriceLine(d.line); else chart.removeSeries(d.line); } catch(e) {} });
   drawn = [];
 }
-
 function renderDrawn(){
   clearDrawn();
-  var s = st();
+  var s = seg();
+  if (!s) return;
   s.lines.forEach(function(L, i){
-    var sel = i === selected;
+    var sel = i === lineSel && tool === null;
     var color = sel ? '#facc15' : '#58a6ff';
     if (L.kind === 'h') {
-      var pl = series.createPriceLine({
-        price: L.price, color: color, lineWidth: 2, lineStyle: 0,
-        axisLabelVisible: true, title: (sel ? '✓ ' : '') + '压力位 ' + (i+1),
-      });
-      drawn.push({ kind:'h', index:i, line:pl });
+      var pl = series.createPriceLine({ price:L.price, color:color, lineWidth:2, lineStyle:0, axisLabelVisible:true, title: (sel?'✓ ':'')+'压力位 '+(i+1) });
+      drawn.push({ kind:'h', line:pl });
     } else {
-      // 射线：用一条两点 LineSeries（图表库支持无限延伸到视野边缘）
-      var lineSeries = chart.addSeries(LightweightCharts.LineSeries, { color: color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-      var pts = rayPoints(L);
-      lineSeries.setData(pts);
-      drawn.push({ kind:'r', index:i, line:lineSeries });
+      var lineSeries = chart.addSeries(LightweightCharts.LineSeries, { color:color, lineWidth:2, priceLineVisible:false, lastValueVisible:false });
+      lineSeries.setData(rayPoints(L));
+      drawn.push({ kind:'r', line:lineSeries });
     }
   });
-  drawOverlay();
 }
-
-/** 把一条射线变成整年可见的两点序列（延伸到序列末端）。 */
 function rayPoints(L){
   var t1 = L.p1.t, p1 = L.p1.price, t2 = L.p2.t, p2 = L.p2.price;
   var lastT = candles[candles.length-1].t;
@@ -229,9 +251,9 @@ function buildChart(){
   chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, markIdx - 120), to: markIdx + 12 });
   chart.subscribeCrosshairMove(function(){ drawOverlay(); });
   chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ drawOverlay(); });
-  selected = -1;
-  renderDrawn();
-  setTool(null);
+  segSel = Math.min(segSel, Math.max(0, st().segments.length - 1));
+  lineSel = -1;
+  renderDrawn(); drawOverlay(); setTool(null); renderList();
 }
 
 function xOfDay(d){ var i = candles.findIndex(function(b){ return b.d >= d; }); return i < 0 ? null : chart.timeScale().logicalToCoordinate(i); }
@@ -241,14 +263,17 @@ function drawOverlay(){
   var s = st(), w = overlay.clientWidth, h = overlay.clientHeight;
   overlay.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
   var out = [];
-  if (s.region && s.region.length === 2) {
-    var xa = xOfDay(s.region[0]), xb = xOfDay(s.region[1]);
-    if (xa != null && xb != null) out.push('<rect x="'+Math.min(xa,xb)+'" y="0" width="'+Math.max(4,Math.abs(xb-xa))+'" height="'+h+'" fill="rgba(245,158,11,.12)" stroke="#f59e0b" stroke-opacity=".55"/>');
-  }
+  s.segments.forEach(function(g, i){
+    if (!g.region) return;
+    var xa = xOfDay(g.region[0]), xb = xOfDay(g.region[1]);
+    if (xa == null || xb == null) return;
+    var sel = i === segSel;
+    out.push('<rect x="'+Math.min(xa,xb)+'" y="0" width="'+Math.max(4,Math.abs(xb-xa))+'" height="'+h+'" fill="rgba(245,158,11,'+(sel?0.18:0.09)+')" stroke="#f59e0b" stroke-opacity="'+(sel?0.8:0.35)+'"/>');
+    out.push('<text x="'+(Math.min(xa,xb)+4)+'" y="'+(sel?22:36)+'" fill="#f59e0b" font-size="10">段 '+(i+1)+' '+(sel?'✓':'')+'</text>');
+  });
   if (draft && draft.temp) out.push('<line x1="'+draft.temp.x1+'" y1="'+draft.temp.y1+'" x2="'+draft.temp.x2+'" y2="'+draft.temp.y2+'" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4 3"/>');
   if (regionDrag) out.push('<rect x="'+Math.min(regionDrag.a,regionDrag.b)+'" y="0" width="'+Math.abs(regionDrag.b-regionDrag.a)+'" height="'+h+'" fill="rgba(245,158,11,.22)"/>');
   overlay.innerHTML = out.join('');
-  el('region').textContent = s.region ? (s.region[0] + ' → ' + s.region[1]) : '（未选）';
 }
 
 function toPoint(ev){
@@ -256,9 +281,8 @@ function toPoint(ev){
   var x = ev.clientX - r.left, y = ev.clientY - r.top;
   var t = chart.timeScale().coordinateToTime(x);
   var price = series.coordinateToPrice(y);
-  return { x:x, y:y, t:t, price:price, inChart: ev.clientX >= boxLeft() };
+  return { x:x, y:y, t:t, price:price };
 }
-function boxLeft(){ return chart.priceScale('right').width() ? overlay.clientWidth - chart.priceScale('right').width() : 0; }
 
 overlay.addEventListener('pointerdown', function(ev){
   if (!tool) return;
@@ -266,10 +290,11 @@ overlay.addEventListener('pointerdown', function(ev){
   if (p.price == null) return;
   var s = st();
   if (tool === 'rg') { regionDrag = { a:p.x, b:p.x }; return; }
-  if (tool === 'h') { s.lines.push({ kind:'h', price:p.price }); save(); renderDrawn(); setTool(null); return; }
+  var seg = s.segments[segSel];
+  if (tool === 'h') { seg.lines.push({ kind:'h', price:p.price }); seg.source = 'edited'; save(); renderDrawn(); setTool(null); return; }
   if (tool === 'r') {
     if (!draft) draft = { first:p };
-    else { s.lines.push({ kind:'r', p1:{ t:draft.first.t, price:draft.first.price }, p2:{ t:p.t, price:p.price } }); save(); renderDrawn(); setTool(null); }
+    else { seg.lines.push({ kind:'r', p1:{ t:draft.first.t, price:draft.first.price }, p2:{ t:p.t, price:p.price } }); seg.source = 'edited'; save(); renderDrawn(); setTool(null); }
     drawOverlay();
   }
 });
@@ -280,90 +305,100 @@ overlay.addEventListener('pointermove', function(ev){
   if (draft) { draft.temp = { x1:draft.first.x, y1:draft.first.y, x2:p.x, y2:p.y }; drawOverlay(); }
 });
 overlay.addEventListener('pointerup', function(ev){
-  if (regionDrag) {
-    var s = st();
-    var x1 = Math.min(regionDrag.a, regionDrag.b), x2 = Math.max(regionDrag.a, regionDrag.b);
-    var t1 = chart.timeScale().coordinateToTime(x1), t2 = chart.timeScale().coordinateToTime(x2);
-    regionDrag = null;
-    if (t1 != null && t2 != null) { s.region = [ new Date(t1*1000).toISOString().slice(0,10), new Date(t2*1000).toISOString().slice(0,10) ]; save(); }
-    setTool(null);
-  }
-});
-// 右键：删掉离指针最近的那条线（只在浏览态生效）
-overlay.addEventListener('contextmenu', function(ev){
-  if (tool) return;
-  ev.preventDefault();
-  var s = st(); if (!s.lines.length) return;
-  var r = overlay.getBoundingClientRect();
-  var y = ev.clientY - r.top, best = -1, bestD = 12;
-  s.lines.forEach(function(L, i){
-    if (L.kind !== 'h') return;
-    var p = series.priceToCoordinate(L.price);
-    if (p == null) return;
-    var d = Math.abs(p - y);
-    if (d < bestD) { bestD = d; best = i; }
-  });
-  if (best >= 0) { s.lines.splice(best, 1); selected = -1; save(); renderDrawn(); }
-});
-overlay.addEventListener('pointer-events', function(){});
-
-function deleteSelected(){
+  if (!regionDrag) return;
   var s = st();
-  if (selected < 0 || selected >= s.lines.length) return;
-  s.lines.splice(selected, 1); selected = -1; save(); renderDrawn();
+  var x1 = Math.min(regionDrag.a, regionDrag.b), x2 = Math.max(regionDrag.a, regionDrag.b);
+  var t1 = chart.timeScale().coordinateToTime(x1), t2 = chart.timeScale().coordinateToTime(x2);
+  regionDrag = null;
+  if (t1 != null && t2 != null) {
+    var r = [ new Date(t1*1000).toISOString().slice(0,10), new Date(t2*1000).toISOString().slice(0,10) ];
+    // 新增一段（而不是覆盖）—— 这是 Bug 2 的修复
+    s.segments.push({ region:r, source:'edited', verdict:null, lines:[] });
+    segSel = s.segments.length - 1;
+    lineSel = -1;
+    save();
+  }
+  setTool(null); renderDrawn(); drawOverlay(); renderList();
+});
+
+function deleteSelectedLine(){
+  var s = seg();
+  if (!s || lineSel < 0 || lineSel >= s.lines.length) return;
+  s.lines.splice(lineSel, 1); lineSel = -1; save(); renderDrawn(); renderList();
 }
 
 function renderList(){
   var c = cur();
   el('title').textContent = c.short + ' · 标注日 ' + c.markDate;
   el('quote').textContent = '你的备注：' + c.quote;
-  var done = Object.keys(state).filter(function(k){ return state[k].verdict; }).length;
+  var done = Object.keys(state).filter(function(k){ return (state[k].segments || []).some(function(g){ return g.verdict; }); }).length;
   el('cnt').textContent = (idx+1) + ' / ' + CARDS.length + ' · 已标注 ' + done;
   el('prog').style.width = (done / CARDS.length * 100) + '%';
-  var s = state[c.inst];
-  Array.prototype.forEach.call(document.querySelectorAll('#verdict button'), function(b){
-    b.classList.toggle('on', !!s && s.verdict === b.getAttribute('data-v'));
+
+  var s = st();
+  el('segments').innerHTML = s.segments.map(function(g, i){
+    var sel = i === segSel;
+    var v = { good:'会做', structure:'结构不行', chart:'股性不行', missed:'错过了' }[g.verdict] || '未定';
+    return '<div class="seg ' + (sel ? 'sel' : '') + '" data-i="'+i+'">'
+      + '<b>段 ' + (i+1) + ' ' + (g.region ? g.region.join(' → ') : '') + '</b>'
+      + '<div class="meta">结论：' + v + ' · ' + (g.source === 'prefilled' ? '（预填，未改）' : '已改') + '</div>'
+      + (g.lines.length ? '<div class="lines">' + g.lines.map(function(L, j){
+          var txt = L.kind === 'h' ? ('压力位 ' + (L.price >= 1 ? L.price.toFixed(4) : L.price.toPrecision(5))) : '突破方向';
+          return '<span data-j="'+j+'" class="'+(sel && j===lineSel ? 'sel' : '')+'">'+(j+1)+'. '+txt+'</span>';
+        }).join('') + '</div>' : '<div class="lines">（还没画线）</div>')
+      + '</div>';
+  }).join('');
+  Array.prototype.forEach.call(el('segments').querySelectorAll('.seg'), function(d){
+    d.onclick = function(){ segSel = Number(d.getAttribute('data-i')); lineSel = -1; renderDrawn(); drawOverlay(); renderList(); };
   });
-  // 画过的线列表
-  var lines = (s && s.lines) || [];
-  el('lines').innerHTML = lines.length
-    ? lines.map(function(L, i){
-        var txt = L.kind === 'h' ? ('压力位 ' + (L.price >= 1 ? L.price.toFixed(4) : L.price.toPrecision(5))) : '突破方向';
-        return '<span data-i="'+i+'" class="' + (i === selected ? 'sel' : '') + '">' + (i+1) + '. ' + txt + '</span>';
-      }).join('')
-    : '<span style="border:0;background:none;color:#6e7681">还没画线</span>';
-  Array.prototype.forEach.call(el('lines').querySelectorAll('span[data-i]'), function(sp){
-    sp.onclick = function(){ selected = Number(sp.getAttribute('data-i')); renderDrawn(); renderList(); };
+  Array.prototype.forEach.call(el('segments').querySelectorAll('span[data-j]'), function(sp){
+    sp.onclick = function(e){ e.stopPropagation(); lineSel = Number(sp.getAttribute('data-j')); renderDrawn(); renderList(); };
+  });
+  var sSeg = seg();
+  Array.prototype.forEach.call(document.querySelectorAll('#verdict button'), function(b){
+    b.classList.toggle('on', !!sSeg && sSeg.verdict === b.getAttribute('data-v'));
   });
   el('list').innerHTML = CARDS.map(function(x, i){
-    var v = state[x.inst] && state[x.inst].verdict;
-    var name = { good:'会做', structure:'结构不行', chart:'股性不行', missed:'错过了' }[v] || '';
-    return '<div class="' + (v ? 'done' : '') + '" data-i="'+i+'">' + (i+1) + '. ' + x.short + ' ' + (v ? '✓ ' + name : '') + '</div>';
+    var k = x.inst + '|' + x.markDate;
+    var g = state[k] && state[k].segments || [];
+    var v = g.some(function(x2){ return x2.verdict; });
+    return '<div class="' + (v ? 'done' : '') + '" data-i="'+i+'">' + (i+1) + '. ' + x.short + ' ' + (v ? '✓ ' + g.length + ' 段' : '') + '</div>';
   }).join('');
   Array.prototype.forEach.call(el('list').querySelectorAll('div'), function(d){
-    d.onclick = function(){ idx = Number(d.getAttribute('data-i')); buildChart(); renderList(); };
+    d.onclick = function(){ idx = Number(d.getAttribute('data-i')); segSel = 0; buildChart(); renderList(); };
   });
 }
 
-function go(n){ idx = (n + CARDS.length) % CARDS.length; buildChart(); renderList(); }
+function go(n){ idx = (n + CARDS.length) % CARDS.length; segSel = 0; lineSel = -1; buildChart(); renderList(); }
 el('prev').onclick = function(){ go(idx-1); };
 el('next').onclick = function(){ go(idx+1); };
 el('t-h').onclick = function(){ setTool(tool === 'h' ? null : 'h'); };
 el('t-r').onclick = function(){ setTool(tool === 'r' ? null : 'r'); };
 el('t-rg').onclick = function(){ setTool(tool === 'rg' ? null : 'rg'); };
-el('del-sel').onclick = deleteSelected;
-el('clear').onclick = function(){
-  if (!confirm('清空这张图上所有的线？')) return;
-  st().lines = []; selected = -1; save(); renderDrawn();
+el('del-seg').onclick = function(){
+  var s = st();
+  if (s.segments.length <= 1) { alert('至少保留一段'); return; }
+  s.segments.splice(segSel, 1);
+  segSel = Math.max(0, segSel - 1); lineSel = -1; save(); renderDrawn(); drawOverlay(); renderList();
+};
+el('clear-lines').onclick = function(){
+  if (!confirm('清空这张图上所有段的线？')) return;
+  st().segments.forEach(function(g){ g.lines = []; });
+  lineSel = -1; save(); renderDrawn(); renderList();
 };
 Array.prototype.forEach.call(document.querySelectorAll('#verdict button'), function(b){
-  b.onclick = function(){ st().verdict = b.getAttribute('data-v'); save(); renderList(); go(idx+1); };
+  b.onclick = function(){
+    var g = seg(); if (!g) return;
+    g.verdict = b.getAttribute('data-v'); g.source = 'edited'; save(); renderList();
+  };
 });
 el('export').onclick = function(){
-  var blob = new Blob([JSON.stringify(CARDS.map(function(c){
-    var s = state[c.inst] || {};
-    return { inst:c.inst, markDate:c.markDate, quote:c.quote, region:s.region||null, verdict:s.verdict||null, lines:s.lines||[] };
-  }), null, 2)], { type:'application/json' });
+  var out = CARDS.map(function(c){
+    var k = c.inst + '|' + c.markDate;
+    var s = state[k] || { segments: [] };
+    return { inst:c.inst, markDate:c.markDate, quote:c.quote, segments: s.segments.map(function(g){ return { region:g.region, source:g.source, verdict:g.verdict, lines:g.lines }; }) };
+  });
+  var blob = new Blob([JSON.stringify(out, null, 2)], { type:'application/json' });
   var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'annotations-34.json'; a.click();
 };
 document.addEventListener('keydown', function(e){
@@ -374,7 +409,7 @@ document.addEventListener('keydown', function(e){
   if (e.key === 'Escape') setTool(null);
   if (e.key === 'ArrowRight') go(idx+1);
   if (e.key === 'ArrowLeft') go(idx-1);
-  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedLine(); }
 });
 buildChart(); renderList();
 </script></body></html>`;
