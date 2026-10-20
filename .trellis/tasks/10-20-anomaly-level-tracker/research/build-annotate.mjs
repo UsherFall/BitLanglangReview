@@ -181,13 +181,37 @@ out = out.replace(
 
 const target = path.join(OUT, 'annotate-today.html');
 
+// 空段的显示：别让它显示成空白的"段 N"
+out = out.split("(g.region ? g.region.join(' → ') : '')").join("(g.region ? g.region.join(' → ') : '（未框区间）')");
+
+/**
+ * 用户 10/20：「我没标的币就是我觉得不好的币，但是因为页面没有区间的话就没法选不好原因」
+ *
+ * 改法：判定按钮不再要求"先有段"。
+ * 没有段时点判定，自动建一个空段（region: null）承载结论，用户再画线/框段时挂上去。
+ * 空段的卡也算"已表态"，导出时带 verdict，粗筛就能拿到负样本和原因。
+ */
+const verdictPat = /b\.onclick = function\(\)\{\s*\n\s*var g = seg\(\); if \(!g\) return;\s*\n\s*g\.verdict = b\.getAttribute\('data-v'\); g\.source = 'edited'; save\(\); renderList\(\);\s*\n\s*\};/;
+if (!verdictPat.test(out)) throw new Error('模板判定按钮代码变了，请更新 build-annotate.mjs');
+out = out.replace(
+  verdictPat,
+  `b.onclick = function(){
+    var s = st();
+    // 没段也能表个态：自动建一个空段放着结论
+    if (!s.segments.length) { s.segments.push({ region: null, source: 'edited', verdict: null, lines: [] }); segSel = 0; }
+    var g = s.segments[segSel] || s.segments[0]; if (!g) return;
+    var v = b.getAttribute('data-v');
+    g.verdict = (g.verdict === v) ? null : v;
+    g.source = 'edited'; save(); renderList();
+  };`,
+);
+
 /**
  * 加「复制到剪贴板」（用户 10/20：我标好了但没导出）。
  * 原始标注只存在浏览器本地，agent 读不到；多给一条不用管文件路径的出口。
  */
 const copyBtn =
-  '<button id="copy" style="margin-left:6px">复制 JSON</button>';
-out = out.replace(
+  '<button id="copy" style="margin-left:6px">复制 JSON</button>';out = out.replace(
   '<button id="export" class="primary">导出标注</button>',
   '<button id="export" class="primary">导出标注</button>' + copyBtn,
 );

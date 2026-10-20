@@ -1,0 +1,277 @@
+{
+ "good": [
+  {
+   "inst": "JST",
+   "note": "整体还是看空但不做空，因为前面涨了很多波了，需要调整",
+   "nSeg": 1,
+   "verdict": "structure",
+   "regions": [
+    "2026-10-09~2026-10-19"
+   ],
+   "linesH": [
+    0.14302022435148398
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 44.7,
+   "fromBase": 95,
+   "fromPeak": 1.6,
+   "holdDays": 11
+  },
+  {
+   "inst": "BTC",
+   "note": "这里是做反弹的机会，可以看小级别有没有在射线附近收敛",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-10-06~2026-10-20"
+   ],
+   "linesH": [],
+   "linesR": [
+    1
+   ],
+   "gain": 35.1,
+   "fromBase": 74,
+   "fromPeak": 6.8,
+   "holdDays": 28
+  },
+  {
+   "inst": "BNB",
+   "note": "这里弹上来就要开始看了",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-08-22~2026-09-03"
+   ],
+   "linesH": [
+    724.9384599205422
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 42.8,
+   "fromBase": 66,
+   "fromPeak": 10.1,
+   "holdDays": 15
+  },
+  {
+   "inst": "LINEA",
+   "note": "同样的这里弹上来关注，虽然这根日线突破了，但小级别找机会",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-08-22~2026-09-06"
+   ],
+   "linesH": [
+    0.0026957076419724234
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 49.5,
+   "fromBase": 56,
+   "fromPeak": 14.6,
+   "holdDays": 6
+  },
+  {
+   "inst": "ETH",
+   "note": "区间末尾这里弹上来就要看了",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-07-27~2026-08-17"
+   ],
+   "linesH": [],
+   "linesR": [
+    1
+   ],
+   "gain": 50.1,
+   "fromBase": 55,
+   "fromPeak": 15,
+   "holdDays": 28
+  },
+  {
+   "inst": "OPG",
+   "note": "同样弹上来小级别找机会",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-09-21~2026-10-09"
+   ],
+   "linesH": [
+    0.1515650385604113
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 70.5,
+   "fromBase": 55,
+   "fromPeak": 18.6,
+   "holdDays": 10
+  },
+  {
+   "inst": "ZRX",
+   "note": "弹上来小级别找机会",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-08-24~2026-09-03"
+   ],
+   "linesH": [
+    0.10375017527459687
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 76.6,
+   "fromBase": 56,
+   "fromPeak": 19.2,
+   "holdDays": 10
+  },
+  {
+   "inst": "BAND",
+   "note": "同样弹上来小级别找机会",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-08-30~2026-09-19"
+   ],
+   "linesH": [
+    0.2146661836877775
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 77.8,
+   "fromBase": 55,
+   "fromPeak": 19.7,
+   "holdDays": 14
+  },
+  {
+   "inst": "RENDER",
+   "note": "",
+   "nSeg": 1,
+   "verdict": "good",
+   "regions": [
+    "2026-08-22~2026-09-18"
+   ],
+   "linesH": [
+    1.6389582846459452
+   ],
+   "linesR": [
+    0
+   ],
+   "gain": 72.9,
+   "fromBase": 53,
+   "fromPeak": 19.7,
+   "holdDays": 7
+  }
+ ],
+ "bad": [
+  {
+   "inst": "GMX",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 49.4,
+   "fromBase": 71,
+   "fromPeak": 9.6,
+   "holdDays": 4
+  },
+  {
+   "inst": "DOT",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 72.5,
+   "fromBase": 68,
+   "fromPeak": 13.3,
+   "holdDays": 23
+  },
+  {
+   "inst": "AWE",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 39.6,
+   "fromBase": 52,
+   "fromPeak": 13.5,
+   "holdDays": 19
+  },
+  {
+   "inst": "ELSA",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 77,
+   "fromBase": 68,
+   "fromPeak": 13.9,
+   "holdDays": 1
+  },
+  {
+   "inst": "ATOM",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 61.1,
+   "fromBase": 56,
+   "fromPeak": 16.8,
+   "holdDays": 10
+  },
+  {
+   "inst": "EIGEN",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 64.6,
+   "fromBase": 55,
+   "fromPeak": 17.5,
+   "holdDays": 23
+  },
+  {
+   "inst": "IO",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 78.9,
+   "fromBase": 58,
+   "fromPeak": 18.6,
+   "holdDays": 8
+  },
+  {
+   "inst": "APT",
+   "note": "",
+   "nSeg": 0,
+   "verdict": null,
+   "regions": [],
+   "linesH": [],
+   "linesR": [],
+   "gain": 78.2,
+   "fromBase": 53,
+   "fromPeak": 20.5,
+   "holdDays": 9
+  }
+ ]
+}

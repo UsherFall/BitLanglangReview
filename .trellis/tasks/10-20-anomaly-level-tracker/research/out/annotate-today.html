@@ -300,7 +300,7 @@ function renderList(){
     var sel = i === segSel;
     var v = { good:'会做', structure:'结构不行', chart:'股性不行', missed:'错过了' }[g.verdict] || '未定';
     return '<div class="seg ' + (sel ? 'sel' : '') + '" data-i="'+i+'">'
-      + '<b>段 ' + (i+1) + ' ' + (g.region ? g.region.join(' → ') : '') + '</b>'
+      + '<b>段 ' + (i+1) + ' ' + (g.region ? g.region.join(' → ') : '（未框区间）') + '</b>'
       + '<div class="meta">结论：' + v + ' · ' + (g.source === 'prefilled' ? '（预填，未改）' : '已改') + '</div>'
       + (g.lines.length ? '<div class="lines">' + g.lines.map(function(L, j){
           var txt = L.kind === 'h' ? ('压力位 ' + (L.price >= 1 ? L.price.toFixed(4) : L.price.toPrecision(5))) : '突破方向';
@@ -348,8 +348,13 @@ el('clear-lines').onclick = function(){
 };
 Array.prototype.forEach.call(document.querySelectorAll('#verdict button'), function(b){
   b.onclick = function(){
-    var g = seg(); if (!g) return;
-    g.verdict = b.getAttribute('data-v'); g.source = 'edited'; save(); renderList();
+    var s = st();
+    // 没段也能表个态：自动建一个空段放着结论
+    if (!s.segments.length) { s.segments.push({ region: null, source: 'edited', verdict: null, lines: [] }); segSel = 0; }
+    var g = s.segments[segSel] || s.segments[0]; if (!g) return;
+    var v = b.getAttribute('data-v');
+    g.verdict = (g.verdict === v) ? null : v;
+    g.source = 'edited'; save(); renderList();
   };
 });
 el('export').onclick = function(){
