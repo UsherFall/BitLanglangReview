@@ -3,15 +3,20 @@
     "inst": "WALUSDT",
     "markDate": "2026-10-11",
     "quote": "9月29往后的收敛好",
-    "region": [
-      "2026-10-01",
-      "2026-10-12"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.03933080158915634
+        "region": [
+          "2026-10-01",
+          "2026-10-08"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.038049076887123154
+          }
+        ]
       }
     ]
   },
@@ -19,15 +24,20 @@
     "inst": "WALUSDT",
     "markDate": "2026-10-12",
     "quote": "10-10到10-12这些收敛都很好",
-    "region": [
-      "2026-10-01",
-      "2026-10-12"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.03933080158915634
+        "region": [
+          "2026-10-10",
+          "2026-10-12"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.04320928020565552
+          }
+        ]
       }
     ]
   },
@@ -35,15 +45,20 @@
     "inst": "FLUIDUSDT",
     "markDate": "2026-09-30",
     "quote": "9-28到9-30那几根收敛（这个也好）",
-    "region": [
-      "2026-09-28",
-      "2026-09-30"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 1.5472996027109136
+        "region": [
+          "2026-09-28",
+          "2026-09-30"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 1.5472996027109136
+          }
+        ]
       }
     ]
   },
@@ -51,15 +66,20 @@
     "inst": "INITUSDT",
     "markDate": "2026-09-08",
     "quote": "9-6到9-8那段收敛是我想要的",
-    "region": [
-      "2026-08-29",
-      "2026-09-01"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.06051439588688946
+        "region": [
+          "2026-08-29",
+          "2026-09-01"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.06051439588688946
+          }
+        ]
       }
     ]
   },
@@ -67,15 +87,20 @@
     "inst": "INITUSDT",
     "markDate": "2026-09-19",
     "quote": "9-17到9-19那段也是我想要的",
-    "region": [
-      "2026-08-29",
-      "2026-09-01"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.06051439588688946
+        "region": [
+          "2026-09-17",
+          "2026-09-19"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.07703928487964477
+          }
+        ]
       }
     ]
   },
@@ -83,15 +108,20 @@
     "inst": "BATUSDT",
     "markDate": "2026-09-30",
     "quote": "9-28到9-30那段横盘是好机会",
-    "region": [
-      "2026-09-22",
-      "2026-09-30"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.09485934564150503
+        "region": [
+          "2026-09-28",
+          "2026-09-30"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.09732526992287918
+          }
+        ]
       }
     ]
   },
@@ -99,15 +129,20 @@
     "inst": "BEAMUSDT",
     "markDate": "2026-10-02",
     "quote": "9-28到10-2是好机会",
-    "region": [
-      "2026-09-28",
-      "2026-10-02"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.002154505258237906
+        "region": [
+          "2026-10-01",
+          "2026-10-02"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.0022471182519280203
+          }
+        ]
       }
     ]
   },
@@ -115,15 +150,20 @@
     "inst": "AXLUSDT",
     "markDate": "2026-10-05",
     "quote": "10-3到10-5那段收敛还是要扫出来",
-    "region": [
-      "2026-09-21",
-      "2026-09-25"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.05288537976162655
+        "region": [
+          "2026-10-03",
+          "2026-10-05"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.05757839214769807
+          }
+        ]
       }
     ]
   },
@@ -131,15 +171,20 @@
     "inst": "VELODROMEUSDT",
     "markDate": "2026-09-01",
     "quote": "8-28到9-1那段是可以的",
-    "region": [
-      "2026-08-28",
-      "2026-09-01"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.025707076887123162
+        "region": [
+          "2026-08-28",
+          "2026-09-01"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.025707076887123162
+          }
+        ]
       }
     ]
   },
@@ -147,15 +192,34 @@
     "inst": "XMRUSDT",
     "markDate": "2026-08-13",
     "quote": "8-9到8-13很好",
-    "region": [
-      "2026-08-09",
-      "2026-08-23"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 421.3392030848329
+        "region": [
+          "2026-07-30",
+          "2026-08-04"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 369.7981397522786
+          }
+        ]
+      },
+      {
+        "region": [
+          "2026-08-11",
+          "2026-08-13"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 414.09336059827064
+          }
+        ]
       }
     ]
   },
@@ -163,15 +227,20 @@
     "inst": "XMRUSDT",
     "markDate": "2026-08-20",
     "quote": "8-16到8-20都很好",
-    "region": [
-      "2026-08-09",
-      "2026-08-23"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 421.3392030848329
+        "region": [
+          "2026-08-11",
+          "2026-08-13"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 413.72401028277636
+          }
+        ]
       }
     ]
   },
@@ -179,15 +248,20 @@
     "inst": "OPGUSDT",
     "markDate": "2026-10-07",
     "quote": "10-2到10-7那段好",
-    "region": [
-      "2026-10-02",
-      "2026-10-07"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.14819499883150267
+        "region": [
+          "2026-10-02",
+          "2026-10-07"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.14819499883150267
+          }
+        ]
       }
     ]
   },
@@ -195,15 +269,20 @@
     "inst": "TIAUSDT",
     "markDate": "2026-10-05",
     "quote": "10-3到10-5好",
-    "region": [
-      "2026-10-03",
-      "2026-10-05"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.5158957700397289
+        "region": [
+          "2026-10-03",
+          "2026-10-05"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.5359808366440757
+          }
+        ]
       }
     ]
   },
@@ -211,26 +290,20 @@
     "inst": "OPUSDT",
     "markDate": "2026-10-12",
     "quote": "最近的几根收敛10-10到10-12",
-    "region": [
-      "2026-09-10",
-      "2026-09-13"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.14974304744099087
-      },
-      {
-        "kind": "r",
-        "p1": {
-          "t": 1787328000,
-          "price": 0.1229799719560645
-        },
-        "p2": {
-          "t": 1789401600,
-          "price": 0.10486826361299369
-        }
+        "region": [
+          "2026-10-10",
+          "2026-10-12"
+        ],
+        "source": "edited",
+        "verdict": "structure",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.15068625847160552
+          }
+        ]
       }
     ]
   },
@@ -238,26 +311,27 @@
     "inst": "OPUSDT",
     "markDate": "2026-09-16",
     "quote": "前面那段大三角收敛8-21到9-16",
-    "region": [
-      "2026-09-10",
-      "2026-09-13"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.14974304744099087
-      },
-      {
-        "kind": "r",
-        "p1": {
-          "t": 1787328000,
-          "price": 0.1229799719560645
-        },
-        "p2": {
-          "t": 1789401600,
-          "price": 0.10486826361299369
-        }
+        "region": [
+          "2026-09-10",
+          "2026-09-13"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "r",
+            "p1": {
+              "t": 1778256000,
+              "price": 0.1805153073147932
+            },
+            "p2": {
+              "t": 1789401600,
+              "price": 0.10470472072914232
+            }
+          }
+        ]
       }
     ]
   },
@@ -265,15 +339,20 @@
     "inst": "STRKUSDT",
     "markDate": "2026-10-01",
     "quote": "9-25到10-1的收敛很好",
-    "region": [
-      "2026-09-25",
-      "2026-10-01"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "h",
-        "price": 0.048796246786632386
+        "region": [
+          "2026-09-25",
+          "2026-10-01"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.05058171862584715
+          }
+        ]
       }
     ]
   },
@@ -281,26 +360,27 @@
     "inst": "ZECUSDT",
     "markDate": "2026-08-17",
     "quote": "前面的大三角收敛很好5-20到8-17",
-    "region": [
-      "2026-08-26",
-      "2026-09-01"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "r",
-        "p1": {
-          "t": 1779379200,
-          "price": 689.702061229259
-        },
-        "p2": {
-          "t": 1784044800,
-          "price": 586.8129516242111
-        }
-      },
-      {
-        "kind": "h",
-        "price": 878.8632788034587
+        "region": [
+          "2026-08-12",
+          "2026-08-17"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "r",
+            "p1": {
+              "t": 1779379200,
+              "price": 686.8283337228323
+            },
+            "p2": {
+              "t": 1786291200,
+              "price": 528.7584575835475
+            }
+          }
+        ]
       }
     ]
   },
@@ -308,26 +388,20 @@
     "inst": "ZECUSDT",
     "markDate": "2026-09-01",
     "quote": "突破后的8-26到9-1也还可以",
-    "region": [
-      "2026-08-26",
-      "2026-09-01"
-    ],
-    "verdict": "good",
-    "lines": [
+    "segments": [
       {
-        "kind": "r",
-        "p1": {
-          "t": 1779379200,
-          "price": 689.702061229259
-        },
-        "p2": {
-          "t": 1784044800,
-          "price": 586.8129516242111
-        }
-      },
-      {
-        "kind": "h",
-        "price": 878.8632788034587
+        "region": [
+          "2026-08-26",
+          "2026-09-01"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 886.4512432811405
+          }
+        ]
       }
     ]
   },
@@ -335,128 +409,387 @@
     "inst": "AZTECUSDT",
     "markDate": "2026-09-30",
     "quote": "更好的机会是9-18后面那段突破前横盘",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-19",
+          "2026-09-26"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.018610902079925218
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "BERAUSDT",
     "markDate": "2026-09-12",
     "quote": "8-31后那段横盘要扫出来的",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-08-31",
+          "2026-09-12"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.21726031783126898
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "NEARUSDT",
     "markDate": "2026-09-04",
     "quote": "8-25后面那段收敛很好",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-08-25",
+          "2026-09-04"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 2.1002523954194907
+          }
+        ]
+      },
+      {
+        "region": [
+          "2026-08-09",
+          "2026-08-18"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "r",
+            "p1": {
+              "t": 1779811200,
+              "price": 2.9740074783827994
+            },
+            "p2": {
+              "t": 1784822400,
+              "price": 2.003168497312456
+            }
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "NIGHTUSDT",
     "markDate": "2026-08-29",
     "quote": "8-19后面那段收敛好",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-08-19",
+          "2026-08-29"
+        ],
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "SIGNUSDT",
     "markDate": "2026-09-22",
     "quote": "9-10后面那段横盘收敛好",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-14",
+          "2026-09-16"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.01122237438653891
+          }
+        ]
+      },
+      {
+        "region": [
+          "2026-09-18",
+          "2026-09-19"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.011834170366908155
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "FLUXUSDT",
     "markDate": "2026-10-09",
     "quote": "9-29后面那段横盘好",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-29",
+          "2026-10-02"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.07623206122925918
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "AEROUSDT",
     "markDate": "2026-09-19",
     "quote": "9-9后那段横盘可以看",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-11",
+          "2026-09-13"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.6758506426735218
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "LINEAUSDT",
     "markDate": "2026-09-02",
     "quote": "8-23后面那段横盘可以看",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-08-23",
+          "2026-09-02"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.00269838466931526
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "PYTHUSDT",
     "markDate": "2026-09-14",
     "quote": "9-4后面那段横盘是要关注的",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-04",
+          "2026-09-14"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.059444963776583315
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "BTWUSDT",
     "markDate": "2026-09-13",
     "quote": "只有9-03后面那些收敛可以看",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-03",
+          "2026-09-13"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.7673223374620238
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "STXUSDT",
     "markDate": "2026-09-12",
     "quote": "会去关注8-31后的那段高位横盘",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-08-31",
+          "2026-09-12"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.28714314092077586
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "INJUSDT",
     "markDate": "2026-04-30",
     "quote": "4-18后面那段横盘算是好机会",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-04-18",
+          "2026-04-23"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 3.498350081794812
+          }
+        ]
+      },
+      {
+        "region": [
+          "2026-05-04",
+          "2026-05-06"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 3.994321103061463
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "QUSDT",
     "markDate": "2026-07-03",
     "quote": "6月23往后那段收敛可以看下",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-06-23",
+          "2026-07-03"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "r",
+            "p1": {
+              "t": 1759852800,
+              "price": 0.05265209558308016
+            },
+            "p2": {
+              "t": 1782057600,
+              "price": 0.019913705772376725
+            }
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "QUSDT",
     "markDate": "2026-07-23",
     "quote": "7月13往后的收敛可以看下",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-07-19",
+          "2026-07-23"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.02310124585183454
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "BTCUSDT",
     "markDate": "2026-08-25",
     "quote": "8-17弹起来后小级别有收敛",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-08-14",
+          "2026-08-17"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 66845.53727506427
+          }
+        ]
+      }
+    ]
   },
   {
     "inst": "BTCUSDT",
     "markDate": "2026-09-19",
     "quote": "9-18到9-19小级别也有收敛也是好机会",
-    "region": null,
-    "verdict": null,
-    "lines": []
+    "segments": [
+      {
+        "region": [
+          "2026-09-18",
+          "2026-09-19"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 82268.32530965179
+          }
+        ]
+      }
+    ]
   }
 ]
