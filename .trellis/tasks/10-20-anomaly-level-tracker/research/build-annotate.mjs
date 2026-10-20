@@ -15,7 +15,10 @@ import path from 'node:path';
 const DIR = '.trellis/tasks/10-20-anomaly-level-tracker/research';
 const OUT = path.join(DIR, 'out');
 const TEMPLATE = '.trellis/tasks/10-19-fakeout-retest-quality/research/annotate.html';
-const dayOf = (t) => new Date(Number(t)).toISOString().slice(0, 10);
+// 用户 10/20 确认：日期按北京时间看。
+// Bitget 1D 是 UTC 0 点开盘 = 北京 8:00 开盘，即"北京日期当天的 K 线"。
+// 所以要 +8h 再取日期，不能直接 toISOString().slice(0,10)（那样会早一天）。
+const dayOf = (t) => new Date(Number(t) + 8 * 3600 * 1000).toISOString().slice(0, 10);
 
 const list = JSON.parse(fs.readFileSync(path.join(OUT, 'bottom-list.json'), 'utf8'));
 const SHOW = Number(process.env.SHOW ?? 200);
@@ -32,8 +35,8 @@ for (const r of list.slice(0, SHOW)) {
     short: r.inst,
     quote: `拉升 ${r.s0.slice(5)}→${r.p.slice(5)} 涨${r.gain}% · 回到${r.fromBase}% · 离顶${r.fromPeak}% · 顶后${r.holdDays}天`,
     markDate: lastDay,
-    // 默认框出"整段拉升 + 顶之后的整理"，用户在这个范围里标压力位
-    defaultRegion: [r.s0, lastDay],
+    // 用户 10/20：去掉默认段，全部自己画
+    defaultRegion: null,
     hideAfter: lastDay,
     bars,
   });
@@ -51,7 +54,7 @@ let out = html.slice(0, start) + JSON.stringify(cards) + html.slice(end);
 // 这里换成 MM-DD，和价格轴标签的日期口径一致。
 const axisBefore = "timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:8, barSpacing:6 },";
 const axisAfter =
-  "timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:8, barSpacing:6, tickMarkFormatter:function(t){ var n=Number(t); return new Date((n<1e12?n*1000:n)).toISOString().slice(5,10); } },";
+  "timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:8, barSpacing:6, tickMarkFormatter:function(t){ var n=Number(t); var ms=(n<1e12?n*1000:n)+8*3600*1000; return new Date(ms).toISOString().slice(5,10); } },";
 if (!out.includes(axisBefore)) throw new Error('模板时间轴格式变了，请更新 build-annotate.mjs 里的补丁');
 out = out.replace(axisBefore, axisAfter);
 
@@ -110,7 +113,7 @@ out = out.replace(asideAnchor, noteHtml + '\n' + asideAnchor);
 const stBefore =
   "  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ] };";
 const stAfter =
-  "  if (!state[key()]) state[key()] = { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ], note: '' };\n" +
+  "  if (!state[key()]) state[key()] = c.defaultRegion ? { segments: [ { region: c.defaultRegion.slice(), source: 'prefilled', verdict: null, lines: [] } ], note: '' } : { segments: [], note: '' };\n" +
   '  if (typeof state[key()].note !== \'string\') state[key()].note = \'\';';
 if (!out.includes(stBefore)) throw new Error('模板 st() 结构变了，请更新 build-annotate.mjs 里的备注补丁');
 out = out.replace(stBefore, stAfter);
@@ -177,5 +180,13 @@ out = out.replace(
 );
 
 const target = path.join(OUT, 'annotate-today.html');
+
+// 模板里把线段时间转日期的地方也要 +8h，否则和轴上的北京日期差一天
+const rayBefore = "new Date(t1*1000).toISOString().slice(0,10)";
+const rayAfter = "new Date(t1*1000 + 8*3600*1000).toISOString().slice(0,10)";
+out = out.split(rayBefore).join(rayAfter);
+const rayBefore2 = "new Date(t2*1000).toISOString().slice(0,10)";
+const rayAfter2 = "new Date(t2*1000 + 8*3600*1000).toISOString().slice(0,10)";
+out = out.split(rayBefore2).join(rayAfter2);
 fs.writeFileSync(target, out);
 console.log(`写出 ${target}（${cards.length} 张卡，${(out.length / 1024 / 1024).toFixed(2)} MB）`);
