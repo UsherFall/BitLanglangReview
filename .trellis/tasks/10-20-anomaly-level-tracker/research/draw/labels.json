@@ -54,8 +54,15 @@
     "inst": "GMXUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 07-30→10-15 涨49.4% · 回到71% · 离顶9.6% · 顶后4天",
-    "note": "",
-    "segments": []
+    "note": "没有很好的拉，回调，反弹后收敛的结构",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "BNBUSDT",
@@ -83,22 +90,43 @@
     "inst": "DOTUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 08-17→09-26 涨72.5% · 回到68% · 离顶13.3% · 顶后23天",
-    "note": "",
-    "segments": []
+    "note": "一样的没有拉回调反弹收敛的结构",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "AWEUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 07-28→09-30 涨39.6% · 回到52% · 离顶13.5% · 顶后19天",
-    "note": "",
-    "segments": []
+    "note": "没有好的收敛，单从这个历史k线看也没有流畅的行情",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "chart",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "ELSAUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 08-17→10-18 涨77% · 回到68% · 离顶13.9% · 顶后1天",
-    "note": "",
-    "segments": []
+    "note": "同样没有拉回调反弹收敛，日线上看不出来",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "LINEAUSDT",
@@ -155,15 +183,29 @@
     "inst": "ATOMUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 07-30→10-09 涨61.1% · 回到56% · 离顶16.8% · 顶后10天",
-    "note": "",
-    "segments": []
+    "note": "同样没有拉回调反弹收敛，日线上看不出来",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "EIGENUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 08-12→09-26 涨64.6% · 回到55% · 离顶17.5% · 顶后23天",
-    "note": "",
-    "segments": []
+    "note": "同样没有拉回调反弹收敛，日线上看不出来",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "OPGUSDT",
@@ -191,8 +233,15 @@
     "inst": "IOUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 08-13→10-11 涨78.9% · 回到58% · 离顶18.6% · 顶后8天",
-    "note": "",
-    "segments": []
+    "note": "同样没有拉回调反弹收敛，日线上看不出来",
+    "segments": [
+      {
+        "region": null,
+        "source": "edited",
+        "verdict": "structure",
+        "lines": []
+      }
+    ]
   },
   {
     "inst": "ZRXUSDT",
@@ -264,7 +313,22 @@
     "inst": "APTUSDT",
     "markDate": "2026-10-20",
     "quote": "拉升 08-30→10-10 涨78.2% · 回到53% · 离顶20.5% · 顶后9天",
-    "note": "",
-    "segments": []
+    "note": "这个底部箱体还可以，但也只能去小级别找机会",
+    "segments": [
+      {
+        "region": [
+          "2026-08-22",
+          "2026-09-18"
+        ],
+        "source": "edited",
+        "verdict": "good",
+        "lines": [
+          {
+            "kind": "h",
+            "price": 0.7118994858611825
+          }
+        ]
+      }
+    ]
   }
 ]
