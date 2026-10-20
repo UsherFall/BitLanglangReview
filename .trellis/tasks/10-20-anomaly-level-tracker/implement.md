@@ -1,44 +1,78 @@
 # 执行计划
 
-## 已完成（研究层）
+## 已完成的（本轮 10-20 全部做完）
 
-- [x] 拉 2026-10-20 最新 1D 池（443 个加密币，isRwa 剔除）——`research/fetch-pool.mjs`
-- [x] 批平上一轮 38 段标注为 `research/labels.json`
-- [x] 粗筛 v1（现在正在拉升里）→ 35% 币日命中，否决
-- [x] 粗筛 v2（拉升→横住）多参数扫描 → 与随机不可分，否决
-- [x] 粗筛 v3（拉升≥30% & ≥4天 & 回吐≤60%）→ 85 个候选
-- [x] 第 3 步回放：31 段 170 个币日，算出涨跌幅 + 距上方最近线
-- [x] 距离口径交叉验证（8.11% vs 9.02% vs 8.11%）
+### 数据与基础设施
+- [x] 拉 1D 池（451 个加密币、200 根、含成交量）——`research/fetch-pool.mjs`
+- [x] 北京时间口径（+8h 再取日期；判定日用最后已收盘那根）
+- [x] 新币不被 `>=200` 根过滤（OPG 181 根曾被挡掉）
+
+### 标注工具
+- [x] 标注页 `out/annotate-today.html`：17 张卡、可缩放看全 200 根
+- [x] 画段修复：不飘了（用逻辑下标换算，夹到真实 K 线范围）
+- [x] 备注框：每张卡独立保存、随导出一起出去
+- [x] 没框区间也能选原因（空段承载 verdict）
+- [x] 「复制 JSON」按钮
+- [x] 去掉默认段（用户要全部自己画）
+
+### 第 3 步警报（核心产出）
+- [x] 趋势线/水平线统一处理
+- [x] 波动尺自适应（BTC 2.38%、山寨 6~8%）
+- [x] 判定从线画好日之后开始（修掉 BTC 误报）
+- [x] 回放验证：10 段里 5 个正好命中区间末、2 个晚 1~2 天
+- [x] 当下状态：BTC 正确落在"观察中"
+
+### 证伪清单（本轮新增）
+- [x] 涨幅 20~80% 作粗筛条件
+- [x] 「收回突破线上」当信号
+- [x] 固定百分比"附近"
+- [x] 拿今天价格比历史线
+- [x] 数"第几次接近"才响
+
+### 粗筛审计（暴露的真问题）
+- [x] 现口径召回 4/9、规模 208/天
+- [x] 去掉回吐约束召回 8/9 但规模 438/天（97%，无效）
+- [x] **ETH 提前判断 vs 算法结构晚 1~2 天**（recall-audit.md §三）
 
 ## 待办
 
-### A. 口径固化（本轮）
-- [x] A1 粗筛 v3 常量集中在 `build-tape.mjs` 顶部并注释
-- [x] A2 `--as-of=YYYY-MM-DD` 参数支持回放任意一天
-- [x] A3 输出 `out/list-<date>.md` + `out/list-<date>.html`（可视化名单页）
+### A. 粗筛重做（本任务的核心阻塞点）
 
-### B. 交给用户看一眼（验收）
-- [x] B1 生成 82 个候选的可视化页 + 全貌页（完整 200 根带影线）
-- [x] B2 修掉「突破币排在前面」：已突破剔除（3 个），改按离顶升序
-- [x] B3 用现有标注页生成 `out/annotate-today.html`（82 卡，可缩放可画线）
-- [ ] B4 **等用户在标注页标线** → 导出 json → 放到 `research/draw/labels.json`
-- [ ] B5 重跑 `build-page.mjs`，确认名单页出现「距线 %」且口径正确
-- [ ] B6 用户看图后确认：候选数量 / 排序是否对
+现口径没筛：每天 208/451。且 ETH 类段结构上扫不到（判据要等拉升已完成）。
 
-### C. 产品化（另开任务，本任务不做）
-- [ ] C1 扫描列表页：币 / 最新价 / 今日涨跌 / 距用户线 / 拉升区间
-- [ ] C2 画线保留在 instrument 上，跨天复用
-- [ ] C3 粗筛结果并入现有 `coin-scan` 流程前，先确认与旧字段的取舍
+- [ ] A1 想清「第 1 步到底回答什么问题」
+  - 不是"最近涨过没"（普涨里全都涨过）
+  - 不是"现在值不值得做"（那是收敛，不归算法）
+  - 候选：**"这个币最近有过一次拉升、并且从那之后还没破它的顶"** —— 这是"值得画线"的最小条件
+- [ ] A2 按新定义重写粗筛，用 9 个"会做"段回归：
+  - 目标：召回 ≥8/9
+  - 规模：每天 ≤20 个（用户上限）
+  - 区分度：随机日命中率 < 30%（避免"什么都报"）
+- [ ] A3 若仍扫不到 ETH 类段，明确告诉用户：这类"提前判断"的段结构上日线扫不到，只能在你标注后从第 3 步接管
+
+### B. 产品化接线（待 A 完成）
+
+- [ ] B1 把 `alert.mjs` 的逻辑并入产品扫描服务
+  - 用户线存到 instrument 级（跨天复用）
+  - 每天跑一遍，输出 警报 / 观察中 / 不接近
+- [ ] B2 标注页接入产品（现在只在 research 目录）
+- [ ] B3 粗筛 → 标注页 → 警报 的每日流程串起来
+
+### C. 文档
+
+- [ ] C1 更新 `.trellis/spec/` 里 coin-scan 相关 spec（如果产品化）
+- [ ] C2 findings.md 补充本轮完整链路
 
 ## 验证命令
 
 ```bash
 node .trellis/tasks/10-20-anomaly-level-tracker/research/fetch-pool.mjs
-node .trellis/tasks/10-20-anomaly-level-tracker/research/build-tape.mjs
-node .trellis/tasks/10-20-anomaly-level-tracker/research/diag-levels.mjs
+node .trellis/tasks/10-20-anomaly-level-tracker/research/build-annotate.mjs
+node .trellis/tasks/10-20-anomaly-level-tracker/research/alert.mjs
+node .trellis/tasks/10-20-anomaly-level-tracker/research/recall-audit.mjs
 ```
 
 ## 回滚点
 
-- 全部改动都在 `.trellis/tasks/10-20-anomaly-level-tracker/` 下，**不碰 `src/`**；删除该目录即回滚。
-- 上一轮研究目录只读引用，不改动。
+- 全部改动在 `.trellis/tasks/10-20-anomaly-level-tracker/` 下，不碰 `src/`
+- 上一轮研究目录只读引用
