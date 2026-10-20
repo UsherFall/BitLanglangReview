@@ -181,6 +181,36 @@ out = out.replace(
 
 const target = path.join(OUT, 'annotate-today.html');
 
+/**
+ * 加「复制到剪贴板」（用户 10/20：我标好了但没导出）。
+ * 原始标注只存在浏览器本地，agent 读不到；多给一条不用管文件路径的出口。
+ */
+const copyBtn =
+  '<button id="copy" style="margin-left:6px">复制 JSON</button>';
+out = out.replace(
+  '<button id="export" class="primary">导出标注</button>',
+  '<button id="export" class="primary">导出标注</button>' + copyBtn,
+);
+const copyJs = `
+el('copy').onclick = function(){
+  var out = CARDS.map(function(c){
+    var k = c.inst + '|' + c.markDate;
+    var s = state[k] || { segments: [], note: '' };
+    return { inst:c.inst, markDate:c.markDate, quote:c.quote, note: s.note || '', segments: s.segments.map(function(g){ return { region:g.region, source:g.source, verdict:g.verdict, lines:g.lines }; }) };
+  });
+  var txt = JSON.stringify(out, null, 2);
+  var done = function(ok){ el('copy').textContent = ok ? '已复制 ✓' : '复制失败，用导出'; setTimeout(function(){ el('copy').textContent = '复制 JSON'; }, 2200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(function(){ done(true); }, function(){ done(false); });
+  else {
+    var ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
+    try { done(document.execCommand('copy')); } catch(e) { done(false); }
+    document.body.removeChild(ta);
+  }
+};`;
+const bootAnchor2 = 'buildChart(); renderList();';
+const bIdx = out.lastIndexOf(bootAnchor2);
+out = out.slice(0, bIdx) + copyJs + '\n' + out.slice(bIdx);
+
 // 模板里把线段时间转日期的地方也要 +8h，否则和轴上的北京日期差一天
 const rayBefore = "new Date(t1*1000).toISOString().slice(0,10)";
 const rayAfter = "new Date(t1*1000 + 8*3600*1000).toISOString().slice(0,10)";
