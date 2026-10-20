@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+const l = JSON.parse(fs.readFileSync('.trellis/tasks/10-20-anomaly-level-tracker/research/out/rally-list.json', 'utf8'));
+const set = new Set(l.map((x) => x.inst));
+const ann = JSON.parse(fs.readFileSync('.trellis/tasks/10-20-anomaly-level-tracker/research/labels.json', 'utf8'));
+const insts = [...new Set(ann.map((g) => g.inst))];
+const short = (x) => (x.endsWith('USDT') ? x.slice(0, -4) : x);
+const hit = insts.filter((i) => set.has(short(i)));
+const miss = insts.filter((i) => !set.has(short(i)));
+console.log('标的', insts.length, '币：命中', hit.length, '漏', miss.length);
+console.log('命中:', hit.map(short).join(', '));
+console.log('漏:', miss.map(short).join(', '));
