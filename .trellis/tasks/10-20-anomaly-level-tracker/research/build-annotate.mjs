@@ -17,9 +17,8 @@ const OUT = path.join(DIR, 'out');
 const TEMPLATE = '.trellis/tasks/10-19-fakeout-retest-quality/research/annotate.html';
 const dayOf = (t) => new Date(Number(t)).toISOString().slice(0, 10);
 
-const list = JSON.parse(fs.readFileSync(path.join(OUT, 'rally-list.json'), 'utf8'));
-const AS_OF = list[0]?.asOf ?? '';
-const SHOW = Number(process.env.SHOW ?? 82);
+const list = JSON.parse(fs.readFileSync(path.join(OUT, 'bottom-list.json'), 'utf8'));
+const SHOW = Number(process.env.SHOW ?? 200);
 
 const cards = [];
 for (const r of list.slice(0, SHOW)) {
@@ -31,8 +30,8 @@ for (const r of list.slice(0, SHOW)) {
   cards.push({
     inst: `${r.inst}USDT`,
     short: r.inst,
-    quote: `拉升 ${r.s0.slice(5)}→${r.p.slice(5)} 涨${r.gain}% · 离顶${r.fromPeak}% · 顶后${r.holdDays}天`,
-    markDate: AS_OF,
+    quote: `拉升 ${r.s0.slice(5)}→${r.p.slice(5)} 涨${r.gain}% · 回到${r.fromBase}% · 离顶${r.fromPeak}% · 顶后${r.holdDays}天`,
+    markDate: lastDay,
     // 默认框出"整段拉升 + 顶之后的整理"，用户在这个范围里标压力位
     defaultRegion: [r.s0, lastDay],
     hideAfter: lastDay,

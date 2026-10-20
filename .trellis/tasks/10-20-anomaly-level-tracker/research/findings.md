@@ -119,17 +119,67 @@
 - 把导出的 json 放到 `research/draw/labels.json`，重跑 `build-page.mjs`，
   名单页就会多出「距线 %」一列（口径 = 上方最近一条）
 
-## 六、产物清单
+## 六、用户 10/20 第二次反馈："我想要底部拉升然后盘整的币，这些都拉的好高"
+
+### 6.1 先量，再改
+
+用你亲手标的 36 段做尺子（`diag-height.mjs`）：
+
+| 量 | 你的 36 段 | 原来 82 个候选 |
+|---|---|---|
+| 这波涨幅 中位 | **43%**（p25~p75 = 27%~58%） | **108%** |
+| 现在在涨幅的几成位置 中位 | **74%** | 57% |
+| 起点比前 60 根高点低 | 27.5% | 29% |
+| 起点在近 60 根区间的位置 | 32/100 | 11/100 |
+
+⇒ 你说"拉的好高"**成立**：候选涨幅中位是你能接受的两倍半。
+但"在底部"这一项，候选的起点其实比你的段**还要低**（位置 11 vs 32）——
+所以"底部"不是问题，**"拉飞"才是**。
+
+### 6.2 参数扫描（sweep-bottom.mjs / sweep-gain.mjs）
+
+只加"起点低位"条件没用：不管怎么调，覆盖最多 12/36（sweep-bottom）。
+把"涨幅上限"当主条件才有变化：
+
+| 口径 | 今日命中 | 覆盖你的段 | 同币随机日 | 区分度 |
+|---|---|---|---|---|
+| 原来（涨幅≥30% & 回吐≤60% & 不报突破） | 82 | 33/36 | 96% | **1.0×** |
+| 只限涨幅 10~50% | 41 | 12/36 | 32% | 1.1× |
+| 只限涨幅 20~80% | 203 | 29/36 | 52% | 1.5× |
+| **涨幅 20~80% + 回到涨幅 50% 以上 + 不报突破** | **17** | **25/36** | 25% | **2.7×** |
+| 涨幅 15~60% + 回到 50% 以上 + 不报突破 | 7 | 22/36 | 16% | 3.7× |
+
+⇒ 采用「涨幅 20~80% + 回到 50% 以上 + 不报突破」：
+**17 个**，覆盖你标的 25/36，区分度从 1.0× 提到 2.7×。
+
+### 6.3 去重后的成分
+
+这 17 个里，有 6 个（BNB / ETH / ELSA / LINEA / OPG / AWE）和你之前"拉飞"那版重合——
+因为它们本身涨幅就在 20~80% 之间，不是每个候选都涨了 100%+，是**排序把拉飞的排前面了**。
+其余 11 个是**新增的**（DOT / EIGEN / IO / ZRX / BAND / RENDER / APT / ATOM / GMX / JST / BTC）。
+
+## 七、待用户确认
+
+**打开 `out/bottom-list.html`**（17 个）：形态对不对？多了 / 少了？
+
+两个可以拧的旋钮（都是相对量，不是死数字）：
+
+- **涨幅上限 80%** 放宽到 120% → 会多出一批"拉得更高但还在整理"的
+- **「回到 50% 以上」** 降到 30% → 会多出"刚回踩到一半"的
+
+## 八、产物清单
 
 | 文件 | 说明 |
 |---|---|
 | `research/fetch-pool.mjs` | 拉池（含成交量），每日可复跑 |
-| `research/build-tape.mjs` | 产线入口：粗筛 + 突破剔除 + 按回踩排序 + 回放 + 自检 |
+| `research/build-bottom-list.mjs` | ⭐ 当前采用口径：涨幅 20~80% + 回到 50% 以上 |
 | `research/build-annotate.mjs` | 用候选生成标注页 `out/annotate-today.html` |
+| `research/build-tape.mjs` | 旧口径（涨幅≥30% & 回吐≤60%），留作对照 |
 | `research/build-page.mjs` | 名单页（缩略卡）；有 `draw/labels.json` 时显示「距线」 |
 | `research/build-overview.mjs` | 全貌页（完整 200 根 + 影线） |
+| `research/diag-height.mjs` | 用你的段量"拉多高"，核心诊断 |
+| `research/sweep-bottom.mjs` `sweep-gain.mjs` | 参数扫描（保留证据） |
 | `research/diag-buckets.mjs` | 突破/回踩分档统计 |
-| `research/diag-levels.mjs` | 三种距离口径交叉验证 |
-| `research/scan-rally.mjs` `scan-rally2.mjs` | v1/v2 失败记录（保留证据） |
-| `research/out/annotate-today.html` | ⭐ 给用户标压力位 |
-| `research/out/list-<date>.html` `overview.html` | 名单页 / 全貌页 |
+| `research/scan-rally.mjs` `scan-rally2.mjs` | v1/v2 失败记录 |
+| `research/out/bottom-list.html` | ⭐ 给用户看的 17 个 |
+| `research/out/annotate-today.html` | 标压力位用（待按新口径重灌） |
