@@ -176,7 +176,7 @@ function buildChart(){
     layout:{ background:{ type:'solid', color:'#10151c' }, textColor:'#c9d1d9', attributionLogo:false },
     grid:{ vertLines:{ color:'#1b2028' }, horzLines:{ color:'#1b2028' } },
     rightPriceScale:{ borderColor:'#30363d' },
-    timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:8, barSpacing:6, tickMarkFormatter:function(t){ var n=Number(t); return new Date((n<1e12?n*1000:n)).toISOString().slice(5,10); } },
+    timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:2, tickMarkFormatter:function(t){ var n=Number(t); return new Date((n<1e12?n*1000:n)).toISOString().slice(5,10); } },
     crosshair:{ mode:0 }, autoSize:true, handleScroll:true, handleScale:true,
     localization:{ timeFormatter:function(t){ return new Date(t*1000).toISOString().slice(0,10); } },
   });
@@ -191,7 +191,17 @@ function buildChart(){
   }));
   var markIdx = Math.max(0, candles.findIndex(function(b){ return b.d > mark; }) - 1);
   if (markIdx < 0) markIdx = candles.length - 1;
-  chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, markIdx - 120), to: markIdx + 12 });
+  
+  // 按容器宽度把"全部历史"铺满：spacing 由宽度反推，库就不会再替你砍掉远处的 K 线
+  function fitAll(){
+    var w = el('chart').clientWidth || 900;
+    var n = Math.min(candles.length, 400);
+    var spacing = Math.max(1.2, w / n);
+    chart.applyOptions({ timeScale:{ barSpacing: spacing, rightOffset: 1 } });
+    chart.timeScale().setVisibleLogicalRange({ from: candles.length - n, to: candles.length + 1 });
+  }
+  fitAll();
+  window.addEventListener('resize', function(){ clearTimeout(window.__fitT); window.__fitT = setTimeout(fitAll, 120); });
   chart.subscribeCrosshairMove(function(){ drawOverlay(); });
   chart.timeScale().subscribeVisibleLogicalRangeChange(function(){ drawOverlay(); });
   segSel = Math.min(segSel, Math.max(0, st().segments.length - 1));

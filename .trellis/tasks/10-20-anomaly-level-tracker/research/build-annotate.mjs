@@ -55,6 +55,38 @@ const axisAfter =
 if (!out.includes(axisBefore)) throw new Error('模板时间轴格式变了，请更新 build-annotate.mjs 里的补丁');
 out = out.replace(axisBefore, axisAfter);
 
+/**
+ * 修补：模板的初始视野是写死的「最近 120 根」，用户 10/20 反馈"缩放比例不对，要尽可能看多点 k 线"。
+ *
+ * 三层原因：
+ *   1. 视野写死 markIdx-120
+ *   2. barSpacing 写死 6px —— 一屏只塞得下十几个格子
+ *   3. 只调视野不调间距时，库会反推间距把远处截掉（实测视野给 200 根，结果只显示 5 根）
+ *
+ * 现在按容器像素宽反推 barSpacing：spacing = 容器宽度 / 要显示的根数，
+ * 再把视野设为「全部历史」。一屏能看到多少根 = 容器有多宽，能塞多少塞多少。
+ * 用户滚轮缩放后，间距按新视野重算，永远填满容器。
+ */
+const spacingBefore = "timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:8, barSpacing:6, tickMarkFormatter:";
+const spacingAfter = "timeScale:{ borderColor:'#30363d', timeVisible:false, rightOffset:2, tickMarkFormatter:";
+if (!out.includes(spacingBefore)) throw new Error('模板 barSpacing 写法变了，请更新 build-annotate.mjs 里的补丁');
+out = out.replace(spacingBefore, spacingAfter);
+
+const viewBefore = "chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, markIdx - 120), to: markIdx + 12 });";
+const viewAfter = `
+  // 按容器宽度把"全部历史"铺满：spacing 由宽度反推，库就不会再替你砍掉远处的 K 线
+  function fitAll(){
+    var w = el('chart').clientWidth || 900;
+    var n = Math.min(candles.length, 400);
+    var spacing = Math.max(1.2, w / n);
+    chart.applyOptions({ timeScale:{ barSpacing: spacing, rightOffset: 1 } });
+    chart.timeScale().setVisibleLogicalRange({ from: candles.length - n, to: candles.length + 1 });
+  }
+  fitAll();
+  window.addEventListener('resize', function(){ clearTimeout(window.__fitT); window.__fitT = setTimeout(fitAll, 120); });`;
+if (!out.includes(viewBefore)) throw new Error('模板初始视野代码变了，请更新 build-annotate.mjs 里的补丁');
+out = out.replace(viewBefore, viewAfter);
+
 const target = path.join(OUT, 'annotate-today.html');
 fs.writeFileSync(target, out);
 console.log(`写出 ${target}（${cards.length} 张卡，${(out.length / 1024 / 1024).toFixed(2)} MB）`);
