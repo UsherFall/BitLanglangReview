@@ -58,7 +58,7 @@ describe('App Chart Price', () => {
     expect(priceFormatterAt(0)).toBe(formatChartPrice);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('LUNA-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('LUNAUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
@@ -112,11 +112,11 @@ function makeFetch() {
     if (url.startsWith('/api/trades')) {
       return new Response(JSON.stringify({
         trades: [makeTrade()],
-        instruments: ['LUNA-USDT-SWAP'],
+        instruments: ['LUNAUSDT'],
         tags: [],
       }));
     }
-    if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['LUNA-USDT-SWAP'] }));
+    if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['LUNAUSDT'] }));
     if (url.startsWith('/api/free-replay/sessions')) {
       if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
       if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -134,7 +134,7 @@ function makeTrade() {
   return {
     id: 't1',
     sequence: 1,
-    instrument: 'LUNA-USDT-SWAP',
+    instrument: 'LUNAUSDT',
     direction: '多',
     leverage: 1,
     margin: 1,
@@ -157,7 +157,7 @@ function makeTrade() {
 
 function makeCandle(time: string) {
   return {
-    instrument: 'LUNA-USDT-SWAP',
+    instrument: 'LUNAUSDT',
     timeframe: '5m',
     timestamp: Date.parse(time),
     open: 0.0000123,

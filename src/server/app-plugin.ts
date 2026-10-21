@@ -40,6 +40,7 @@ import { fetchBinanceOnlyCandles, fetchReviewCandles, getBitgetCandles, getCandl
 import { loadTradesFromWorkbook } from './trade-import';
 import { binanceRateGate, bitgetMarketRateGate, type RateGate } from './http';
 import type { CandleSource, TickerSource } from './market-data';
+import type { CandleSourceId } from '../domain/candlestick';
 
 const workbookPath = findSourceWorkbook();
 
@@ -188,11 +189,17 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         try {
           // The Other Coin Panel reads from the same venue as the chart it sits
           // beside, so the list has to be named in that venue's vocabulary.
-          const source = url.searchParams.get('source') === 'okx' ? 'okx' : 'binance';
+          const raw = url.searchParams.get('source');
+          const source: CandleSourceId = raw === 'okx' || raw === 'bitget' ? raw : 'binance';
           const service = source === 'okx'
             ? { listTradableUsdtSymbols: () => Promise.resolve([]), listSwapInstruments: () => okxInstrumentService.listSwapInstruments() }
             : binanceInstrumentMetadata();
-          send(res, 200, await freeReplayInstrumentPayload(service, source));
+          // 10/21: the Bitget list is the ticker snapshot the coin scan already
+          // caches (30s TTL) - listing it costs no extra request.
+          const bitgetSymbols = source === 'bitget'
+            ? async () => (await bitgetTickerSource.listTickers()).map((ticker) => ticker.instrument)
+            : undefined;
+          send(res, 200, await freeReplayInstrumentPayload(service, source, bitgetSymbols));
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load instruments' });
         }

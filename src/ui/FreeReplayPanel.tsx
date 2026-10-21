@@ -4,7 +4,7 @@ import 'flatpickr/dist/themes/dark.css';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import type { ReviewTimeframe } from '../domain/trade';
 import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
-import { FREE_REPLAY_CANDLE_GRID } from './free-replay-chart';
+import { FREE_REPLAY_CANDLE_GRID, FREE_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
 import type { PaperTradingSession } from './free-replay-paper-trading';
 
 type InstrumentResponse = {
@@ -12,6 +12,11 @@ type InstrumentResponse = {
 };
 
 export type FreeReplayStart = {
+  /**
+   * Which venue's candles this replay reads (10/21). Optional: a session
+   * recorded before the move has none and keeps its original venue.
+   */
+  candleSource?: string;
   instrument: string;
   startTime: string;
   dataAnchorTime: string;
@@ -60,7 +65,9 @@ export function FreeReplayPanel({
   const sessionList = sessions ?? [];
 
   useEffect(() => {
-    fetch('/api/free-replay/instruments')
+    // 10/21: the panel lists the venue the replay will actually use.
+    // Free Replay replays Bitget positions, so it lists Bitget symbols.
+    fetch(`/api/free-replay/instruments?source=${FREE_REPLAY_CANDLE_SOURCE}`)
       .then((response) => response.json())
       .then((next: InstrumentResponse) => {
         setInstruments(next.instruments);
@@ -136,6 +143,9 @@ export function FreeReplayPanel({
           progressTime,
           startCursorTime: cursorTime,
           cursorTime,
+          // 10/21: the session records the venue it will be replayed
+          // against, so it keeps this venue even if the default moves.
+          candleSource: FREE_REPLAY_CANDLE_SOURCE,
         });
       }}>开始回溯复盘</button>
       <div className="replay-controls">

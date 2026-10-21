@@ -26,7 +26,7 @@ import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload,
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
-import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, FREE_REPLAY_CANDLE_GRID, FREE_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
+import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, replayCandleGrid, replayCandleSource, FREE_REPLAY_CANDLE_GRID, FREE_REPLAY_CANDLE_SOURCE, LEGACY_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
 import {
   availableMargin,
   cancelPendingOrder,
@@ -474,7 +474,7 @@ export function App() {
     setFreeReplay({
       ...freeReplay,
       progressTime,
-      cursorTime: freeReplayCursorTimeForProgress(progressTime, timeframe),
+      cursorTime: freeReplayCursorTimeForProgress(progressTime, timeframe, replayCandleGrid(freeReplay)),
     });
   }
 
@@ -483,8 +483,8 @@ export function App() {
     setFreeReplay((current) => current ? {
       ...current,
       dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
-      startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe, FREE_REPLAY_CANDLE_GRID),
-      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe, FREE_REPLAY_CANDLE_GRID),
+      startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe, replayCandleGrid(current)),
+      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe, replayCandleGrid(current)),
     } : current);
   }
 
@@ -512,6 +512,9 @@ export function App() {
     }
     setFreeReplay({
       instrument: payload.instrument,
+      // 10/21: a session recorded before the move has no `candleSource` and
+      // keeps replaying against Binance; a new one replays against its own.
+      candleSource: payload.candleSource ?? LEGACY_REPLAY_CANDLE_SOURCE,
       startTime: payload.startTime,
       // Anchor the data window on the restored cursor rather than the session
       // start: a replay that advanced past the initial window would otherwise
@@ -1280,7 +1283,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
     initializedRangeKeyRef.current = '';
-    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: FREE_REPLAY_CANDLE_SOURCE });
+    const params = new URLSearchParams({ instrument: replay.instrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: replayCandleSource(replay) });
     fetchCandles(params)
       .then((candles) => {
         const merged = mergeCandles(candles);

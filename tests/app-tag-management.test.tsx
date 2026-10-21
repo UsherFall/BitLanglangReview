@@ -106,7 +106,7 @@ function makeFetch(state: TradeState) {
       }
       return new Response(JSON.stringify({ review: trade?.review, ...tagPayload(state.trades) }));
     }
-    if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+    if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
     if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [] }));
     if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
     return new Response(JSON.stringify({}));

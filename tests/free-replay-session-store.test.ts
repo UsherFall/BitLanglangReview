@@ -62,3 +62,37 @@ describe('Free Replay Session Store', () => {
     expect(store.listSessions().map((session) => session.instrument)).toEqual(['ETH-USDT-SWAP']);
   });
 });
+
+describe('Free Replay Session Store · 记录回放用的行情源（10/21）', () => {
+  const base = {
+    instrument: 'BTCUSDT',
+    startTime: '2024-05-21 10:00',
+    dataAnchorTime: '2024-05-21 10:00',
+    startCursorTime: 1716267600,
+    startProgressTime: 1716268800,
+    progressTime: 1716269400,
+    cursorTime: 1716268800,
+    timeframe: '5m',
+    paperTrading: { active: false, trades: [] },
+  };
+
+  it('存取 candleSource', () => {
+    const store = new FreeReplaySessionStore(':memory:');
+
+    const saved = store.saveSession({ ...base, candleSource: 'bitget' });
+
+    expect(saved.candleSource).toBe('bitget');
+    expect(store.listSessions()[0]?.candleSource).toBe('bitget');
+    store.close();
+  });
+
+  it('没有 candleSource 的旧会话读成 undefined（按旧行为：币安）', () => {
+    const store = new FreeReplaySessionStore(':memory:');
+
+    const saved = store.saveSession({ ...base });
+
+    expect(saved.candleSource).toBeUndefined();
+    expect(store.listSessions()[0]?.candleSource).toBeUndefined();
+    store.close();
+  });
+});

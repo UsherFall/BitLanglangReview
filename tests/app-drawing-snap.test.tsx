@@ -207,7 +207,7 @@ describe('App drawing magnet snap in Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
@@ -234,7 +234,7 @@ describe('App drawing magnet snap in Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
@@ -288,7 +288,7 @@ function makeFetch() {
     if (url.startsWith('/api/trades')) {
       return new Response(JSON.stringify({
         trades: [makeTrade()],
-        instruments: ['BTC-USDT-SWAP'],
+        instruments: ['BTCUSDT'],
         tags: [],
       }));
     }
@@ -311,7 +311,7 @@ function makeTrade() {
   return {
     id: 't1',
     sequence: 1,
-    instrument: 'BTC-USDT-SWAP',
+    instrument: 'BTCUSDT',
     direction: '多',
     leverage: 1,
     margin: 1,
@@ -334,7 +334,7 @@ function makeTrade() {
 
 function makeCandle(time: string, ohlc: { open: number; high: number; low: number; close: number }) {
   return {
-    instrument: 'BTC-USDT-SWAP',
+    instrument: 'BTCUSDT',
     timeframe: '5m',
     timestamp: Date.parse(time),
     volume: 10,
@@ -349,8 +349,8 @@ function makeFreeReplayFetch() {
     if (url.startsWith('/api/trades')) {
       return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
     }
-    if (url === '/api/free-replay/instruments') {
-      return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+    if (url.startsWith('/api/free-replay/instruments')) {
+      return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
     }
     if (url.startsWith('/api/free-replay/sessions')) {
       if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));

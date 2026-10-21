@@ -5,6 +5,16 @@ import Database from 'better-sqlite3';
 // types, mirroring how chart drawing points are stored as points_json.
 export type FreeReplaySessionPayload = {
   instrument: string;
+  /**
+   * Which venue's candles this session replays against (10/21).
+   *
+   * The Free Replay panel moved to the Bitget source, but the sessions stored
+   * BEFORE that move were recorded against Binance. The field is therefore
+   * OPTIONAL: an absent value means "the old behaviour" (Binance), so an old
+   * session keeps replaying exactly as it did instead of silently switching
+   * venues under the user's feet.
+   */
+  candleSource?: string;
   startTime: string;
   dataAnchorTime: string;
   startCursorTime: number;
@@ -20,6 +30,7 @@ export type SaveFreeReplaySessionInput = Omit<FreeReplaySessionPayload, 'updated
 
 type SessionRow = {
   instrument: string;
+  candle_source: string | null;
   start_time: string;
   timeframe: string;
   data_anchor_time: string;
@@ -40,6 +51,7 @@ export class FreeReplaySessionStore {
     this.db.exec(`
       create table if not exists free_replay_sessions (
         instrument          text not null,
+        candle_source       text,
         start_time          text not null,
         timeframe           text not null,
         data_anchor_time    text not null,
@@ -52,6 +64,40 @@ export class FreeReplaySessionStore {
         primary key (instrument, start_time)
       );
     `);
+    this.allowCandleSourceColumn();
+  }
+
+  /**
+   * Adds the optional `candle_source` column (10/21).
+   *
+   * The migration copies the table rather than running `alter table ... add
+   * column`, matching the pattern `drawing-store.ts` established: the rebuild
+   * works on every SQLite build the app may run against. Existing rows keep
+   * NULL, which reads as "the old behaviour" (Binance).
+   */
+  private allowCandleSourceColumn(): void {
+    if (columnExists(this.db, 'free_replay_sessions', 'candle_source')) return;
+    this.db.exec(`
+      alter table free_replay_sessions rename to free_replay_sessions_old;
+      create table free_replay_sessions (
+        instrument          text not null,
+        candle_source       text,
+        start_time          text not null,
+        timeframe           text not null,
+        data_anchor_time    text not null,
+        start_cursor_time   integer not null,
+        start_progress_time integer not null,
+        progress_time       integer not null,
+        cursor_time         integer not null,
+        paper_trading_json  text not null,
+        updated_at          text not null,
+        primary key (instrument, start_time)
+      );
+      insert into free_replay_sessions (instrument, candle_source, start_time, timeframe, data_anchor_time, start_cursor_time, start_progress_time, progress_time, cursor_time, paper_trading_json, updated_at)
+        select instrument, null, start_time, timeframe, data_anchor_time, start_cursor_time, start_progress_time, progress_time, cursor_time, paper_trading_json, updated_at
+        from free_replay_sessions_old;
+      drop table free_replay_sessions_old;
+    `);
   }
 
   listSessions(): FreeReplaySessionPayload[] {
@@ -63,9 +109,10 @@ export class FreeReplaySessionStore {
     const updatedAt = new Date().toISOString();
     this.db
       .prepare(
-        `insert into free_replay_sessions (instrument, start_time, timeframe, data_anchor_time, start_cursor_time, start_progress_time, progress_time, cursor_time, paper_trading_json, updated_at)
-         values (@instrument, @startTime, @timeframe, @dataAnchorTime, @startCursorTime, @startProgressTime, @progressTime, @cursorTime, @paperTradingJson, @updatedAt)
+        `insert into free_replay_sessions (instrument, candle_source, start_time, timeframe, data_anchor_time, start_cursor_time, start_progress_time, progress_time, cursor_time, paper_trading_json, updated_at)
+         values (@instrument, @candleSource, @startTime, @timeframe, @dataAnchorTime, @startCursorTime, @startProgressTime, @progressTime, @cursorTime, @paperTradingJson, @updatedAt)
          on conflict(instrument, start_time) do update set
+           candle_source = excluded.candle_source,
            timeframe = excluded.timeframe,
            data_anchor_time = excluded.data_anchor_time,
            start_cursor_time = excluded.start_cursor_time,
@@ -77,6 +124,7 @@ export class FreeReplaySessionStore {
       )
       .run({
         instrument: input.instrument,
+        candleSource: input.candleSource ?? null,
         startTime: input.startTime,
         timeframe: input.timeframe,
         dataAnchorTime: input.dataAnchorTime,
@@ -87,7 +135,9 @@ export class FreeReplaySessionStore {
         paperTradingJson: JSON.stringify(input.paperTrading),
         updatedAt,
       });
-    return { ...input, updatedAt };
+    // The venue is echoed back, so a caller that just saved a session can
+    // read which venue it will replay against.
+    return { ...input, candleSource: input.candleSource ?? undefined, updatedAt };
   }
 
   deleteSession(instrument: string, startTime: string): void {
@@ -102,6 +152,7 @@ export class FreeReplaySessionStore {
 function toSessionPayload(row: SessionRow): FreeReplaySessionPayload {
   return {
     instrument: row.instrument,
+    candleSource: row.candle_source ?? undefined,
     startTime: row.start_time,
     dataAnchorTime: row.data_anchor_time,
     startCursorTime: row.start_cursor_time,
@@ -112,4 +163,10 @@ function toSessionPayload(row: SessionRow): FreeReplaySessionPayload {
     paperTrading: JSON.parse(row.paper_trading_json),
     updatedAt: row.updated_at,
   };
+}
+
+/** Whether the table already carries the column. */
+function columnExists(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
 }

@@ -249,8 +249,8 @@ describe('OtherCoinChart in Free Replay', () => {
       return { candles: makeSeries('2026-05-21T09:50:00+08:00', 5, 3) };
     });
 
-    // Replay mode is bound to Binance, so its opening instrument must be a
-    // Binance symbol. Defaulting to the OKX name made the panel's first load
+    // Replay mode reads Bitget (10/21), so its opening instrument must be a
+    // Bitget symbol. Defaulting to the OKX name made the panel's first load
     // fail outright (`Binance request failed: HTTP 400`).
     const { unmount } = render(
       <OtherCoinChart entryTime="2024-05-21T10:00:00.000Z" timeframe="5m" cursorTime={CURSOR_1000} onClose={() => {}} />,
@@ -292,10 +292,10 @@ describe('OtherCoinChart in Free Replay', () => {
       <OtherCoinChart entryTime="2024-05-21T10:00:00+08:00" timeframe="5m" candleSource="binance" onClose={() => {}} />,
     );
     await waitFor(() => expect(personal.length).toBeGreaterThan(0));
-    // `binance-only`, not the candidate chain: the panel already holds a native
+    // `binance`, not the candidate chain: the panel already holds a native
     // Binance symbol from the instrument list, and the chain only matches
     // `*-USDT-SWAP`, so it would answer with an empty window.
-    expect(personal[0].source).toBe('binance-only');
+    expect(personal[0].source).toBe('binance');
     // The Binance panel must open on a Binance symbol, not the OKX default.
     expect(personal[0].instrument).toBe('BTCUSDT');
     unmount();
@@ -319,7 +319,7 @@ describe('OtherCoinChart in Free Replay', () => {
     expect(workbook[0].instrument).toBe('BTC-USDT-SWAP');
   });
 
-  it('offers instruments its own source can actually load', async () => {
+  it('offers instruments its own source can actually load (10/21: the venue is the one it is told)', async () => {
     // The regression this guards: the panel listed Binance symbols
     // (`BTCUSDT`) while requesting the candidate chain, which only accepts
     // OKX-style names and answers a Binance symbol with an empty window. The
@@ -349,8 +349,8 @@ describe('OtherCoinChart in Free Replay', () => {
     expect(listSources).toEqual(['binance']);
     // `binance` (the candidate chain) would swallow a Binance symbol; the
     // panel already knows the native symbol, so it reads Binance directly.
-    expect(candleSources[0]).toBe('binance-only');
-    expect(listSources[0]).toBe(candleSources[0] === 'binance-only' ? 'binance' : 'okx');
+    expect(candleSources[0]).toBe('binance');
+    expect(listSources[0]).toBe(candleSources[0] === 'binance' ? 'binance' : 'okx');
     unmount();
 
     // Trade review: the panel is OKX-backed, so it needs OKX names.

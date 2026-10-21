@@ -22,10 +22,18 @@ type InstrumentService = {
 export async function freeReplayInstrumentPayload(
   instrumentService: InstrumentService,
   source: CandleSourceId = 'binance',
+  /** 10/21: the Bitget symbol list, taken from the scan's ticker cache. */
+  bitgetSymbols?: () => Promise<string[]>,
 ): Promise<{ instruments: string[] }> {
   if (source === 'okx') {
     if (!instrumentService.listSwapInstruments) return { instruments: [] };
     return { instruments: await instrumentService.listSwapInstruments() };
+  }
+  if (source === 'bitget') {
+    // 10/21: the Bitget list comes from the ticker snapshot the coin scan
+    // already keeps (30s TTL), so listing it costs no extra request.
+    if (!bitgetSymbols) return { instruments: [] };
+    return { instruments: await bitgetSymbols() };
   }
   return { instruments: await instrumentService.listTradableUsdtSymbols() };
 }

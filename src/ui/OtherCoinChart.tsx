@@ -9,12 +9,12 @@ import { useChartDrawings } from './chart-drawing';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { formatChartPrice } from './chart-price';
 import { entryVisibleRange, formatChartTime, markerTimeForEvent, timeframeMs, type CandleGrid } from './chart-time';
-import { FREE_REPLAY_CANDLE_GRID, FREE_REPLAY_CANDLE_SOURCE, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
+import { LEGACY_REPLAY_CANDLE_GRID, replayCandleSource, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 
 // Opening instrument, per source: the panel must start on a symbol its own
 // source can resolve, or the first render asks for a contract that venue does
 // not carry (OKX names in trade review, Binance symbols in Free Replay).
-const DEFAULT_INSTRUMENT_BY_SOURCE: Record<string, string> = { okx: 'BTC-USDT-SWAP', binance: 'BTCUSDT' };
+const DEFAULT_INSTRUMENT_BY_SOURCE: Record<string, string> = { okx: 'BTC-USDT-SWAP', binance: 'BTCUSDT', bitget: 'BTCUSDT' };
 
 type InstrumentResponse = {
   instruments: string[];
@@ -62,16 +62,26 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
   onClose: () => void;
 }) {
   const isReplay = cursorTime != null;
-  // Replay is bound to Binance on its own (no OKX fallback). Elsewhere the panel
-  // follows the chart it sits beside. Venue and grid travel together: a request
-  // to one venue floored on the other's grid lands between candlesticks.
-  const venue: CandleSourceId = isReplay ? 'binance' : candleSource;
-  const grid: CandleGrid = venue === 'binance' ? FREE_REPLAY_CANDLE_GRID : 'shanghai';
+  // Venue and grid travel together: a request to one venue floored on the
+  // other's grid lands between candlesticks.
+  //
+  // 10/21: the panel reads the venue it is TOLD to. Before, a replay forced
+  // `binance` and every other mode was ignored - so the replay's own venue
+  // (Bitget) could not be honoured, and a `source=bitget` panel silently read
+  // Binance instead. The replay's venue comes from the session (see
+  // `replayCandleSource`); a plain panel just uses the caller's `candleSource`.
+  // A replay panel is not told a venue by the caller - it inherits the
+  // session's (10/21). The `candleSource` prop defaults to OKX, so it cannot
+  // be the fallback here: the replay's own source is the only correct answer.
+  const venue: CandleSourceId = isReplay
+    ? (replayCandleSource(null) as CandleSourceId)
+    : candleSource;
+  const grid: CandleGrid = venue === 'binance' ? LEGACY_REPLAY_CANDLE_GRID : 'shanghai';
   // The panel picks from a venue-specific instrument list, so it always knows
-  // the native symbol already and never needs the candidate chain — that chain
+  // the native symbol already and never needs the candidate chain - that chain
   // exists to translate a *trade's* OKX-style name, and it returns an empty
   // window for a Binance symbol.
-  const requestSource = venue === 'binance' ? FREE_REPLAY_CANDLE_SOURCE : venue;
+  const requestSource = venue;
   const chartRef = useRef<HTMLDivElement>(null);
   const chartWrapRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);

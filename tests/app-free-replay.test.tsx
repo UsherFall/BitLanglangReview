@@ -70,7 +70,7 @@ describe('App Free Replay', () => {
   it('keeps the workspace rendered after starting Free Replay', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -92,11 +92,11 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
     expect(screen.queryByText('选择交易对和开始时间，开始回溯复盘')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
@@ -106,7 +106,7 @@ describe('App Free Replay', () => {
   it('collapses the whole sidebar via the explicit collapse button', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -131,7 +131,7 @@ describe('App Free Replay', () => {
   it('supports a paper trading market open and close during Free Replay', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -152,7 +152,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -170,7 +170,7 @@ describe('App Free Replay', () => {
   it('scrolls the Free Replay viewport without changing zoom when advancing the cursor', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -193,7 +193,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
@@ -211,7 +211,7 @@ describe('App Free Replay', () => {
   it('starts Free Replay with the cursor visible and right-side padding', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -234,7 +234,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
@@ -248,7 +248,7 @@ describe('App Free Replay', () => {
   it('toggles Free Replay paper trade entry and exit markers', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -269,7 +269,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -301,7 +301,7 @@ describe('App Free Replay', () => {
   it('sets a stop loss and closes automatically when the next revealed candle touches it', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -322,7 +322,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -344,7 +344,7 @@ describe('App Free Replay', () => {
   it('shows Free Replay hover percentage from the latest revealed candle close', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -365,7 +365,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -384,7 +384,7 @@ describe('App Free Replay', () => {
   it('defaults the Free Replay price scale to log and toggles back to normal', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -398,7 +398,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -416,7 +416,7 @@ describe('App Free Replay', () => {
   it('remaps Free Replay paper trade markers after switching timeframe', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -443,7 +443,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -474,7 +474,7 @@ describe('App Free Replay', () => {
     const candleRequests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -504,7 +504,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:35' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -555,7 +555,7 @@ describe('App Free Replay', () => {
     const candleRequests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -599,7 +599,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:35' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -618,7 +618,7 @@ describe('App Free Replay', () => {
     const candleRequests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -639,7 +639,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:05' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -662,7 +662,7 @@ describe('App Free Replay', () => {
   it('auto-saves the session with the advanced cursor after a reveal', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -685,7 +685,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
@@ -704,7 +704,7 @@ describe('App Free Replay', () => {
   it('auto-saves the paper trading session after a paper trading action', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -726,7 +726,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
@@ -743,7 +743,7 @@ describe('App Free Replay', () => {
     const seeded = [makeSeededSession()];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -766,11 +766,11 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
 
-    fireEvent.click(screen.getByRole('button', { name: /^BTC-USDT-SWAP/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT/ }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '15m' }).className).toContain('selected');
     expect(screen.getByLabelText('市价开仓')).toBeInTheDocument();
 
@@ -786,7 +786,7 @@ describe('App Free Replay', () => {
     const seeded = [makeSeededSession()];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -809,11 +809,11 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTC-USDT-SWAP' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
     expect(screen.getByRole('button', { name: '15m' }).className).toContain('selected');
     expect(screen.getByLabelText('市价开仓')).toBeInTheDocument();
   });
@@ -821,7 +821,7 @@ describe('App Free Replay', () => {
   it('deletes the active session, stops replay, and does not re-save it', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -843,19 +843,19 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByLabelText('删除会话 BTC-USDT-SWAP 2024-05-21 10:00')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText('删除会话 BTCUSDT 2024-05-21 10:00')).toBeInTheDocument());
 
     const beforeDelete = sessionPutBodies().length;
-    fireEvent.click(screen.getByLabelText('删除会话 BTC-USDT-SWAP 2024-05-21 10:00'));
+    fireEvent.click(screen.getByLabelText('删除会话 BTCUSDT 2024-05-21 10:00'));
 
     await waitFor(() => expect(screen.getByText('选择交易对和开始时间，开始回溯复盘')).toBeInTheDocument());
     expect(screen.queryByLabelText('开始模拟交易')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('删除会话 BTC-USDT-SWAP 2024-05-21 10:00')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('删除会话 BTCUSDT 2024-05-21 10:00')).not.toBeInTheDocument();
 
     await new Promise((resolve) => window.setTimeout(resolve, 700));
     expect(sessionPutBodies().length).toBe(beforeDelete);
@@ -867,7 +867,7 @@ describe('App Free Replay', () => {
     const candleRequests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -884,8 +884,8 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
-    fireEvent.click(screen.getByRole('button', { name: /^BTC-USDT-SWAP/ }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT/ }));
 
     await waitFor(() => expect(candleRequests.some((url) => url.includes('mode=initial'))).toBe(true));
     const initialParams = new URL(`http://localhost${candleRequests.find((url) => url.includes('mode=initial'))}`).searchParams;
@@ -897,7 +897,7 @@ describe('App Free Replay', () => {
     let laterCalls = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -929,7 +929,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
@@ -958,7 +958,7 @@ describe('App Free Replay', () => {
     let laterCalls = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -982,7 +982,7 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
     await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
@@ -1005,7 +1005,7 @@ describe('App Free Replay', () => {
     const serverError = 'Binance request failed: HTTP 418 (Binance IP auto-banned; retry after ~1659s)';
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTC-USDT-SWAP'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -1019,19 +1019,19 @@ describe('App Free Replay', () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTC-USDT-SWAP'));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
     fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
     fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
 
     await waitFor(() => expect(screen.getByText(serverError)).toBeInTheDocument());
   });
 
-  it('requests every Free Replay candle window from Binance, never OKX', async () => {
+  it('requests every Free Replay candle window from Bitget, never OKX (10/21)', async () => {
     const candleRequests: string[] = [];
     let laterCalls = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -1068,23 +1068,23 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
     await waitFor(() => expect(laterCalls).toBeGreaterThanOrEqual(1));
 
-    // Without `source=binance-only` the server falls through to OKX, which
+    // Without an explicit `source` the server falls through to OKX, which
     // charts a different price scale for the same instrument — the QNT case
     // (OKX 46.5 vs Binance 263.5) that motivated this binding.
     expect(candleRequests.length).toBeGreaterThan(0);
     for (const request of candleRequests) {
       const params = new URL(`http://localhost${request}`).searchParams;
-      expect(params.get('source')).toBe('binance-only');
+      expect(params.get('source')).toBe('bitget');
       expect(params.get('instrument')).toBe('BTCUSDT');
     }
     expect(candleRequests.map((r) => new URL(`http://localhost${r}`).searchParams.get('mode'))).toContain('initial');
   });
 
-  it('opens the other-coin panel on the Binance source inside Free Replay', async () => {
+  it('opens the other-coin panel on the replay source inside Free Replay', async () => {
     const panelOpens: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url === '/api/free-replay/instruments') return new Response(JSON.stringify({ instruments: ['BTCUSDT', 'ETHUSDT'] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT', 'ETHUSDT'] }));
       if (url.startsWith('/api/free-replay/sessions')) {
         if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
         if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
@@ -1117,14 +1117,14 @@ describe('App Free Replay', () => {
     // The panel issues its own initial load; those requests must be Binance too.
     await waitFor(() => expect(panelOpens.length).toBeGreaterThan(beforePanel));
     for (const request of panelOpens) {
-      expect(request.split(':')[0]).toBe('binance-only');
+      expect(request.split(':')[0]).toBe('bitget');
     }
   });
 });
 
 function makeCandle(time: string, overrides = {}) {
   return {
-    instrument: 'BTC-USDT-SWAP',
+    instrument: 'BTCUSDT',
     timeframe: '5m',
     timestamp: Date.parse(time),
     open: 1,
@@ -1139,7 +1139,7 @@ function makeCandle(time: string, overrides = {}) {
 function makeSeededSession(overrides: Partial<Record<'startTime' | 'dataAnchorTime' | 'timeframe', string> & { cursorTime: number }> = {}) {
   const cursorTime = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
   return {
-    instrument: 'BTC-USDT-SWAP',
+    instrument: 'BTCUSDT',
     startTime: '2024-05-21 10:00',
     dataAnchorTime: '2024-05-21 10:00',
     startCursorTime: Date.parse('2024-05-21T09:45:00+08:00') / 1000,
