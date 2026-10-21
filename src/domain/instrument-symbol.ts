@@ -19,7 +19,7 @@ function okxBaseAsset(instId: string): string | null {
  * 为什么需要（10/21）：画线存在 `drawing-store` 里，用的是画线那张图的
  * instrument —— 交割单复盘是 OKX 名（`BTC-USDT-SWAP`），选品扫描的池子却是
  * Bitget/Binance 名（`BTCUSDT`）。扫描服务按 instrument 精确匹配，一根线都
- * 匹配不上，于是「距你标的线」永远是 `—`。
+ * 匹配不上，于是「距线」永远是 `—`。
  *
  * 规则（大小写不敏感）：
  *   `BTC-USDT-SWAP` → `BTCUSDT`

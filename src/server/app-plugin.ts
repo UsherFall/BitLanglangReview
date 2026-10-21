@@ -101,8 +101,9 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // Both services are stateless across requests, so one instance per source
       // is enough — and `MarketHeatService`'s anchor cache is per source by
       // construction, which is the isolation the scan's source switching needs.
-      // The drawing store comes first: the scan measures "距你标的线" from the
-      // levels the user drew, so it needs the store at construction time.
+      // The drawing store comes first: both the shrink scan and the 标线监控
+      // view measure 距线 (the distance to the user's drawn levels), so they need
+      // the store at construction time.
       const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const coinScanServices = buildPerSource((source) => {
         const { tickerSource, candleSource, gate } = marketSources[source];
@@ -350,6 +351,22 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           }
           try {
             send(res, 200, await marketHeatServices[source].computeHeat({ anchor: anchor ?? Date.now() }));
+          } catch (error) {
+            send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
+          }
+          return;
+        }
+        if (method === 'watch') {
+          // 标线监控 (10/21): the row set is the user's own drawn lines, so
+          // scope / topN / the volume floor do not apply — only the source and
+          // an optional anchor do. The scope param is still legality-checked
+          // above, but it is not part of the watch contract.
+          const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
+          if (anchor !== undefined && anchor <= 0) {
+            return send(res, 400, { error: 'Invalid scan parameters' });
+          }
+          try {
+            send(res, 200, await coinScanServices[source].scanWatch({ method: 'watch', source, anchor }));
           } catch (error) {
             send(res, 502, { error: error instanceof Error ? error.message : 'Scan failed' });
           }

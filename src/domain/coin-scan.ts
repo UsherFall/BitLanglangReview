@@ -318,8 +318,10 @@ export type ScanRow = {
   change24h: number;
   quoteVolume24h: number;
   /**
-   * 距你标的线, per timeframe (scanTimeframes order).
+   * 距线, per timeframe (scanTimeframes order).
    * `null` for a timeframe with no drawn line (or no candles to measure against).
+   * 10/21 起该读数同时出现在「主升浪候选」(shrink) 的行内和「标线监控」(watch)
+   * 的行里 —— 两边共用同一条测量代码路径。
    */
   levelAlerts: Record<ReviewTimeframe, LevelAlert | null>;
   /**
@@ -400,5 +402,45 @@ export type ScanResponse = {
    * Present only when at least one level degraded.
    */
   levelScaleNotes?: string[];
+};
+
+/**
+ * 标线监控 (`method=watch`) 的参数。刻意最小：监控的行集合是「你画了线的币」，
+ * 不是候选池 —— 没有品种、成交额下限或数量上限可配。10/21 与「主升浪候选」
+ * (shrink) 一起成为选品的两步：粗筛扫候选(shrink) → 你标线 → 持续跟进(watch)。
+ */
+export type LevelWatchParams = {
+  method: 'watch';
+  /** 回显用 —— 路由解析并校验它，与 shrink 扫描同一套规则。 */
+  source?: MarketDataSource;
+  /** 监控锚点 (epoch ms)：缺省 → 现在（K 线刷新）；给定 → 回放该时刻的距线状态。 */
+  anchor?: number;
+};
+
+/**
+ * `method=watch` 的响应：每个被用户画了线的币一行 —— 行入选标准与 shrink 扫描
+ * 相反。shrink 的行是「1D 粗筛存活的币」（距线是行内读数），watch 的行是
+ * 「drawing-store 里有线的币」（canonical 匹配、跨周期并集），**不经过粗筛**：
+ * 画了线但已不满足盘整口径的币照样出现 —— 监控对象不随行情口径漂移丢失。
+ *
+ * 距线数值与 shrink 扫描共用同一条代码路径（`coin-scan-service.ts` 的
+ * `measureLevelAlert`），所以同一时刻两边必然一致。
+ */
+export type LevelWatchResponse = {
+  /** 画了线且当前行情源解析得到的币，按「离线最近」排序（与 shrink 同一键）。 */
+  scanned: ScanRow[];
+  params: LevelWatchParams;
+  scannedAt: string;
+  /** 限频退避（Binance 429），与 shrink 同义。 */
+  warnings?: string[];
+  /** 取数失败的币 —— 与 shrink 的 stage-2 同规则：该行删除而非半测量。 */
+  failedInstruments?: string[];
+  /** 线无法换算到本行情源价位的退化说明（10/21，与 shrink 同义）。 */
+  levelScaleNotes?: string[];
+  /**
+   * 画了线但当前行情源解析不到的币（canonical 名在 ticker 列表里没有对应）。
+   * 与 failedInstruments 是两个通道：一个叫你「换源看」，一个叫你「看这只币」。
+   */
+  missingInstruments?: string[];
 };
 

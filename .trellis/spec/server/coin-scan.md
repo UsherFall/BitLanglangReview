@@ -2,29 +2,33 @@
 
 ## 1. Scope / Trigger
 
-The 选品 (Instrument Scan; renamed from 选币 09/16) module finds instruments by pluggable scan methods, split into two sub-modules: **Crypto Scope** (加密: crypto + indices + commodities) and **Equity Scope** (股票: US + Korean equities). The two pools are disjoint and scanned separately, each with its own parameter defaults. V1 ships only the **shrink** (收敛结构) method; 09/08 adds the **heat** (热度) method, which returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`) and exists **only in the crypto scope**. It scans a parameterized universe of **Bitget USDT-FUTURES perpetuals** by default (10/12). The source is selectable **per request** via the `source` query param (the panel's 行情源 selector, 10/12); `MARKET_DATA_SOURCE` / `.env` (shell env wins) / Bitget only decide the **default selection** — one of `binance` (USDT-M) / `okx` (SWAP) / `bitget` (USDT-FUTURES), see `market-data.md`. It detects **波动率收敛** (volatility convergence): a recent band whose per-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". **Volume plays no role** — the user's stance is "看裸 K". The pool is derived from the ticker source after three filters: the **scan pool policy** (which classes are covered at all), the requested **scan scope** (which sub-module), and **session gating** (which instruments are open at the anchor). The 24h-volume floor is a low rail, NOT a selector, and `topN` is only an optional cap — the pool is the whole scannable universe of the scope (10/13; see "The pool is the whole scope universe, screened on 1D percentiles (10/13)").
+The 选品 (Instrument Scan; renamed from 选币 09/16) module finds and follows instruments by pluggable scan methods, split into two sub-modules: **Crypto Scope** (加密: crypto + indices + commodities) and **Equity Scope** (股票: US + Korean equities). The two pools are disjoint and scanned separately, each with its own parameter defaults. It scans a parameterized universe of **Bitget USDT-FUTURES perpetuals** by default (10/12). The source is selectable **per request** via the `source` query param (the panel's 行情源 selector, 10/12); `MARKET_DATA_SOURCE` / `.env` / Bitget only decide the **default selection** — one of `binance` (USDT-M) / `okx` (SWAP) / `bitget` (USDT-FUTURES), see `market-data.md`. The pool is derived from the ticker source after three filters: the **scan pool policy** (which classes are covered at all), the requested **scan scope** (which sub-module), and **session gating** (which instruments are open at the anchor). The 24h-volume floor is a low rail, NOT a selector, and `topN` is only an optional cap — the pool is the whole scannable universe of the scope (10/13).
 
-**The scan runs in two stages** (10/13): the coarse timeframe (1D) is fetched for the WHOLE candidate pool and screened on its own percentiles ("盘得够久 + 收住了 + 不在趋势中"), and only the survivors pay for the remaining four timeframes. Row inclusion IS that 1D coarse screen — the per-timeframe convergence columns are still computed and reported for the survivors, but they no longer decide who is in the list.
+The module is a two-step pipeline (10/21):
 
-**Candle series is session-only** (09/16): for a session-gated instrument the detector never sees candles that contain no trading time — closed-market stretches are dropped from the series before `probeStructure` runs, and 2× the raw window is requested to compensate. Ungated classes (crypto, commodity) keep every candle. See "Design Decisions".
+1. **主升浪候选** (`method=shrink`, both scopes) — the candidate half, labeled 「主升浪候选」 since 10/21 (briefly mislabeled 「距你标的线」, which described only the row's readout). The **1D coarse screen** decides which instruments become rows (盘得够久 + 收住了 + 不在趋势中, pool-relative percentile cuts plus the absolute position floor), and each row reports **距线** — how far the price sits from a level the USER drew on that instrument (see the 10/21 design entries below). The user's stance (10/21): 「主要找的还是盘整有机会开主升浪的币」 — the screen finds 盘整 candidates; which candidate is worth watching stays a human judgement, expressed through the drawn lines.
+2. **标线监控** (`method=watch`, 10/21, both scopes) — the follow-up half. Rows are every instrument with a drawn line (canonical matching, union across the five scan timeframes), NOT the screen's survivors: a marked coin stays in the watch list after it stops satisfying the 盘整 gates — the point of watching is exactly what happens after the box breaks down or trends. It crosses scopes, includes closed markets, and resolves the marked instruments against the CURRENT source — a marked instrument this source cannot carry is reported in `missingInstruments`, never silently dropped.
 
-**The fractal triangle module was removed** (8/13, user decision): swing detection, backscan, and geometry classification are gone. The scan is purely volatility-driven — there is only one structure kind, `'convergence'`. A rising/falling TREND is rejected by the band's flatness gate, not by a separate triangle detector.
+The **heat** method (09/08) returns the review market-temperature reading (constant Binance Top80 pool, see `market-heat.md`) and exists **only in the crypto scope**. The **box-braces** method (`method=box`, 10/18) detects 箱体蓄力 — it is served and tested but has NO panel entry as of 10/21.
 
-**All measures are RELATIVE** (8/13, user decision): there is no coin-own "typical volatility" baseline and no absolute threshold — the band is compared only to the same-length preceding stretch, because each coin's volatility differs.
+The automatic convergence detector is GONE (10/20): nine attempts failed and the user ruled 「收敛算法实现不了」 — the lines are always user-drawn and the scan only measures distance. Volume plays no role — the user's stance is "看裸 K".
 
-**One click scans all 5 timeframes** (5m/15m/1H/4H/1D) with a **uniform candle window** (100 bars for every timeframe; the lookback does not vary with the period). The coarse timeframe is fetched FIRST and alone; the other four only for its survivors. The result is **one row per coarse-screen survivor** with a 结构 column (the 1D measures) and a 收敛结构 column; a surviving coin appears even when it converges on no timeframe at all.
+**The candidate scan runs in two stages** (10/13): the coarse timeframe (1D) is fetched for the WHOLE candidate pool and screened on its own percentiles, and only the survivors pay for the line timeframes — a (coin, timeframe) pair is fetched only when the user drew a line on that timeframe, so the extra requests scale with the WATCH LIST, not with the pool.
 
-This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in `src/server/app-plugin.ts`, the pure algorithm in `src/domain/coin-scan.ts`, and the UI in `src/ui/CoinScanPanel.tsx`.
+**Candle series is session-only** (09/16): for a session-gated instrument the detector never sees candles that contain no trading time — closed-market stretches are dropped from the series before any measure runs, and 2× the raw window is requested to compensate. Ungated classes (crypto, commodity) keep every candle. See "Design Decisions".
+
+This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in `src/server/app-plugin.ts`, the pure algorithm in `src/domain/coin-scan.ts` and `src/domain/level-alert.ts`, and the UI in `src/ui/CoinScanPanel.tsx`.
 
 ## 2. Signatures
 
 - Route: `GET /api/scan` (no `timeframe` param — the scan always covers `scanTimeframes`)
 - Bootstrap route: `GET /api/scan/config` → `{ source: MarketDataSource }` (the server's startup source; never touches the network). Registered **before** `/api/scan` — connect matches by path prefix, so the scan route would otherwise swallow it.
-- Service: `CoinScanService.scanShrink(params: ShrinkScanParams): Promise<ScanResponse>`
+- Candidate scan: `CoinScanService.scanShrink(params: ShrinkScanParams): Promise<ScanResponse>`
+- Watch view: `CoinScanService.scanWatch(params: LevelWatchParams): Promise<LevelWatchResponse>` (10/21)
+- Box-braces scan: `CoinScanService.scanBoxBrace(params: BoxBraceScanParams): Promise<BoxBraceScanResponse>` (see the box section below)
 - Pure coarse screen (1D, pool-relative): `coarseStructure(candles, params): CoarseMeasures | null`, `coarseScreen(measures, params): { screen, passes }`
-- Pure volatility detector: `detectConvergence(candles, params): StructureResult | null` (band vs preceding stretch)
-- Probing entry point: `probeStructure(candles, params): StructureResult | null` (forwards to `detectConvergence`)
-- Defaults: `defaultStructureParams(overrides?): StructureParams`, `DEFAULT_COARSE_PARAMS: Required<CoarseParams>`
+- Pure 距线 measurement (`src/domain/level-alert.ts`): `levelAlert(candles, lines, at, fromIndex): LevelAlert | null`, plus `linesFromDrawings` / `scaleLinesToSource` / `scaleStartIndex` / `levelScaleFactor` (see the 10/21 design entries)
+- Defaults: `DEFAULT_COARSE_PARAMS: Required<CoarseParams>`
 
 ## 3. Contracts
 
@@ -32,13 +36,12 @@ This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in
 
 | Field | Type | Default | Constraint |
 | --- | --- | --- | --- |
-| `method` | string | — | `shrink` (收敛结构) or `heat` (热度); anything else → 400 |
+| `method` | string | — | `shrink` (主升浪候选), `watch` (标线监控), `box` (箱体蓄力, no panel entry), or `heat` (热度); anything else → 400. `watch` is available in BOTH scopes (the watch list is the user's own drawn lines, not a pool) |
 | `scope` | string | `crypto` | `crypto` (加密: crypto + indices + commodities) or `equity` (股票: US + Korean equities); anything else → 400; `heat` + `equity` → 400 |
 | `source` | string | server startup source (`.env` / `MARKET_DATA_SOURCE`, else `bitget`) | `binance` / `okx` / `bitget`; **absent or anything else falls back to the startup source** (never 400). Selects the ticker / candle / gate trio for THIS request and the `minQuoteVolume24h` default |
 | `topN` | number | **absent = no cap** (the whole open pool) | optional CAP (上限保护) since 10/13; when present, `>= 1`. It used to be the hard pool gate (top-150 crypto / 30 equity, raised 60 → 150 on 10/11) — superseded, see "The pool is the whole scope universe, screened on 1D percentiles (10/13)". `0` → 400 |
 | `minQuoteVolume24h` | number | per `source × scope` (see "Per-request source and per-source volume floor (10/12)" and the 10/13 "low rail" section) | `>= 0`; instruments below this 24h quote volume are filtered before the coarse screen |
 | `anchor` | number (optional) | now | epoch ms; bars whose close time (`timestamp + timeframe`) is `<= anchor` are treated as completed. Absent / empty / NaN → `Date.now()`. Present and `<= 0` → 400 |
-| `minScore` | number (optional) | 0 | `>= 0`; the single 宁少勿滥 strength knob (UI default **0.6**). A timeframe counts as converged only when `score >= timeframeMinScore(tf, minScore)`, i.e. this knob shifted by the level's own offset: `max(0, minScore + TIMEFRAME_SCORE_OFFSET[tf])` (0 for 5m/15m/1H, −0.05 for 4H, −0.10 for 1D). Because `score` is the shrink depth and nothing else, the effective bar reads directly as an amplitude statement: at 0.6 the small timeframes demand ≤40% of the preceding stretch, 4H ≤45%, 1D ≤50%. `minScore = 0` (the SERVICE default; the UI always sends a value) degenerates every offset to 0, so an absent knob behaves exactly as before the offsets existed. Absent → 0. Present and `< 0` → 400 |
 
 Non-numeric params fall back to the pair's default — `minQuoteVolume24h` to the table below, and `topN` to ABSENT (never to 0, which would 400 and silently scan nothing). Invalid final values → 400. The defaults live in the private `SCAN_PARAM_DEFAULTS` table, read through `defaultScanParams(source, scope)` (`src/domain/scan-scope.ts`), and are mirrored by the panel's inputs. `MarketDataSource` / `MARKET_DATA_SOURCES` / `DEFAULT_MARKET_DATA_SOURCE` (`'bitget'`) / `isMarketDataSource` are exported from the same module and are the single source of truth for source literals.
 
@@ -46,33 +49,25 @@ Non-numeric params fall back to the pair's default — `minQuoteVolume24h` to th
 
 `method=heat` responds with `MarketHeatResult` (`domain/market-heat.ts`) instead — the overall market-temperature reading for the fixed Top80 pool at `anchor`, computed against the **request-selected `source`** (the whole 选品 module moves together, 10/12; UI renders it through the shared `MarketHeatView`). Only `source` and `anchor` apply for heat (still crypto-scope only).
 
+`method=watch` responds with `LevelWatchResponse` (`domain/coin-scan.ts`, 10/21) — rows are the drawn-line instruments, NOT the coarse screen's survivors. Only `source` and `anchor` apply: `scope` is accepted but ignored (the watch list crosses sub-modules), and `topN` / `minQuoteVolume24h` are not read. A marked instrument the current source cannot resolve is reported in `missingInstruments` rather than dropped; a fetch failure drops the row and is reported in `failedInstruments` (the same isolation rule as the scan's stage 2).
+
 `source` is resolved **per request** in the route (validated with `isMarketDataSource`; absent/illegal → startup source), which picks a pre-built `{ tickerSource, candleSource, gate }` trio and the matching `CoinScanService` / `MarketHeatService` instance (`Record<MarketDataSource, …>`). Both services are stateless across requests; `MarketHeatService`'s anchor cache is therefore isolated per source. The echoed `params.source` rides along so the UI can label a result's venue and results from different sources are not silently compared.
 
 ### Response (`ScanResponse`)
 
 ```ts
-type ConvergenceStructure = 'convergence'; // the only structure kind (triangle removed)
-type StructureResult = {
-  structure: ConvergenceStructure | null; // null = this timeframe has no convergence
-  position: number;                       // 0..1: (lastPrice - rangeLow)/(rangeHigh - rangeLow)
-  score: number;                          // shrink depth = clamp01(1 - runMed/preMed), larger = stronger, [0,1]
-  touchCount: number;                     // always 0 (no swing touches; kept for the row contract)
-  qualified: boolean;                     // passed the shrink + flatness + containment gates
-};
+```ts
 type ScanRow = {
   instrument: string;            // XAUUSDT / BTCUSDT (Binance), BTC-USDT-SWAP (OKX)
   lastPrice: number;
   change24h: number;             // percent
   quoteVolume24h: number;        // 24h quote volume in USDT (liquidity floor)
-  structures: Record<ReviewTimeframe, StructureResult>; // all 5 timeframes, scanTimeframes order
-  convergedTimeframes: ReviewTimeframe[]; // qualified && score >= timeframeMinScore(tf, minScore); ASCENDING (scanTimeframes order), so the last element is the highest level. EMPTY when a coarse-screen survivor converges nowhere
-  qualifiedCount: number;        // = convergedTimeframes.length (0 for a survivor with no convergence)
-  bestScore: number;             // max score across converged timeframes (larger = stronger); 0 when there are none
-  qualified: boolean;            // always true (rows only contain coarse-screen survivors)
-  coarse?: CoarseRow;            // 10/13 — the 1D screen's verdict, measures and this scan's cuts
+  levelAlerts: Record<ReviewTimeframe, LevelAlert | null>; // 10/20 — all 5 timeframes, scanTimeframes order; null = no drawn line (or no candles to measure against)
+  alertTimeframes: ReviewTimeframe[]; // timeframes whose state is 'alert' (贴近), ASCENDING scanTimeframes order
+  coarse?: CoarseRow;            // 10/13 — the 1D screen's verdict, measures and this scan's cuts. UNSET on watch rows (10/21): the watch view has no screen.
 };
 type CoarseRow = {
-  pass: boolean;                 // always true on a returned row: row inclusion IS the coarse screen
+  pass: boolean;                 // always true on a returned scan row: row inclusion IS the coarse screen
   rangePct: number;              // (max high − min low) / lastClose over the window
   netPct: number;                // |close_last − close_first| / close_first over the same window
   posRange: number;              // 10/13 — (lastClose − series min low)/(series max high − min low) over ALL 1D bars
@@ -81,7 +76,7 @@ type CoarseRow = {
 };
 type ScanResponse = {
   scanned: ScanRow[];            // the coarse-screen survivors; sorted by closest-to-your-line FIRST (10/20: the user draws the lines, so the only meaningful order is "how close is the price to my line"); a row with no line at all has no ratio and sinks below every measured one
-  qualifiedCount: number;        // = scanned.length
+  qualifiedCount: number;        // = scanned.length (legacy name kept from the 10/20 payload)
   params: ShrinkScanParams;      // echoes effective params, including resolved scope/anchor/source; `topN` is absent when it was not sent
   scannedAt: string;             // ISO
   coarse?: CoarseSummary;        // 10/13 — what the 1D screen ran on and with
@@ -90,6 +85,15 @@ type ScanResponse = {
   failedInstruments?: string[];  // 10/13 — candles could not be fetched (timeout / network / exchange business error): the instrument is dropped from THIS scan, not from the pool
   metadataUnavailable?: boolean; // present only when the ticker snapshot carried no instrument classes => gating was off
   levelScaleNotes?: string[];    // 10/21 — why a drawn level could not be carried into this source's price basis (measured unscaled)
+};
+type LevelWatchResponse = {      // 10/21 — method=watch (标线监控)
+  scanned: ScanRow[];            // the drawn-line instruments; same sort key as the scan (closest line first)
+  params: LevelWatchParams;      // echoes the resolved source and anchor
+  scannedAt: string;             // ISO
+  warnings?: string[];
+  failedInstruments?: string[];  // same rule as the scan's stage 2: the ROW is dropped, reported here
+  levelScaleNotes?: string[];
+  missingInstruments?: string[]; // marked instruments the current source cannot resolve (canonical names) — a third channel: the reaction is "switch source", not "look at the coin"
 };
 type CoarseSummary = {
   windowDays: number;            // T = 23 (1D bars)
@@ -102,7 +106,7 @@ type CoarseSummary = {
 };
 ```
 
-Backward compatibility: `structures` / `convergedTimeframes` / `qualifiedCount` / `bestScore` / `qualified` keep their definitions — only the ROW SET moved (it is now the coarse screen's survivors, so `qualifiedCount` can be 0). `coarse` is optional in the type so a pre-10/13 payload still type-checks; the service always sets it.
+History: the convergence-era fields (`structures` / `convergedTimeframes` / `bestScore` / `qualified` / `minScore`) were deleted on 10/20 together with `detectConvergence`. `coarse` is optional in the type so a pre-10/13 payload still type-checks; the scan service always sets it, and the watch view never does.
 
 ### Algorithm: 1D coarse screen (`coarseStructure` + `coarseScreen`)
 
@@ -136,38 +140,14 @@ Three further properties are deliberate and must not be "improved":
 
 **Known residual — component drift.** The pool RATE is stable, the MEMBERSHIP is not: measured over 15 anchors the 7 covered labels hold for ~8 anchors and then start dropping (and WLD — the one borderline negative — starts entering around the 10th). `T` is a SHARP optimum (`T ± 1` loses 1–2 labels), so a change to it needs a re-calibration, not a guess. ACE is a **structural mismatch** (its 23-day range is as wide as the pool's 74th percentile and its drift is far outside the net gate) and is deliberately NOT covered by stage 1 — the user confirmed that, so do NOT loosen a threshold for it.
 
-### Algorithm: volatility convergence (`detectConvergence`)
-
-Walks the RAW BARS looking for a recent band whose bar-to-bar volatility is meaningfully below the same-length stretch immediately before it — "波动率越来越小". Sliding scan over every possible band start (the band always ends at the last bar); a band must pass:
-
-1. **Flatness** — the band is a quiet HORIZONTAL band, not a trend. Its low-edge and high-edge regression drifts must both be `<= flatRatio × runMed`, where `runMed` is the band's own median per-bar volatility (edge drift = total OLS drift / mean price, a relative measure). This also rejects a rising/falling trend whose relative amplitude naturally shrinks as price climbs (which would otherwise fake a "volatility shrink").
-2. **Volatility shrink** — `runMed < convergenceRatio × preMed`, where `preMed` is the median per-bar volatility of the SAME-LENGTH segment immediately before the band. Internal spikes are absorbed by the median.
-3. **Containment** — the newest bar's close must still sit inside the range the band was **CONFIRMED at**, with a 10% tolerance (relative to that range's own height): a price that broke out is no longer 蓄力. The confirmed range is built from the band's first `runLen - CONVERGENCE_CONFIRMED_TAIL` bars — i.e. deliberately WITHOUT the newest bar, which is the bar being tested. Including it makes the check vacuously true (a real candle's close always lies inside its own `[low, high]`), which is the bug fixed on 09/20 (see "Design Decisions"). Flatness and containment are independent: flatness asks whether the band is SLOPED, containment asks whether the price LEFT it.
-
-No coin-own "typical volatility" baseline: everything is judged against the preceding stretch only (8/13, user decision). A crash-then-pause band (a big dump followed by a quiet stretch) IS detected as a strong shrink because its band is far quieter than the dump; the band's flatness gate usually rejects such wide post-dump bands (their edges drift too much), which is how the CBRS 大跌后喘息 case stays out. Whether further exclusion is needed is flagged as an open calibration decision.
-
-**Score is the shrink depth ALONE** (09/20 — the length bonus was removed):
-
-```
-relativeCalm = clamp01(1 - runMed / preMed)   // how much quieter the band is than before
-score        = relativeCalm
-```
-
-Duration is deliberately unscored: see "Score is the shrink depth alone (09/20)" under Design Decisions. Because nothing else enters the score, the UI default `minScore` **0.6** reads directly as an amplitude statement — the band's median per-bar amplitude must be at most 40% of the preceding stretch's — and raising the knob is a direct tightening of that ratio.
-
-**The knob is applied per timeframe** (10/11): the level's own offset (`TIMEFRAME_SCORE_OFFSET`) is subtracted before the comparison, so at the default 0.6 the effective bars are 0.60 (5m/15m/1H), 0.55 (4H) and 0.50 (1D). This is how "a contraction on a bigger level is a rarer setup" is expressed — deliberately WITHOUT adding a level term back into `score` (which would re-litigate 09/20).
-
 ### Calibration constants (`src/domain/coin-scan.ts`, all exported)
 
 | Constant | Value | Meaning |
 | --- | --- | --- |
-| `scanTimeframes` | `['5m','15m','1H','4H','1D']` | the 5 scanned timeframes; also defines the LEVEL order (index 0 = 5m … 4 = 1D) used for sorting |
-| `TIMEFRAME_SCORE_OFFSET` | `{ 5m:0, 15m:0, 1H:0, 4H:-0.05, 1D:-0.10 }` (typed `Partial<Record<ReviewTimeframe, number>>`) | per-level shift applied to the single `minScore` knob (10/11). Only the 5 scanned timeframes carry an entry; a lookup miss reads as 0 |
-| `timeframeMinScore` | `(tf, minScore) => Math.max(0, minScore + (TIMEFRAME_SCORE_OFFSET[tf] ?? 0))` | the effective per-timeframe threshold — the ONLY place the offset is applied |
-| `DEFAULT_CONVERGENCE_MIN_RUN` | 5 | min band length (K bars) for a convergence. Load-bearing since 09/20: with duration unscored the best band tends to be short, so this is the only floor keeping bands from being a couple of bars |
-| `DEFAULT_CONVERGENCE_RATIO` | 0.9 | shrink gate: band median vol must be `< this ×` preceding median vol (0.9 admits mild real shrinks; the score ranks them) |
-| `DEFAULT_CONVERGENCE_FLAT_RATIO` | 2.0 | band flatness: edge regression drift `<= this × runMed` (the band's own noise) |
-| `CONVERGENCE_CONFIRMED_TAIL` | 1 | bars at the band's tail EXCLUDED from the containment range (1 = test the newest bar against the `runLen - 1` bars before it). Structural, not a calibration knob |
+| `scanTimeframes` | `['5m','15m','1H','4H','1D']` | the 5 scanned timeframes; also defines the order of the per-timeframe 距线 detail rows and `alertTimeframes` |
+| `DEFAULT_COARSE_PARAMS` | `{ windowDays: 23, pctRange: 0.7370689655172413, pctNet: 0.4849137931034483, posRangeFloor: 0.03 }` | the coarse screen's calibration (see the section above; the constants live in `src/domain/scan-scope.ts`) |
+
+The convergence-era constants (`TIMEFRAME_SCORE_OFFSET`, `DEFAULT_CONVERGENCE_*`, `CONVERGENCE_CONFIRMED_TAIL`) were deleted with the detector on 10/20 — their calibration history stays under Design Decisions.
 
 ### Algorithm: box-braces / squeeze (`detectBoxBrace`, `src/domain/box-brace.ts`)
 
@@ -189,14 +169,14 @@ The reported box is the **longest** qualifying window (ties → tightest squeeze
 | `SQUEEZE_LOOKBACKS` | `[10, 20, 40]` | move lookbacks; the widest travel wins |
 | `SQUEEZE_BOUNDARY_GROWTH` / `SQUEEZE_BOUNDARY_SPAN` | 10 / 1 | "same box, longer" tolerance used by `selectWindow` |
 
-**Wiring**: `GET /api/scan?method=box` (params `minQuoteVolume24h`, optional `anchor` / `minRun` / `maxRun` / `maxHeightRatio`); `CoinScanService.scanBoxBrace` issues ONE paged 1D read per open-pool instrument, drops the still-forming bar, and reports `{ rows, params, scannedAt, scanned, warnings?, skippedInstruments?, failedInstruments?, metadataUnavailable? }` with rows ordered by `box.squeeze` ascending. The UI adds a `箱体蓄力` option to the scan method selector and renders `BoxScanResults`.
+**Wiring**: `GET /api/scan?method=box` (params `minQuoteVolume24h`, optional `anchor` / `minRun` / `maxRun` / `maxHeightRatio`); `CoinScanService.scanBoxBrace` issues ONE paged 1D read per open-pool instrument, drops the still-forming bar, and reports `{ rows, params, scannedAt, scanned, warnings?, skippedInstruments?, failedInstruments?, metadataUnavailable? }` with rows ordered by `box.squeeze` ascending. `BoxScanResults` renders it; the panel's method selector has NO box entry as of 10/21 (the route, service and result component are kept from 10/18).
 
 **Measured volume (10/18, 427-instrument snapshot): the per-day list is WIDE — median ≈ 244 instruments/day.** The detector is a description, not a final screen; a usable shortlist needs a downstream ranking or a tighter `maxHeightRatio`. Do not present the raw list as "the picks".
 
 ### Service aggregation
 
 ```
-scanShrink(params):
+scanShrink(params):                                  // 主升浪候选
   tickers = tickerSource.listTickers()
   anchor = params.anchor ?? Date.now()
   scope = params.scope ?? 'crypto'
@@ -207,8 +187,8 @@ scanShrink(params):
     if isMarketOpen(ticker.marketClass ?? 'CRYPTO', anchor): open.push(ticker)
     else skippedInstruments.push(ticker.instrument)
   candidates = params.topN === undefined ? open : open.slice(0, params.topN)   // optional cap only
-  minScore = params.minScore ?? 0
   refresh = params.anchor === undefined
+  linesByTimeframe = loadLinesByTimeframe()            // drawing-store → canonical-name-keyed lines (10/21)
 
   failed = set()                                             // 10/13 — one failed fetch never fails the scan
   // ---- stage 1: the coarse timeframe for the WHOLE candidate pool ----
@@ -219,45 +199,63 @@ scanShrink(params):
     completed === null ? null : coarseStructure(completed, DEFAULT_COARSE_PARAMS))   // a failed fetch reads as "no measure"
   { screen, passes } = coarseScreen(measures, DEFAULT_COARSE_PARAMS)         // cuts from THIS pool
 
-  // ---- stage 2: the other four timeframes, only for the survivors ----
-  tasks = survivors × {5m,15m,1H,4H}
+  // ---- stage 2: the timeframes the user drew lines on, only for the survivors ----
+  tasks = survivors × timeframes-with-a-line-on-that-coin
   results = mapLimit(tasks, concurrency 5, ({ticker, timeframe}) =>
-    try  { ticker, timeframe, structure: probeStructure(completed(ticker, timeframe, anchor, refresh), defaultStructureParams()) }
-    catch(e) { if isIpBanned: throw e; failed.add(ticker); { ticker, timeframe, structure: null } })
+    try  { ticker, timeframe, alert: measureLevelAlert(completed(ticker, timeframe, anchor, refresh), lines, ...) }
+    catch(e) { if isIpBanned: throw e; failed.add(ticker); { ticker, timeframe, alert: null } })
 
   for [i, {ticker, completed}] in coarseFetches:
-    if not passes[i] or completed == null or ticker in failed: continue   // 行入选 = 粗筛通过; a survivor with a failed sibling timeframe loses its ROW
-    structures['1D'] = probeStructure(completed) ?? neutral   // stage-1 series reused, no extra request
-    structures[tf]  = results[tf] ?? neutral                  // the other four
-    converged = scanTimeframes.filter(tf => structures[tf].qualified && structures[tf].score >= timeframeMinScore(tf, minScore))
-    rows.push({ ..., structures, convergedTimeframes: converged, qualifiedCount: converged.length,
-                bestScore: converged.length ? max(score) : 0, qualified: true,
-                coarse: { pass: true, rangePct, netPct, rangePctThreshold: screen.rangePctThreshold, netPctThreshold: screen.netPctThreshold } })
-  highestLevel(row) = converged.length ? max(scanTimeframes.indexOf(tf)) : -1   // no convergence sinks below every converging row
-  rows.sort(highestLevel desc, qualifiedCount desc, bestScore desc)   // equal keys keep the ticker (24h-volume) order (stable sort)
+    if not passes[i] or completed == null or ticker in failed: continue   // 行入选 = 粗筛通过; a survivor with a failed line timeframe loses its ROW
+    levelAlerts['1D'] = measureLevelAlert(completed, lines)   // stage-1 series reused, no extra request
+    levelAlerts[tf]   = results[tf] ?? null                   // the other four
+    alertTimeframes = scanTimeframes.filter(tf => levelAlerts[tf]?.state == 'alert')
+    rows.push({ ..., levelAlerts, alertTimeframes,
+                coarse: { pass: true, rangePct, netPct, posRange, rangePctThreshold, netPctThreshold } })
+  rows.sort(closestRatio asc)   // the coin whose price is CLOSEST to a drawn line comes first; a row with no line sinks (10/20)
   if tickerSource.metadataAvailable?.() === false: response.metadataUnavailable = true
   if failed.size > 0: response.failedInstruments = [...failed]   // 10/13 — reported, never silent
+  if scaleNotes.size > 0: response.levelScaleNotes = [...scaleNotes]   // 10/21 — degraded cross-venue scaling
   response.coarse = { windowDays, pctRange, pctNet, poolSize: screen.poolSize, rangePctThreshold, netPctThreshold, candidates: candidates.length }
   return { scanned: rows, qualifiedCount: rows.length, params: { ...params, anchor, scope }, scannedAt, coarse, ... }
+
+scanWatch(params):                                   // 标线监控 (10/21)
+  tickers = tickerSource.listTickers()
+  anchor = params.anchor ?? Date.now(); refresh = params.anchor === undefined
+  linesByTimeframe = loadLinesByTimeframe()
+  marked = union of canonical names across linesByTimeframe          // the watch list
+  for canonical in marked: resolve against tickers by canonicalInstrument
+    resolved → watchTickers; unresolved → missingInstruments         // reported, never dropped silently
+  // NO scope / pool policy / volume / session gating: the rows are the user's own list
+  tasks = watchTickers × timeframes-with-a-line-on-that-coin
+  results = mapLimit(tasks, concurrency 5, ...)                      // same completedCandles + measureLevelAlert
+  for ticker in watchTickers:
+    if ticker in failed: continue                                    // same isolation rule as stage 2
+    rows.push({ ..., levelAlerts, alertTimeframes })                 // NO coarse — there is no screen verdict
+  rows.sort(closestRatio asc)
+  return { scanned: rows, params: { ...params, anchor }, scannedAt, missingInstruments?, failedInstruments?, levelScaleNotes?, warnings? }
 ```
 
 `completedCandles(ticker, tf, anchor, refresh)` is the one shared fetch helper: it requests `scanWindowFor(ticker.marketClass)` bars through the candle source, then drops the still-forming bar BY TIME (`timestamp + timeframeMs(tf) <= anchor`) and any untraded bar (`isCandleInSession`). Both filters are needed — see "Session-only series" below.
 
-- **Uniform candle window**: `SCAN_WINDOW = 100` **tradable** bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The detector needs a band + a same-length preceding stretch, so the window holds both. Session-gated instruments request `2 × SCAN_WINDOW` RAW bars because the untraded ones are dropped — 2× keeps a weekday window full and a Monday-morning window ~2/3 full, while staying in Binance's cheapest klines weight band (`< 500` → weight 2). Cover this with a test that asserts the requested `limit` per class. On Bitget, the 1D `limit` of 100 really yields **≤ 90** bars (hard exchange cap, see `market-data.md`) — the coarse window `T = 23` fits, but nothing may assume a full 100.
+`measureLevelAlert(candles, lines, instrument, timeframe, anchor, scaleNotes)` (module-level, `coin-scan-service.ts`) is the ONE 距线 measurement path — `scaleLinesToSource` (cross-venue price basis) then `levelAlert` (volatility ruler) — shared by `scanShrink`'s stage 2, its 1D stage-1 reuse, and `scanWatch`, so the two views can never report different numbers for the same coin at the same anchor. `closestRatio(row)` is likewise shared as both views' sort key.
+`completedCandles(ticker, tf, anchor, refresh)` is the one shared fetch helper: it requests `scanWindowFor(ticker.marketClass)` bars through the candle source, then drops the still-forming bar BY TIME (`timestamp + timeframeMs(tf) <= anchor`) and any untraded bar (`isCandleInSession`). Both filters are needed — see "Session-only series" below.
+
+- **Uniform candle window**: `SCAN_WINDOW = 100` **tradable** bars for EVERY timeframe (8/13, user decision: the lookback must not vary with the period). The volatility ruler (距线) reads the newest 60 bars of it, so the window comfortably holds the ruler's sample. Session-gated instruments request `2 × SCAN_WINDOW` RAW bars because the untraded ones are dropped — 2× keeps a weekday window full and a Monday-morning window ~2/3 full, while staying in Binance's cheapest klines weight band (`< 500` → weight 2). Cover this with a test that asserts the requested `limit` per class. On Bitget, the 1D `limit` of 100 really yields **≤ 90** bars (hard exchange cap, see `market-data.md`) — the coarse window `T = 23` fits, but nothing may assume a full 100.
 - **Scan pool policy** (09/16): `isScannable(marketClass)` in `src/domain/scan-pool.ts` decides the universe — crypto / indices / commodities / US equities / Korean equities are IN; HK equities, A-shares and pre-IPO are OUT (no trustworthy session, and pre-IPO has no underlying market at all). Symbols outside the policy are **not** reported in `skippedInstruments`; they are a pool definition, not a per-scan skip. An absent class stays IN the pool so a metadata outage cannot empty a scan.
 - **Session gating** (09/06, widened 09/16): instruments whose underlying **Market Session** is closed at `anchor` are dropped AFTER the 24h-volume gate, so a closed **TradFi Instrument** never fires a klines request (and, when `topN` is used, never holds a slot). Class comes from the ticker's optional `marketClass` (Binance `exchangeInfo` metadata, TTL-cached). The US window is **04:00–20:00 ET** (pre-market + regular + after-hours; the thin overnight session is treated as closed). Skipped symbols are echoed as `skippedInstruments` and shown in the UI as 「已跳过 N 个休市标的」. Pure session math lives in `src/domain/market-session.ts`.
 - **Session-only series** (09/16): `isCandleInSession(marketClass, open, barMs)` keeps a candle only when part of its span falls inside a session window. Ungated classes short-circuit to `true`. The span test (not an "open time inside the window" test) is what makes the UTC-aligned **daily** candles work: Binance daily candles open at 20:00 ET, so an open-time test would drop every one of them, while a span test keeps exactly the days containing a session and drops weekends and holidays.
 - **Metadata degradation is visible** (09/16): `BinanceTickerSource.metadataAvailable()` reports whether the last snapshot attached classes; when it did not, the response carries `metadataUnavailable` and the UI states that closed-market filtering was off. A silent outage would judge closed equity contracts as crypto.
 - **A failed fetch is isolated to its instrument** (10/13). Trigger: a live Bitget scan died outright with `Bitget request failed: request timed out after 12s`, the UI showing only 扫描失败 — one stalled request had rejected `mapLimit`'s `Promise.all`, which threw out of `scanShrink` into the route's 502. Bitget's market path has NO retry (only 429/418 are retried, `http.ts`), so one 12s stall out of ~1124 requests killed the whole run. Now every (instrument, timeframe) fetch sits in its own try/catch, and the failure is answered in the two places it can occur:
   - **Stage 1** — the candidate reports `completed: null`. `coarseScreen` already maps a `null` measure to "leaves the percentile base, never passes" (the short-history path), so nothing is added to the screen: the instrument is dropped by the EXISTING rule, but silently, which is exactly what `failedInstruments` exists to undo.
-  - **Stage 2** — the ROW is dropped. Filling the missing cell with `neutral` (`no convergence here`) was rejected: that is a VERDICT about complete data, so a fetch that never returned would let `convergedTimeframes` / `qualifiedCount` / `bestScore` and the row order run on half-empty input — a silent wrong answer instead of a reported omission.
+  - **Stage 2** — the ROW is dropped. Filling the missing cell with a "far" verdict was rejected: that is a VERDICT about complete data, so a fetch that never returned would let the 距线 reading and the row order run on half-empty input — a silent wrong answer instead of a reported omission. `scanWatch` applies the same rule (10/21).
   - **Only a 418 aborts the scan.** The fatal check reads the GATE (`rateLimitGate.reason() === '418'`), never the error string: a ban means firing more requests only prolongs it (`waitOutGate`'s rationale), and the gate is set before the throw on both the `fetchJsonWithRetry` and `waitOutGate` paths. Timeouts, network errors, exhausted 429 retries and exchange business errors (`code != '00000'`) are all the instrument's own problem.
   - **Not retried, not circuit-broken, timeout untouched** (user decision 10/13): the ask was "don't stop the whole scan", nothing more. Known residual, accepted: with the network fully down every request burns its 12s, so the scan returns an empty table plus the failure list only after ≈16min (408 candidates ÷ 5 × 12s). "Retry once on timeout" and "abort after N consecutive failures" are the two follow-ups, each its own change.
   - `failedInstruments` is a THIRD report channel, not a synonym: `warnings` = rate-limit backoffs, `skippedInstruments` = closed markets, `failedInstruments` = fetch failures. They are kept separate because they ask for different user reactions (wait / re-scan later / look at the instrument). All three are shown in the results header as `.coin-scan-skip-hint` lines.
   - A non-empty `failedInstruments` does NOT make the response a failure: the rest of the pool is real data, and the route still answers 200.
 - The forming bar is dropped **by time** (`timestamp + timeframeMs(timeframe) <= anchor`). Do not `slice(0, -1)` unconditionally — the candle cache may contain no forming bar.
 - **Concurrency**: 5 in-flight candle fetches (mapLimit-style) shared by both stages. Binance request *starts* are paced by the SHARED `binanceRatePacer` (`src/server/http.ts`, `BINANCE_MIN_INTERVAL_MS=110`, jitter 15ms → ~9 req/s) inside `defaultBinanceFetchJson`, and Bitget's by `bitgetMarketRatePacer` (50ms + 10ms jitter, ~20 req/s) inside `defaultBitgetMarketFetchJson` — so one click shares a single rate budget with every other caller (market heat included) and the scan never paces itself. 50ms/20 req/s for BINANCE (the old per-scan pacer) still tripped 418 occasionally; 110ms is the agreed conservative ceiling (09/07, user decision). Measured budget after the 10/13 pool expansion (Bitget crypto, 13 Oct 2026, live): **408 candidates → 407 measurable → 179 survivors → 1124 klines requests (408 stage-1 + 716 stage-2) in 58s**, versus 750 requests ≈82s for the old top-150 × 5 cold scan — same order, and unrejected instruments cost exactly one request. Re-measured 10/14 with the position floor in place (1D-only probe, same pool): **407 measurable → 180 rows without the floor → 173 with it (−7)**, i.e. the floor costs 7 rows ≈ 1.7pp of the pool and nothing else.
-- **Sorting** is done by the service: `highestLevel` descending first (a contraction on a bigger level is rarer, so a lone 1D convergence outranks a lone 5m one — 10/11), then `qualifiedCount` descending (cross-timeframe consistency), then `bestScore` descending. `highestLevel` = the max `scanTimeframes` index over `convergedTimeframes`, derived at sort time — `ScanRow` carries no level field. A survivor with NO convergence reads as **-1**, so it sinks below every converging row while keeping its ticker (24h-volume) order among its peers. Equal keys keep the original ticker (24h-volume) order (`Array#sort` is stable).
+- **Sorting** is done by the service (10/20): `closestRatio` ascending — the coin whose price sits closest to a line the USER drew comes first; a row with no measurable line has no ratio and sinks below every measured one. Equal keys keep the original ticker (24h-volume) order (`Array#sort` is stable). `scanWatch` sorts by the same key (10/21).
 
 ### Candle cache freshness
 
@@ -271,11 +269,12 @@ scanShrink(params):
 | Condition | Error |
 | --- | --- |
 | non-GET method | 405 |
-| `method` not in {`shrink`,`heat`} | 400 `Unsupported scan method` |
-| `topN` present and `< 1` | 400 `Invalid scan parameters` |
+| `method` not in {`shrink`,`watch`,`box`,`heat`} | 400 `Unsupported scan method` |
+| `topN` present and `< 1` | 400 `Invalid scan parameters` (shrink/box only; watch never reads it) |
 | `anchor` present and `<= 0` | 400 `Invalid scan parameters` |
-| `minQuoteVolume24h < 0` | 400 `Invalid scan parameters` |
-| `minScore` present and `< 0` | 400 `Invalid scan parameters` |
+| `minQuoteVolume24h < 0` | 400 `Invalid scan parameters` (shrink/box only; watch never reads it) |
+| `method=watch` and a marked instrument the source cannot resolve | **no error** — the instrument is reported in `missingInstruments`; the watch still answers 200 |
+| `method=watch` and a closed market / the other scope | **no error** — watch crosses scopes and includes closed markets by design |
 | `source` absent or not one of `binance`/`okx`/`bitget` | **no error** — falls back to the server startup source |
 | Binance/OKX tickers or candlestick fetch fails | 502 with readable message |
 | A single instrument's candle fetch fails (timeout / network / exchange business error) | **no error** — the instrument is skipped and echoed in `failedInstruments`; the scan still answers 200 |
@@ -284,26 +283,21 @@ scanShrink(params):
 
 ## 5. Good/Base/Bad Cases
 
-- **Good**: a coin whose recent band is meaningfully quieter than the same-length stretch before it (e.g. 16 volatile bars then 16 flat calm bars → band/preceding ≈ 0.16, score ≈ 0.84). The score IS that complement, so the default `minScore 0.6` admits any band at ≤40% of its preceding stretch on 5m/15m/1H, ≤45% on 4H and ≤50% on 1D (the per-level offsets).
-- **Base**: a uniformly calm coin (band vol ≈ preceding vol → ratio ≈ 1) has no "越来越小" tension and is rejected. A band with no preceding stretch (too few bars) returns null. A price that has broken out of the band is rejected by containment — and containment must compare the newest bar against a range built WITHOUT it (`CONVERGENCE_CONFIRMED_TAIL`), otherwise the check is vacuous.
-- **Bad**: a rising/falling trend (whose relative amplitude shrinks as price climbs) is rejected by the band's flatness gate. A crash-then-pause band is detected as a strong shrink by the pure band-vs-preceding rule; its wide post-dump edges usually fail the flatness gate, but if a narrow post-crash band shows up it will qualify — an open calibration decision flagged in the task notes.
+- **Good (scan)**: a coin whose 23-day 1D window is tight and drift-free relative to the pool AND whose whole-series position clears the floor becomes a row; if the user drew a line on it, the row additionally reports the 距线 with a three-tier state scaled by that coin's own volatility. **Good (watch)**: a coin the user marked weeks ago that has since started trending — it FAILS the coarse screen but still heads the watch list, with its 距线 readings updated.
+- **Base**: a coin with no drawn line shows `—` in the scan's 距线 column and still occupies a row (行入选 is the screen, not the line); a marked coin whose line timeframes all lack candles (a closed market overnight, say) reports `null` alerts — never a faked "far". A tiny pool degenerates the percentile cuts to "nobody passes" (property of the percentile form, not a bug).
+- **Bad**: a 1D-trending coin never becomes a scan row even when its 5m is quiet (the screen judges the DAILY window); a coin hugging its series' absolute bottom is dropped by the position floor even though its 23-day box is the tightest in the pool; a marked coin whose candle fetch failed loses its watch ROW instead of reporting a half-measured distance; and an unresolvable marked coin (wrong source) appears in `missingInstruments`, not as a silent omission.
 
 ## 6. Tests Required
 
-- `tests/coin-scan.test.ts` — pure algorithm:
-  - `detectConvergence`: band quieter than preceding → convergence ≥0.7; uniformly calm → null; short mild band → <0.7; **`score` is the shrink depth alone, independent of band length** (09/20 — same amplitude ratio on a 5-bar vs an 11-bar band, fixtures carrying 5 vs 16 quiet bars after an identical lead, must score identically and must equal `1 - bandMedian/precedingMedian`; under the removed length bonus those two were 0.68 vs 0.89, so the test fails if a duration term returns); **breakout rejected only when the newest bar left the CONFIRMED range** (09/20 — a paired control/breakout fixture differing in one legal bar, whose comment records the flatness/shrink margins proving containment is the rejecting gate); **`position` read off the confirmed range, not the whole band** (09/20, `position = 0.6` where the whole-band range would give 0.5); too few bars → null; non-positive price → null; crash-then-pause detected (known consequence); mild shrink (band ≈ 60% of preceding) → <0.7; stricter `convergenceRatio` filters more. Fixtures must be LEGAL candles (`low <= open/close <= high`) — an illegal `close` is what let the old containment test reach a gate that real data never reaches.
-  - `probeStructure`: forwards to the convergence detector; trending channel → null.
-  - defaults: constants + `defaultStructureParams` fills all thresholds.
-  - `timeframeMinScore` (10/11): default 0.6 → 1D 0.50 / 4H 0.55 / 5m·15m·1H 0.60; `minScore = 0` degenerates to 0 for every timeframe; a negative shift is floored at 0; an unscanned timeframe (1m/1W/1M) reads as offset 0. The literal `TIMEFRAME_SCORE_OFFSET` is asserted so a typo in the table fails the build.
 - `tests/coin-scan-coarse.test.ts` — the pure coarse screen:
-  - `coarseStructure`: measures exactly the newest `T` bars (a 30-bar series whose first 7 bars are wild measures 0.02 at T=23 and 0.51 at T=30); order-insensitive; `netPct` is direction-free while `rangePct` divides by the LAST close (so rising and falling windows differ there on purpose); **`posRange` reads the WHOLE series, not the window** (10 bars at the bottom + 23 flat bars → `rangePct` 0.02 while `posRange` ≈ 0.989 where the window's own range would read 0.5, 10/13) and a zero-height series (`maxHigh === minLow`) reads **0.5** instead of dividing by zero and still clears the floor; `null` for < T bars (次新币), non-positive prices and non-finite input; and it is INDEPENDENT of the detector (a uniformly calm series measures fine while `detectConvergence` returns null — the screen must not inherit "越来越小").
+  - `coarseStructure`: measures exactly the newest `T` bars (a 30-bar series whose first 7 bars are wild measures 0.02 at T=23 and 0.51 at T=30); order-insensitive; `netPct` is direction-free while `rangePct` divides by the LAST close (so rising and falling windows differ there on purpose); **`posRange` reads the WHOLE series, not the window** (10 bars at the bottom + 23 flat bars → `rangePct` 0.02 while `posRange` ≈ 0.989 where the window's own range would read 0.5, 10/13) and a zero-height series (`maxHigh === minLow`) reads **0.5** instead of dividing by zero and still clears the floor; `null` for < T bars (次新币), non-positive prices and non-finite input; and the measure is purely arithmetic — it never consults any detector.
   - `coarseScreen`: rank cuts are `floor(q·N)` on a 20-name pool (14 range / 9 net, 9 pass); the cuts are the POOL's own values, recomputed per pool (two pools in the same order but on a 10× scale pass identically while the thresholds scale); a TIE GROUP takes its MOST CONSERVATIVE rank, so 19 identical members all fail; the boundary is `≤` (rank 5 passes with cut 5, rank 6 does not); **the ABSOLUTE position floor is applied on top of the two percentile cuts and is the only gate that is not derived from the pool** (20-name pool where 3 names clear both rank cuts and differ only in `posRange` → exactly 0.03 passes, 0.029 and 0.0 fail, and setting `posRangeFloor: -1` restores all three, 10/13); an unmeasurable member is excluded from `N` and never passes; a pool too small for the cut degenerates to `nobody passes` (cut 0, threshold `-Infinity`); the defaults are the three documented constants plus `posRangeFloor` 0.03.
-- `tests/coin-scan-service.test.ts` — aggregation: **row inclusion is the coarse screen** (a 1D-trending coin is dropped even when its 5m converges, and its 5m is never requested; a coarse-tight coin that converges nowhere still gets a row with `qualifiedCount` 0 / `bestScore` 0; **a coin hugging its series' absolute bottom is dropped even though its 23-day window is the TIGHTEST box in the pool and a 5m converges — and it still pays exactly one request**, 10/13); **two-stage fetching** (1D for all 20 candidates, the other four only for the survivors — 28 requests — and no filler gets a second timeframe); the `coarse` echo (`poolSize`, `candidates`, thresholds, `posRange` per row); `topN` as a CAP (5 candidates requested, `coarse.candidates` 5, `params.topN` echoed); the volume floor filters before the screen (`coarse.poolSize` counts only the above-floor instruments). Plus the pre-10/13 blocks, all built on a ~20-name pool because the cut degenerates below that: all-5-timeframe scan, uniform window (limit 100 / 200 for gated), forming bar dropped by time, `change24h`/`lastPrice` carried, sort `highestLevel desc → qualifiedCount desc → bestScore desc` (a coarse survivor with no convergence sinks below every converging row), the lone-1D-vs-three-small-timeframes case, per-timeframe threshold (1D 0.51 / 4H 0.44 → `['1D']`; the 0.576 band isolates the 4H offset), `minScore` gate, neutral zeros, past anchor echoed, one coin on multiple timeframes as one row, insufficient history → empty (and `coarse.poolSize` 0), rate-limit warnings, session gating (closed equity never requested, kept out, skipped), session-only series (identical candles converge for crypto and yield nothing for an equity sitting in the closed window), per-class window, and `metadataUnavailable`. Plus the 10/13 fetch-failure isolation, whose three cases have three DIFFERENT expected answers: a **stage-1** failure (asserted against a control run — the other survivors' rows and structures are unchanged, `coarse.poolSize` drops by one because the failed fetch leaves the percentile base, and `failedInstruments` carries it) still RESOLVES; a **stage-2** failure drops the whole ROW (the fixture's failed 4H is a real convergence, so a "keep the row on a neutral cell" implementation would visibly change its score instead of dropping it); and an **IP ban** (`reason: () => '418'`) still rejects the whole scan. A clean control run must carry NO `failedInstruments` field at all.
+- `tests/coin-scan-service.test.ts` — aggregation: **row inclusion is the coarse screen** (a 1D-trending coin is dropped even when its 5m is drawn on; a coarse-tight coin with no drawn line still gets a row; **a coin hugging its series' absolute bottom is dropped even though its 23-day window is the TIGHTEST box in the pool — and it still pays exactly one request**, 10/13); **line-timeframe fetching** (1D for all candidates, a second timeframe ONLY for instruments that drew a line on it); the `coarse` echo (`poolSize`, `candidates`, thresholds, `posRange` per row); `topN` as a CAP; the volume floor filters before the screen; uniform window (limit 100 / 200 for gated), forming bar dropped by time, `change24h`/`lastPrice` carried, sort by `closestRatio` (closest-to-line first, no-line rows sink), past anchor echoed, insufficient history → empty, rate-limit warnings, session gating, session-only series, per-class window, `metadataUnavailable`; the 10/13 fetch-failure isolation (stage-1 absorbed / stage-2 row dropped / 418 aborts); and the 10/21 距线 matching + cross-venue scaling blocks (OKX-name lines match by canonical name; refPrice-based rescaling; degraded lines measured unscaled with notes). Plus the **标线监控 block (10/21)**: rows include coarse-REJECTED marked coins (contrasted against a same-pool candidate scan), closed-market marked coins stay, unresolvable marked instruments are reported in `missingInstruments` (its own channel), sort by closest line, fetch-failure row drop, 418 abort, byte-identical `levelAlerts` between the two views at the same anchor, and the anchor echo/refresh rule.
 - `tests/market-session.test.ts` — session math: the 04:00–20:00 US window incl. the DST switch, weekends, NYSE holidays/early closes, HK/KR/CN windows, ungated classes, the current-year coverage assertion, and `isCandleInSession` (edge candles that only partly overlap, the UTC-aligned daily candles that would all be dropped by an open-time test, and ungated classes that never lose a candle).
 - `tests/scan-pool.test.ts` — `isScannable`: crypto/commodity/US/KR in; HK/CN/pre-IPO out; unclassified in.
 - `tests/scan-scope.test.ts` — `ScanScope` narrowing, `scanScopeOf` (US/KR → equity, everything else incl. unclassified → crypto), `MarketDataSource` guards (`isMarketDataSource` accepts the three literals, rejects others), the `defaultScanParams` matrix (binance 10M/10M, bitget 100k/3M, okx 1M/1M — **all floors positive, no `topN` default**), and the coarse constants (`T` 23, `qR` ≈ 0.7371 > `qN` ≈ 0.4849, both inside (0,1), plus `COARSE_POS_RANGE_FLOOR` 0.03 asserted to be a fixed near-zero rail rather than a percentile).
-- `tests/coin-scan-panel.test.tsx` — the sub-module switch: current scope marked, 热度 offered only in the crypto scope, parameters reset to the scope's defaults on switch, 热度 selection dropped when switching to equities, no `onScopeChange` when re-clicking the active scope. Plus the 行情源 selector: `/api/scan/config` stubbed to a non-default source seeds the selector and re-derives the inputs; switching 行情源 re-derives the floor from `defaultScanParams`; a scan sends `source`. Plus the 10/13 cap semantics: `扫描数量` starts EMPTY and the scan request carries no `topN`; a filled value is sent as `topN`; a `0` is a parameter error and issues no request.
-- `tests/coin-scan-results.test.tsx` — the results surface: the skipped-instrument hint stays inside the detail header, the grid keeps exactly two top-level children, the server order is rendered as-is, manual demotion sinks/greys rows without re-ranking, and (10/13) the 结构 column renders the coarse measures with the scan's cuts in its title while the header reports 候选 vs 收敛. Plus the two report channels staying separate (10/13): a response carrying both lists renders TWO hints in order (closed markets first, then fetch failures), and a clean response renders only the closed-market one.
+- `tests/coin-scan-panel.test.tsx` — the sub-module switch: current scope marked, 热度 offered only in the crypto scope, parameters reset to the scope's defaults on switch, 热度 selection dropped when switching to equities, no `onScopeChange` when re-clicking the active scope. Plus the 行情源 selector: `/api/scan/config` stubbed to a non-default source seeds the selector and re-derives the inputs; switching 行情源 re-derives the floor from `defaultScanParams`; a scan sends `source`. Plus the 10/13 cap semantics: `扫描数量` starts EMPTY and the scan request carries no `topN`; a filled value is sent as `topN`; a `0` is a parameter error and issues no request. Plus the 10/21 method list: options are `shrink` / `watch` / `heat` (crypto) and `shrink` / `watch` (equity), labeled 「主升浪候选」/「标线监控」/「热度」; selecting 标线监控 hides the number inputs and sends `method=watch` with NO `topN` / `minQuoteVolume24h`, reporting a `{ method: 'watch' }` result.
+- `tests/coin-scan-results.test.tsx` — the results surface: the skipped-instrument hint stays inside the detail header, the grid keeps exactly two top-level children, the server order is rendered as-is, manual demotion sinks/greys rows without re-ranking, and (10/13) the 结构 column renders the coarse measures with the scan's cuts in its title while the 距线 column header reads 「距线」. Plus the two report channels staying separate (10/13): a response carrying both lists renders TWO hints in order (closed markets first, then fetch failures), and a clean response renders only the closed-market one. Plus the 10/21 watch view: a `LevelWatchResponse` renders a 「标线监控」 header with 监控/贴近 counts, no structure measures, no candidates line, a working 距线 column, and its own missing-instruments hint.
 - `tests/binance-candles.test.ts` — cache freshness: a stale "now" cache is refreshed; a fresh "now" cache is reused; a historical anchor always reuses the cache.
 
 ## 7. Wrong vs Correct
@@ -328,19 +322,26 @@ const PASSING_FLOOR = 0.15;                     // ← measured: costs labels (R
 #### Correct
 
 ```ts
-// Pure relative volatility shrink: band vs the same-length preceding stretch.
-const structure = detectConvergence(completed, defaultStructureParams());
-// → only "波动率越来越小" verdicts, all reported as 收敛.
+// The user draws the lines; the scan only measures the distance, scaled by the
+// coin's own volatility (see `level-alert.ts`). No structure is ever detected.
+const alert = levelAlert(completed, scaledLines, at, scaleStartIndex(completed, scaledLines));
+// → distancePct + scalePct + ratio + 贴近/接近/远, for the line the USER drew.
 ```
 
 ```ts
 // The position floor is a near-zero ABSOLUTE rail: only "趴在绝对底部" (still
-// falling) is excluded, everything else is left to the small-timeframe stage.
+// falling) is excluded, everything else is left to the user's drawn lines.
 const { passes } = coarseScreen(measures, DEFAULT_COARSE_PARAMS);  // posRangeFloor: 0.03
 // → 全池 ≈97.6% 通过, R1 206→201, 剔 CYS/TUT/BEAT/DEXE, 不伤任何正样本.
 ```
 
 ## Design Decisions
+
+> The entries below are dated history. Those describing the convergence detector
+> (`detectConvergence`, score, containment, per-timeframe thresholds) document code
+> that was DELETED on 10/20 — they are kept because they record why the automatic
+> approach was abandoned and must not be re-attempted; see the 10/20/10/21 entries
+> for what replaced it (user-drawn lines + 距线 + 标线监控).
 
 ### Volatility shrink replaces swing geometry (8/13)
 
@@ -504,6 +505,15 @@ The coarse screen is deliberately WIDE (≈44% of the pool at the calibration po
 - The rows are already ordered by the server ("closest to the level you drew comes first"), so the first 20 are the 20 worth looking at.
 - Manual demotion (降权) is applied **before** the cut: a coin the user explicitly pushed down must not hold one of the 20 slots.
 - 「显示更多」 opens the rest; the header reports both numbers ("粗筛 N 个 · 显示 20 个").
+
+### The 选品 module is a pipeline: 主升浪候选 + 标线监控 (10/21)
+
+Trigger: the user rejected the method label 「距你标的线」 — the name described only the row's 距线 readout, not what the module is: 「算法找出觉得从一个关键高点回落的币…扫出来后我去标注他真正关键的压力位…然后后面就监控这些被我画了线的币」. Two decisions came out of it:
+
+1. **Rename, not re-criterion.** The user confirmed the coarse screen's idea is right (「主要找的还是盘整有机会开主升浪的币」), so the screen, pool and defaults are UNTOUCHED — only the label changed to 「主升浪候选」 (what the scan looks for), and the wire key `shrink` stays (API stability; a label change is not a protocol change).
+2. **标线监控 (`scanWatch`, `method=watch`) fills the real gap.** Row inclusion in the candidate scan IS the coarse screen, so a marked coin vanished from the list the day it stopped satisfying the 盘整 gates — exactly when it might be approaching the marked level. The watch view uses the OPPOSITE row criterion: every instrument with a drawn line (canonical matching, union across the five timeframes), regardless of screen, scope, volume floor or market hours. A marked instrument the current source cannot resolve is reported in `missingInstruments` — the user's reaction is "switch source", not "my coin vanished"; a fetch failure drops the row (`failedInstruments`), the same isolation rule as stage 2.
+
+The two views SHARE the measurement and the sort key on purpose (`measureLevelAlert` / `closestRatio` in `coin-scan-service.ts`, extracted 10/21 from scanShrink's stage 2): a marked coin reads the same distance in both at the same anchor, asserted by a parity test. Auto-refresh/push alerting is deliberately NOT included — the watch view refreshes on click, like every scan.
 
 ## Convergence criterion research (10/19) — position, not "quieter than before"
 Trigger: CFX came out #1 in the live scan while the user read it as "fake breakout, fell back, never held" (no re-test). Recomputing confirmed it: after the 10/09–10/10 spike (+55%) the price bled back down and BOTH detectors still passed it — `detectConvergence` (score 0.716) and `detectBoxBrace` (box height only 0.36 of a "preceding move" that is exactly the two spike bars).

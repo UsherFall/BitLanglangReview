@@ -76,13 +76,15 @@ describe('CoinScanPanel sub-modules (选品)', () => {
 
   it('offers 热度 in the crypto sub-module and hides it for equities', () => {
     renderPanel('crypto');
-    expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink', 'heat']);
+    expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink', 'watch', 'heat']);
+    // 10/21: 「距你标的线」→「主升浪候选」(扫什么), plus the new 标线监控 view.
+    expect([...methodSelect().options].map((option) => option.textContent)).toEqual(['主升浪候选', '标线监控', '热度']);
   });
 
   it('hides 热度 in the equity sub-module', () => {
     renderPanel('equity');
 
-    expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink']);
+    expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink', 'watch']);
   });
 
   it('reports a scope change and resets the scope-specific parameters', () => {
@@ -98,7 +100,7 @@ describe('CoinScanPanel sub-modules (选品)', () => {
     expect(onScanned).not.toHaveBeenCalled();
   });
 
-  it('drops back to 收敛结构 when switching to equities with 热度 selected', () => {
+  it('drops back to 主升浪候选 when switching to equities with 热度 selected', () => {
     render(<Harness />);
     fireEvent.change(methodSelect(), { target: { value: 'heat' } });
     expect(methodSelect().value).toBe('heat');
@@ -106,7 +108,7 @@ describe('CoinScanPanel sub-modules (选品)', () => {
     fireEvent.click(panelButton('股票'));
 
     expect(methodSelect().value).toBe('shrink');
-    expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink']);
+    expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink', 'watch']);
   });
 
   it('does not fire onScopeChange when the active sub-module is re-clicked', () => {
@@ -246,6 +248,37 @@ describe('CoinScanPanel 行情源 (data source)', () => {
 
     await screen.findByText('参数无效,请检查');
     expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/scan?'))).toBe(false);
+  });
+});
+
+describe('CoinScanPanel 标线监控 (10/21)', () => {
+  beforeEach(() => {
+    stubFetch();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends method=watch with NO topN / volume floor, and reports the watch payload', async () => {
+    const fetchMock = stubFetch();
+    const { onScanned } = renderPanel('crypto');
+
+    fireEvent.change(methodSelect(), { target: { value: 'watch' } });
+    // The watch view has no pool to configure: the 扫描数量 / 最低成交额 inputs
+    // disappear and only the 扫描时间点 remains (a datetime, not a number).
+    expect(numberInputEls()).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: '扫描' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/scan?'))).toBe(true));
+    const scanUrl = fetchMock.mock.calls.map(([url]) => url).find((url) => url.startsWith('/api/scan?'))!;
+    const query = new URLSearchParams(scanUrl.slice(scanUrl.indexOf('?') + 1));
+    expect(query.get('method')).toBe('watch');
+    // topN / minQuoteVolume24h are candidate-scan parameters — a watch request
+    // must not carry them.
+    expect(query.has('topN')).toBe(false);
+    expect(query.has('minQuoteVolume24h')).toBe(false);
+    expect(onScanned).toHaveBeenCalledWith(expect.objectContaining({ method: 'watch' }));
   });
 });
 

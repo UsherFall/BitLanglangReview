@@ -11,6 +11,8 @@ import {
   coarseScreen,
   coarseStructure,
   scanTimeframes,
+  type LevelWatchParams,
+  type LevelWatchResponse,
   type ScanResponse,
   type ScanRow,
   type ShrinkScanParams,
@@ -137,7 +139,7 @@ export class CoinScanService {
    * absolute bottom (`COARSE_POS_RANGE_FLOOR` — an absolute rail, unlike the two
    * pool-relative cuts). Rows are the survivors.
    *
-   * Stage 2 measures 距你标的线: for every timeframe the USER drew a line on,
+   * Stage 2 measures 距线: for every timeframe the USER drew a line on,
    * and only for the instruments that drew one, the scan fetches that
    * timeframe's candles and reports how far the price is from the line, scaled
    * by that coin's own volatility. A coin with no line costs nothing beyond
@@ -147,6 +149,11 @@ export class CoinScanService {
    * attempts at it had all failed, and the user ruled that "收敛算法实现不了"
    * (10-19-fakeout-retest-quality/research/HANDOFF.md §3.1). The user draws the
    * lines; the scan only measures the distance.
+   *
+   * 10/21: the 选品 module became a two-step pipeline — this method (UI label
+   * 「主升浪候选」) is the candidate half, and `scanWatch` (「标线监控」) is the
+   * follow-up half. Both measure 距线 through the same `measureLevelAlert`, so
+   * their numbers can never drift apart.
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
     // Discard stale rate-limit warnings (e.g. left by an earlier scan) so only
@@ -192,25 +199,9 @@ export class CoinScanService {
      * Only the timeframes the user actually drew on are measured — the scan
      * fetches a timeframe's candles ONLY for instruments that have a line on it,
      * so the extra requests scale with the number of watched coins, not with
-     * the pool.
+     * the pool. Shared verbatim with `scanWatch` (see `loadLinesByTimeframe`).
      */
-    const linesByTimeframe = new Map<ReviewTimeframe, Map<string, LevelLine[]>>();
-    if (this.drawingStore) {
-      for (const timeframe of scanTimeframes) {
-        const drawings = this.drawingStore.listDrawingsByTimeframe(timeframe);
-        if (!drawings.length) continue;
-        const byInstrument = new Map<string, LevelLine[]>();
-        for (const drawing of drawings) {
-          const lines = linesFromDrawings([drawing], drawing.instrument, timeframe);
-          if (!lines.length) continue;
-          const canonical = canonicalInstrument(drawing.instrument);
-          const bucket = byInstrument.get(canonical) ?? [];
-          bucket.push(...lines);
-          byInstrument.set(canonical, bucket);
-        }
-        if (byInstrument.size) linesByTimeframe.set(timeframe, byInstrument);
-      }
-    }
+    const linesByTimeframe = this.loadLinesByTimeframe();
 
     // ---- Stage 1: the coarse timeframe for the WHOLE candidate pool ----
     // Per-instrument failures are isolated here (10/13): one timed-out klines
@@ -261,16 +252,7 @@ export class CoinScanService {
       try {
         const completed = await this.completedCandles(ticker, timeframe, anchor, refresh);
         const lines = linesByTimeframe.get(timeframe)?.get(canonicalInstrument(ticker.instrument)) ?? [];
-        // 10/21: the line was drawn on ANOTHER venue's chart, so its price has
-        // to be carried into this venue's price basis before the distance is
-        // meaningful. `scaleLinesToSource` uses the drawing's frozen reference
-        // (the close of the bar it was drawn on) and this source's close at the
-        // same instant; when either is missing it falls back to factor 1 and
-        // says so.
-        const { lines: scaled, notes } = scaleLinesToSource(lines, (refTime) => closeAt(completed, refTime));
-        for (const note of notes) scaleNotes.add(`${ticker.instrument} ${timeframe}: ${note}`);
-        const at = completed.at(-1)?.timestamp ?? anchor;
-        const alert = levelAlert(completed, scaled, at, scaleStartIndex(completed, scaled));
+        const alert = measureLevelAlert(completed, lines, ticker.instrument, timeframe, anchor, scaleNotes);
         return { ticker, timeframe, alert };
       } catch (error) {
         if (isIpBanned(this.rateLimitGate)) throw error;
@@ -292,16 +274,10 @@ export class CoinScanService {
       for (const timeframe of scanTimeframes) {
         if (timeframe === COARSE_TIMEFRAME) {
           // Already fetched in stage 1 — the coarse window IS this series.
-          // Same canonical match and same cross-venue price basis as stage 2.
+          // Same canonical match, same cross-venue price basis and same shared
+          // measurement as stage 2 (`measureLevelAlert`).
           const lines = linesByTimeframe.get(timeframe)?.get(canonicalInstrument(ticker.instrument)) ?? [];
-          const at = completed.at(-1)?.timestamp ?? anchor;
-          if (!lines.length) {
-            levelAlerts[timeframe] = null;
-            continue;
-          }
-          const { lines: scaled, notes } = scaleLinesToSource(lines, (refTime) => closeAt(completed, refTime));
-          for (const note of notes) scaleNotes.add(`${ticker.instrument} ${timeframe}: ${note}`);
-          levelAlerts[timeframe] = levelAlert(completed, scaled, at, scaleStartIndex(completed, scaled));
+          levelAlerts[timeframe] = measureLevelAlert(completed, lines, ticker.instrument, timeframe, anchor, scaleNotes);
           continue;
         }
         levelAlerts[timeframe] = alertByCoinAndTimeframe.get(`${ticker.instrument}:${timeframe}`) ?? null;
@@ -334,15 +310,10 @@ export class CoinScanService {
      * user draws the lines, so the only meaningful order is "how close is the
      * price to my line".
      *
-     * Key: the smallest ratio (distance ÷ that coin's own volatility scale) wins.
-     * A row with no line at all has no ratio and sinks below every measured one.
+     * Key: the smallest ratio (distance ÷ that coin's own volatility scale) wins
+     * (`closestRatio`, shared with `scanWatch`). A row with no line at all has
+     * no ratio and sinks below every measured one.
      */
-    const closestRatio = (row: ScanRow): number => {
-      const ratios = Object.values(row.levelAlerts)
-        .filter((alert): alert is LevelAlert => alert !== null)
-        .map((alert) => alert.ratio);
-      return ratios.length ? Math.min(...ratios) : Number.POSITIVE_INFINITY;
-    };
     scanned.sort((a, b) => closestRatio(a) - closestRatio(b));
     // Echo the effective params, including the resolved scope and anchor
     // (Date.now() when absent), so the response always reflects what ran.
@@ -379,6 +350,120 @@ export class CoinScanService {
     // Present only when at least one line degraded — a degraded line still
     // measures, but on the wrong price basis, so the user has to know.
     if (scaleNotes.size > 0) response.levelScaleNotes = [...scaleNotes];
+    return response;
+  }
+
+  /**
+   * 标线监控 (`method=watch`, 10/21): the follow-up half of the 选品 pipeline.
+   *
+   * The shrink scan's row criterion is the 1D coarse screen — which is correct
+   * for FINDING candidates, but wrong for FOLLOWING them: a coin the user drew
+   * a line on disappears from the list the day it stops satisfying the 盘整
+   * gates (a trending stretch, a widened range), exactly when it may be
+   * approaching the marked level. The watch view therefore uses the OPPOSITE
+   * row criterion: every instrument with a drawn line (canonical matching, union
+   * across the five scan timeframes), regardless of the coarse screen, the
+   * scope, the volume floor or market hours.
+   *
+   * Everything else is shared with `scanShrink` deliberately — `loadLinesByTimeframe`,
+   * `completedCandles`, `measureLevelAlert`, `closestRatio` — so a marked coin
+   * reads the SAME distance here as it does in a same-moment candidate scan.
+   *
+   * The one watch-specific channel is `missingInstruments`: a line drawn on a
+   * chart whose coin this source does not carry (a Bitget-only listing read on
+   * OKX, say) is reported rather than silently dropped — the user's reaction is
+   * "switch source", not "my coin vanished".
+   */
+  async scanWatch(params: LevelWatchParams): Promise<LevelWatchResponse> {
+    this.rateLimitGate.takeWarnings();
+    const tickers = await this.tickerSource.listTickers();
+    const anchor = params.anchor ?? Date.now();
+    // Same freshness rule as the shrink scan: a watch without an anchor is a
+    // live read (refresh), one with a historical anchor replays that moment.
+    const refresh = params.anchor === undefined;
+    const linesByTimeframe = this.loadLinesByTimeframe();
+
+    // The watch list: every instrument the user drew a line on, in ANY scan
+    // timeframe, resolved against THIS source's tickers by canonical name.
+    const markedCanonical = new Set<string>();
+    for (const byInstrument of linesByTimeframe.values()) {
+      for (const canonical of byInstrument.keys()) markedCanonical.add(canonical);
+    }
+    const tickerByCanonical = new Map<string, Ticker>();
+    for (const ticker of tickers) {
+      tickerByCanonical.set(canonicalInstrument(ticker.instrument), ticker);
+    }
+    const watchTickers: Ticker[] = [];
+    const missingInstruments: string[] = [];
+    for (const canonical of markedCanonical) {
+      const ticker = tickerByCanonical.get(canonical);
+      if (ticker) watchTickers.push(ticker);
+      else missingInstruments.push(canonical);
+    }
+
+    const failedInstruments = new Set<string>();
+    const scaleNotes = new Set<string>();
+    // Deliberately NO scope / pool-policy / volume / session gating (10/21):
+    // the rows are the user's own watch list, not a candidate pool. A marked
+    // coin of the other sub-module still belongs here, and a closed market's
+    // candles are filtered per-bar by `completedCandles` anyway — a closed
+    // stretch reads as "no candles", never as "quiet".
+    const tasks = watchTickers.flatMap((ticker) =>
+      [...linesByTimeframe.entries()]
+        .filter(([, byInstrument]) => byInstrument.has(canonicalInstrument(ticker.instrument)))
+        .map(([timeframe]) => ({ ticker, timeframe })),
+    );
+    const results = await mapLimit(tasks, SCAN_CONCURRENCY, async ({ ticker, timeframe }) => {
+      try {
+        const completed = await this.completedCandles(ticker, timeframe, anchor, refresh);
+        const lines = linesByTimeframe.get(timeframe)?.get(canonicalInstrument(ticker.instrument)) ?? [];
+        return { ticker, timeframe, alert: measureLevelAlert(completed, lines, ticker.instrument, timeframe, anchor, scaleNotes) };
+      } catch (error) {
+        if (isIpBanned(this.rateLimitGate)) throw error;
+        failedInstruments.add(ticker.instrument);
+        // Same isolation rule as the shrink scan's stage 2: a coin whose
+        // line-timeframe fetch failed loses its row rather than reporting a
+        // half-measured distance — the omission is visible in failedInstruments.
+        return { ticker, timeframe, alert: null };
+      }
+    });
+    const alertByCoinAndTimeframe = new Map<string, LevelAlert>();
+    for (const { ticker, timeframe, alert } of results) {
+      if (alert !== null) alertByCoinAndTimeframe.set(`${ticker.instrument}:${timeframe}`, alert);
+    }
+
+    const scanned: ScanRow[] = [];
+    for (const ticker of watchTickers) {
+      if (failedInstruments.has(ticker.instrument)) continue;
+      const levelAlerts = {} as Record<ReviewTimeframe, LevelAlert | null>;
+      for (const timeframe of scanTimeframes) {
+        levelAlerts[timeframe] = alertByCoinAndTimeframe.get(`${ticker.instrument}:${timeframe}`) ?? null;
+      }
+      scanned.push({
+        instrument: ticker.instrument,
+        lastPrice: ticker.lastPrice,
+        change24h: ticker.change24h,
+        quoteVolume24h: ticker.quoteVolume24h,
+        levelAlerts,
+        alertTimeframes: scanTimeframes.filter((timeframe) => levelAlerts[timeframe]?.state === 'alert'),
+        // No `coarse`: the watch view has no screen verdict — the row criterion
+        // is "the user drew a line", not "the daily box passed", so there is
+        // nothing to echo. The results table renders the structure column as `—`.
+      });
+    }
+    // Closest to a drawn line first — the same key the shrink scan sorts by.
+    scanned.sort((a, b) => closestRatio(a) - closestRatio(b));
+
+    const response: LevelWatchResponse = {
+      scanned,
+      params: { ...params, anchor },
+      scannedAt: new Date().toISOString(),
+    };
+    if (missingInstruments.length > 0) response.missingInstruments = missingInstruments;
+    if (failedInstruments.size > 0) response.failedInstruments = [...failedInstruments];
+    if (scaleNotes.size > 0) response.levelScaleNotes = [...scaleNotes];
+    const warnings = this.rateLimitGate.takeWarnings();
+    if (warnings.length > 0) response.warnings = warnings;
     return response;
   }
 
@@ -476,6 +561,32 @@ export class CoinScanService {
   }
 
   /**
+   * The user's drawn levels, per timeframe, keyed by the CANONICAL instrument
+   * name — the one loading path both the shrink scan and the watch view read
+   * (10/21). See the caller comment in `scanShrink` for the cross-venue naming
+   * background; only `horizontal` and `ray` kinds carry into it.
+   */
+  private loadLinesByTimeframe(): Map<ReviewTimeframe, Map<string, LevelLine[]>> {
+    const linesByTimeframe = new Map<ReviewTimeframe, Map<string, LevelLine[]>>();
+    if (!this.drawingStore) return linesByTimeframe;
+    for (const timeframe of scanTimeframes) {
+      const drawings = this.drawingStore.listDrawingsByTimeframe(timeframe);
+      if (!drawings.length) continue;
+      const byInstrument = new Map<string, LevelLine[]>();
+      for (const drawing of drawings) {
+        const lines = linesFromDrawings([drawing], drawing.instrument, timeframe);
+        if (!lines.length) continue;
+        const canonical = canonicalInstrument(drawing.instrument);
+        const bucket = byInstrument.get(canonical) ?? [];
+        bucket.push(...lines);
+        byInstrument.set(canonical, bucket);
+      }
+      if (byInstrument.size) linesByTimeframe.set(timeframe, byInstrument);
+    }
+    return linesByTimeframe;
+  }
+
+  /**
    * One (coin, timeframe) candle fetch, reduced to the bars a detector may see:
    * the still-forming bar is dropped BY TIME (the cache may or may not hold it,
    * so slicing the newest element unconditionally would wrongly drop the newest
@@ -523,6 +634,39 @@ function closeAt(candles: readonly Candlestick[], timestamp: number): number | u
     if (candle.timestamp < timestamp && (!best || candle.timestamp > best.timestamp)) best = candle;
   }
   return best?.close;
+}
+
+/**
+ * One 距线 measurement over ALREADY-FETCHED candles: carry the lines into this
+ * source's price basis (`scaleLinesToSource`, 10/21) and let `levelAlert` do the
+ * arithmetic. The single measurement path shared by the shrink scan (stage 2
+ * and its 1D stage-1 reuse) and the watch view (10/21), so a marked coin reads
+ * the same distance in both — an accepted AC of the 标线监控 task.
+ */
+function measureLevelAlert(
+  candles: readonly Candlestick[],
+  lines: readonly LevelLine[],
+  instrument: string,
+  timeframe: ReviewTimeframe,
+  anchor: number,
+  scaleNotes: Set<string>,
+): LevelAlert | null {
+  const { lines: scaled, notes } = scaleLinesToSource(lines, (refTime) => closeAt(candles, refTime));
+  for (const note of notes) scaleNotes.add(`${instrument} ${timeframe}: ${note}`);
+  const at = candles.at(-1)?.timestamp ?? anchor;
+  return levelAlert(candles, scaled, at, scaleStartIndex(candles, scaled));
+}
+
+/**
+ * A row's best (smallest) distance-to-line ratio across timeframes — the sort
+ * key both the shrink scan and the watch view use (10/21). A row with no
+ * measurable line has no ratio and sinks below every measured one.
+ */
+function closestRatio(row: ScanRow): number {
+  const ratios = Object.values(row.levelAlerts)
+    .filter((alert): alert is LevelAlert => alert !== null)
+    .map((alert) => alert.ratio);
+  return ratios.length ? Math.min(...ratios) : Number.POSITIVE_INFINITY;
 }
 
 /** Runs `mapper` over `items` with at most `concurrency` in-flight promises. */

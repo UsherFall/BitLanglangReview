@@ -1764,7 +1764,7 @@ label,
   color: #8b949e;
 }
 
-/* 距你标的线列:每个周期一行(周期 / 距线% / 状态)。 */
+/* 距线列:每个周期一行(周期 / 距线% / 状态)。 */
 .coin-scan-level {
   display: flex;
   align-items: baseline;

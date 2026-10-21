@@ -72,7 +72,7 @@ describe('resolveCandleChain', () => {
 describe('canonicalInstrument（匹配用，10/21）', () => {
   it('把三个交易所的写法归一到同一个名', () => {
     // 画线存在 OKX 名（交割单复盘），扫描池是 Bitget/Binance 名 —— 修复前
-    // 按名字精确匹配，一根线都匹配不上，「距你标的线」永远是 `—`。
+    // 按名字精确匹配，一根线都匹配不上，「距线」永远是 `—`。
     expect(canonicalInstrument('BTC-USDT-SWAP')).toBe('BTCUSDT');
     expect(canonicalInstrument('BTC-USDT')).toBe('BTCUSDT');
     expect(canonicalInstrument('BTCUSDT')).toBe('BTCUSDT');

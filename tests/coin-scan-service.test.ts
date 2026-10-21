@@ -227,7 +227,7 @@ const requestedTimeframes = (source: Source, instrument: string) => [
 
 const params: ShrinkScanParams = { method: 'shrink', minQuoteVolume24h: 0 };
 
-describe('CoinScanService (coarse screen → 距你标的线)', () => {
+describe('CoinScanService (coarse screen → 距线)', () => {
   it('fetches 1D for the whole pool and NO other timeframe when nobody drew a line', async () => {
     const source = poolSource({
       [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' },
@@ -768,6 +768,176 @@ describe('CoinScanService · 距线的匹配与价位换算（10/21）', () => {
     const btc = result.scanned.find((row) => row.instrument === BTC);
     expect(btc?.levelAlerts['1D']).not.toBeNull();
     expect(result.levelScaleNotes?.length).toBeGreaterThan(0);
+    store.close();
+  });
+});
+
+describe('CoinScanService · 标线监控 (scanWatch, 10/21)', () => {
+  /** A fresh in-memory store carrying one horizontal line per given instrument. */
+  function storeWithLines(entries: ReadonlyArray<{ instrument: string; timeframe: ReviewTimeframe; price: number }>): DrawingStore {
+    const store = new DrawingStore(':memory:');
+    for (const { instrument, timeframe, price } of entries) {
+      store.saveDrawing({ tradeId: null, instrument, timeframe, kind: 'horizontal', points: [{ time: 1, price }] });
+    }
+    return store;
+  }
+
+  function watchService(source: Source, store: DrawingStore): CoinScanService {
+    return new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    );
+  }
+
+  it('returns every drawn-line instrument — INCLUDING the ones the coarse screen rejects', async () => {
+    // BTC's 1D is a hard trend (the screen's rejected tier) yet it has a line:
+    // the watch view's row criterion is "you drew a line", not "the box passed".
+    // This is the exact case the 10/21 task exists for — a marked coin used to
+    // vanish from the 选品 list the day it stopped satisfying the 盘整 gates.
+    const store = storeWithLines([
+      { instrument: BTC, timeframe: '1D', price: 100 },
+      { instrument: ETH, timeframe: '1D', price: 100 },
+    ]);
+    const source = poolSource({ [BTC]: { '1D': 'trend' }, [ETH]: { '1D': 'flat' } });
+
+    const watch = await watchService(source, store).scanWatch({ method: 'watch' });
+    expect(watch.scanned.map((row) => row.instrument)).toEqual([ETH, BTC]);
+    // No screen verdict on a watch row — there is nothing to echo.
+    expect(watch.scanned.every((row) => row.coarse === undefined)).toBe(true);
+
+    // The contrast: the same pool, same store, candidate scan — BTC is gone.
+    const scan = await watchService(source, store).scanShrink(params);
+    expect(scan.scanned.map((row) => row.instrument)).toEqual([ETH]);
+    store.close();
+  });
+
+  it('keeps a closed-market marked coin (monitoring is follow-up, not candidate scanning)', async () => {
+    // Saturday: the equity sub-module's whole pool is skipped by the candidate
+    // scan, but the watch list still follows TSLA — its Friday candles are the
+    // latest real data, and the user's line does not expire with market hours.
+    const saturdayMs = Date.UTC(2026, 2, 14, 13, 30);
+    const store = storeWithLines([{ instrument: TSLA, timeframe: '1D', price: 100 }]);
+    const source = equitySource();
+
+    const watch = await watchService(source, store).scanWatch({ method: 'watch', anchor: saturdayMs });
+    expect(watch.scanned.map((row) => row.instrument)).toEqual([TSLA]);
+
+    const scan = await watchService(source, store).scanShrink({ ...params, scope: 'equity', anchor: saturdayMs });
+    expect(scan.scanned).toEqual([]);
+    expect(scan.skippedInstruments).toContain(TSLA);
+    store.close();
+  });
+
+  it('reports marked instruments the source cannot resolve instead of dropping them silently', async () => {
+    const store = storeWithLines([
+      { instrument: 'NOPEUSDT', timeframe: '1D', price: 100 },
+      { instrument: ETH, timeframe: '1D', price: 100 },
+    ]);
+    const source = poolSource({ [ETH]: { '1D': 'flat' } });
+
+    const watch = await watchService(source, store).scanWatch({ method: 'watch' });
+
+    expect(watch.scanned.map((row) => row.instrument)).toEqual([ETH]);
+    expect(watch.missingInstruments).toEqual(['NOPEUSDT']);
+    // Its own channel — never folded into the fetch-failure list.
+    expect(watch.failedInstruments).toBeUndefined();
+    store.close();
+  });
+
+  it('sorts by the closest drawn line, exactly like the candidate scan', async () => {
+    // ETH's price sits on its line (ratio 0); BTC's 1D trends far above its
+    // line — the closer coin must come first.
+    const store = storeWithLines([
+      { instrument: BTC, timeframe: '1D', price: 50 },
+      { instrument: ETH, timeframe: '1D', price: 100 },
+    ]);
+    const source = poolSource({ [BTC]: { '1D': 'trend' }, [ETH]: { '1D': 'flat' } });
+
+    const watch = await watchService(source, store).scanWatch({ method: 'watch' });
+
+    expect(watch.scanned.map((row) => row.instrument)).toEqual([ETH, BTC]);
+    store.close();
+  });
+
+  it('drops the row when a line-timeframe fetch fails, and reports it', async () => {
+    const store = storeWithLines([
+      { instrument: BTC, timeframe: '1D', price: 100 },
+      { instrument: ETH, timeframe: '1D', price: 100 },
+    ]);
+    const source = poolSource({ [BTC]: { '1D': 'flat' }, [ETH]: { '1D': 'flat' } });
+    const failing = sourceFailingOn(source, (instrument) => instrument === BTC, TIMEOUT_ERROR);
+
+    const watch = await watchService(failing, store).scanWatch({ method: 'watch' });
+
+    expect(watch.scanned.map((row) => row.instrument)).toEqual([ETH]);
+    expect(watch.failedInstruments).toEqual([BTC]);
+    store.close();
+  });
+
+  it('aborts the whole watch when the IP was banned (HTTP 418)', async () => {
+    const store = storeWithLines([{ instrument: ETH, timeframe: '1D', price: 100 }]);
+    const source = sourceFailingOn(poolSource({ [ETH]: { '1D': 'flat' } }), () => true, new Error('HTTP 418 (IP auto-banned)'));
+    const service = new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      { takeWarnings: () => [], reason: () => '418' },
+      store,
+    );
+
+    await expect(service.scanWatch({ method: 'watch' })).rejects.toThrow('HTTP 418');
+    store.close();
+  });
+
+  it('measures a marked coin through the SAME numbers as the candidate scan (shared code path)', async () => {
+    // The AC of the task: same store, same source, same anchor — the watch row's
+    // levelAlerts are byte-identical to the candidate scan's, because both go
+    // through the same measureLevelAlert. If they ever drift, this fails.
+    const store = storeWithLines([
+      { instrument: BTC, timeframe: '1D', price: 100 },
+      { instrument: BTC, timeframe: '5m', price: 100 },
+      { instrument: ETH, timeframe: '1D', price: 100 },
+      { instrument: ETH, timeframe: '5m', price: 100 },
+    ]);
+    const anchor = Date.parse('2026-10-12T00:00:00Z');
+    const source = poolSource({
+      [BTC]: { '5m': 'strong', '1D': 'flat' },
+      [ETH]: { '5m': 'strong', '1D': 'flat' },
+    });
+    const service = watchService(source, store);
+
+    const scan = await service.scanShrink({ ...params, anchor });
+    const watch = await service.scanWatch({ method: 'watch', anchor });
+
+    for (const instrument of [BTC, ETH]) {
+      const scanRow = scan.scanned.find((row) => row.instrument === instrument);
+      const watchRow = watch.scanned.find((row) => row.instrument === instrument);
+      expect(watchRow).toBeDefined();
+      expect(watchRow?.levelAlerts).toEqual(scanRow?.levelAlerts);
+      expect(watchRow?.alertTimeframes).toEqual(scanRow?.alertTimeframes);
+    }
+    store.close();
+  });
+
+  it('echoes the resolved anchor and refreshes only when it is absent', async () => {
+    const store = storeWithLines([{ instrument: ETH, timeframe: '1D', price: 100 }]);
+    const pastAnchor = Date.parse('2026-08-04T00:00:00Z');
+    const source = poolSource({ [ETH]: { '1D': 'flat' } });
+    const service = watchService(source, store);
+
+    const live = await service.scanWatch({ method: 'watch' });
+    expect(typeof live.params.anchor).toBe('number');
+
+    source.getCandlesticks.mockClear();
+    const replay = await service.scanWatch({ method: 'watch', anchor: pastAnchor });
+    expect(replay.params.anchor).toBe(pastAnchor);
+    expect(source.getCandlesticks.mock.calls.length).toBeGreaterThan(0);
+    for (const call of source.getCandlesticks.mock.calls) {
+      if (call[0].instrument === ETH) {
+        expect(call[0]).toEqual(expect.objectContaining({ anchor: pastAnchor, refresh: false }));
+      }
+    }
     store.close();
   });
 });

@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { scanTimeframes, type ScanResponse, type ScanRow } from '../src/domain/coin-scan';
+import { scanTimeframes, type LevelWatchResponse, type ScanResponse, type ScanRow } from '../src/domain/coin-scan';
 import type { LevelAlert } from '../src/domain/level-alert';
 import { CoinScanResults, type CoinScanResultsProps } from '../src/ui/CoinScanPanel';
 
@@ -52,6 +52,18 @@ function scanResponse(instruments: string[] = ['AAAUSDT']): ScanResponse {
       netPctThreshold: 0.06,
       candidates: 465,
     },
+  };
+}
+
+function watchResponse(instruments: string[] = ['AAAUSDT']): LevelWatchResponse {
+  // Watch rows carry NO coarse verdict — the row criterion is "the user drew a
+  // line", not "the daily box passed".
+  const scanned = instruments.map((instrument) => ({ ...scanRow(instrument), coarse: undefined }));
+  return {
+    scanned,
+    params: { method: 'watch', anchor: 1_700_000_000_000 },
+    scannedAt: '2026-10-21T00:00:00.000Z',
+    missingInstruments: ['ZZZUSDT'],
   };
 }
 
@@ -133,7 +145,7 @@ describe('CoinScanResults', () => {
     const { container } = renderResults();
 
     const headers = [...container.querySelectorAll('.coin-scan-table thead th')].map((th) => th.textContent);
-    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '距你标的线', '操作']);
+    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '距线', '操作']);
 
     const cell = container.querySelector('.coin-scan-coarse');
     // 区间/净漂移 are pool-relative measures, 位 is the row's position inside its
@@ -259,7 +271,7 @@ describe('CoinScanResults · 展示层只出 20 个（10/21）', () => {
   });
 
   it('降权沉底在截断之前：被降权的币不占前 20 的位置', () => {
-    // 服务端按「距你标的线最近」排序；用户降权的币沉到最末。截断取前 20，
+    // 服务端按「距线最近」排序；用户降权的币沉到最末。截断取前 20，
     // 所以被降权的那个必须出现在第 20 名之后（而不是被截掉前排的名额）。
     const { container } = renderResults({ result: scanResponse(many), demotedCoins: ['C00USDT'] });
 
@@ -275,5 +287,30 @@ describe('CoinScanResults · 展示层只出 20 个（10/21）', () => {
     expect(renderedInstruments(container)).toHaveLength(2);
     const buttons = Array.from(container.querySelectorAll('button')).map((button) => button.textContent ?? '');
     expect(buttons.some((text) => text.includes('显示更多'))).toBe(false);
+  });
+});
+
+describe('CoinScanResults · 标线监控视图（10/21）', () => {
+  it('renders the watch payload with a watch header and no screen columns', () => {
+    const { container } = renderResults({ result: watchResponse(['AAAUSDT', 'BBBUSDT']) });
+
+    expect(container.querySelector('.detail-header h1')?.textContent).toBe('标线监控');
+    // No coarse screen → no structure measures, no coarse note, no candidates.
+    expect(container.querySelector('.coin-scan-coarse')).toBeNull();
+    expect(container.querySelector('.coin-scan-note')).toBeNull();
+    const summary = container.querySelector('.detail-header p')?.textContent ?? '';
+    expect(summary).toContain('监控 2 个画线币');
+    expect(summary).toContain('贴近 2 个');
+    expect(summary).not.toContain('候选');
+    // The 距线 column still renders — the watch view shares the measurement path.
+    expect(container.querySelector('.coin-scan-level')).not.toBeNull();
+  });
+
+  it('reports unresolvable marked instruments as their own hint (not a fetch failure)', () => {
+    const { container } = renderResults({ result: watchResponse() });
+
+    const hints = Array.from(container.querySelectorAll('.coin-scan-skip-hint'));
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.textContent).toContain('ZZZUSDT');
   });
 });

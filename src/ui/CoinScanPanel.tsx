@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { scanTimeframes, type ScanResponse, type ScanRow } from '../domain/coin-scan';
+import { scanTimeframes, type LevelWatchResponse, type ScanResponse, type ScanRow, type CoarseSummary } from '../domain/coin-scan';
 import type { LevelAlert, LevelAlertState } from '../domain/level-alert';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { MarketHeatResult } from '../domain/market-heat';
@@ -17,9 +17,10 @@ import type { BoxBraceScanResponse } from '../server/coin-scan-service';
 import { shortInstrument } from '../domain/instrument-symbol';
 import { orderScanRows } from './coin-scan-rows';
 
-/** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显。 */
+/** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显；`watch` 跨品种，无 scope。 */
 export type ScanResult =
   | { method: 'shrink'; data: ScanResponse }
+  | { method: 'watch'; data: LevelWatchResponse }
   | { method: 'box'; data: BoxBraceScanResponse }
   | { method: 'heat'; data: MarketHeatResult; anchorLabel: string };
 
@@ -79,7 +80,7 @@ function topNInput(value: number | undefined): string {
 }
 
 export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange }: CoinScanPanelProps) {
-  const [method, setMethod] = useState<'shrink' | 'heat' | 'box'>('shrink');
+  const [method, setMethod] = useState<'shrink' | 'watch' | 'heat' | 'box'>('shrink');
   // 行情源: 初值 = 共享默认源, 挂载后由服务端启动源校正(见下)。
   const [source, setSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
   // 参数默认值按「源 × 品种」推导(成交额下限分级: 各源体量不同)。扫描数量留空 =
@@ -175,12 +176,16 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange 
       }
       if (anchorEpoch !== null) query.set('anchor', String(anchorEpoch));
       const response = await fetch(`/api/scan?${query.toString()}`);
-      const payload = (await response.json()) as (ScanResponse | MarketHeatResult) & { error?: string };
+      const payload = (await response.json()) as (ScanResponse | LevelWatchResponse | MarketHeatResult) & { error?: string };
       if (!response.ok) throw new Error(payload.error || '扫描失败');
       if (method === 'heat') {
         const heat = payload as MarketHeatResult;
         setScanWarnings(heat.warnings ?? []);
         onScanned({ method: 'heat', data: heat, anchorLabel: anchorScanLabel(anchorEpoch) });
+      } else if (method === 'watch') {
+        const watch = payload as LevelWatchResponse;
+        setScanWarnings(watch.warnings ?? []);
+        onScanned({ method: 'watch', data: watch });
       } else {
         const scan = payload as ScanResponse;
         setScanWarnings(scan.warnings ?? []);
@@ -227,10 +232,13 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange 
       </div>
       <label>
         方法
-        <select value={method} onChange={(event) => setMethod(event.target.value as 'shrink' | 'heat')}>
-          {/* 10/20: 收敛结构 → 距线。收敛检测器已删除（用户明确「收敛算法实现不了」），
-              现在这个方法报的是"现价距你标的线还有多少"。 */}
-          <option value="shrink">距你标的线</option>
+        <select value={method} onChange={(event) => setMethod(event.target.value as 'shrink' | 'watch' | 'heat')}>
+          {/* 10/21: 「距你标的线」→「主升浪候选」。这个方法找的是 1D 粗筛存活的盘整币
+              （盘得够久 + 收住了 + 不在趋势中）——「有机会开主升浪」的候选；名字说的是
+              它扫什么，「距线」只是行内读数（线的精度来自你，不来自算法）。 */}
+          <option value="shrink">主升浪候选</option>
+          {/* 10/21 标线监控：你画过线的币的持续跟进 —— 不经过粗筛，行集合就是画线名单。 */}
+          <option value="watch">标线监控</option>
           {scope === 'crypto' && <option value="heat">热度</option>}
         </select>
       </label>
@@ -265,9 +273,13 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange 
           : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
         {method === 'shrink'
           ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中,再排除趴在序列绝对底部的品种),每币一行。'
-            + '「距你标的线」用的是你自己画的线(水平线/趋势线):价格离那条线近 → 贴近,远 → 不接近,'
-            + '距离按该币自己的波动折算(所以 BTC 和山寨币的门槛不一样)。没画线的币只报距线为「—」。'
+            + '「主升浪候选」找的是盘整里有机会开主升浪的币;行内「距线」列报现价离你自己画的线(水平线/射线)还有多远 — '
+            + '距离按该币自己的波动折算(所以 BTC 和山寨币的门槛不一样),近 → 贴近,远 → 不接近;没画线的币显示「—」。'
             + '时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
+          : method === 'watch'
+          ? '标线监控:只列你画过线的币(所有周期、跨品种),不经过粗筛 —— 画了线但已不满足盘整口径的币照样在。'
+            + '每行报现价、24h 涨跌和各周期距线三档(贴近/接近/远),按离线最近排序;当前行情源解析不到的画线币会单独提示。'
+            + '时间点留空 = 现在,填入则回放该时刻的状态。'
           : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
       </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
@@ -282,7 +294,8 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange 
 }
 
 export type CoinScanResultsProps = {
-  result: ScanResponse | null;
+  /** The shrink scan's response OR the watch view's — both render through this table. */
+  result: ScanResponse | LevelWatchResponse | null;
   leaderCoins: string[];
   onToggleLeaderCoin: (instrument: string) => void;
   /** Instruments the user manually demoted (日线结构不适合做多); rendered last and dimmed. */
@@ -295,6 +308,15 @@ export type CoinScanResultsProps = {
    */
   onDrawLevel?: (instrument: string) => void;
 };
+
+/**
+ * Whether a results payload is the 标线监控 (watch) view's. The watch view has no
+ * scope and no coarse screen — its rows are the user's drawn lines — so the
+ * results table branches on this instead of reading screen fields.
+ */
+function isLevelWatchResult(result: ScanResponse | LevelWatchResponse): result is LevelWatchResponse {
+  return result.params.method === 'watch';
+}
 
 export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demotedCoins, onToggleDemotedCoin, onDrawLevel }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
@@ -328,11 +350,28 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
+  // The watch view reuses this table with a different row criterion: there is no
+  // scope (it crosses 品种) and no coarse screen (rows are the drawn lines, not
+  // the 盘整 survivors), so the header/stat line and the structure column adapt.
+  let coarse: CoarseSummary | undefined;
+  let scopeLabel: string | null;
+  let missingInstruments: string[] | undefined;
+  let skippedInstruments: string[] | undefined;
+  let metadataUnavailable: boolean | undefined;
+  if (isLevelWatchResult(result)) {
+    scopeLabel = null;
+    missingInstruments = result.missingInstruments;
+  } else {
+    scopeLabel = SCOPE_LABELS[result.params.scope ?? 'crypto'];
+    coarse = result.coarse;
+    skippedInstruments = result.skippedInstruments;
+    metadataUnavailable = result.metadataUnavailable;
+  }
   // The service sorts scanned rows (10/20: the coin whose price is CLOSEST to a
   // line the user drew comes first) and the UI keeps that order, except that
   // manually demoted rows sink to the bottom (a stable partition, not a re-rank).
   const rows = orderScanRows(result.scanned, demotedCoins);
-  // 行入选 = 通过 1D 粗筛;「贴近」是行内子集(你画了线、且价格已经贴到线边的币)。
+  // 行入选: shrink = 通过 1D 粗筛;watch = 画了线。「贴近」是行内子集(价格已贴到线边的币)。
   const alertRows = rows.filter((row) => row.alertTimeframes.length > 0).length;
   // The DISPLAY cut (10/21). Demoted rows already sank to the bottom, so they
   // never hold one of the 20 slots — a coin the user explicitly pushed down must
@@ -343,10 +382,12 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
     <>
       <header className="detail-header">
         <div>
-          <h1>选品结果 · {SCOPE_LABELS[result.params.scope ?? 'crypto']}</h1>
+          <h1>{scopeLabel ? `选品结果 · ${scopeLabel}` : '标线监控'}</h1>
           <p>
-            粗筛 {result.scanned.length} 个{result.coarse ? ` · 候选 ${result.coarse.candidates} 个` : ''} · 贴近 {alertRows} 个
-            {result.coarse ? ` · 日线窗口 ${result.coarse.windowDays} 天` : ''}
+            {scopeLabel
+              ? `粗筛 ${result.scanned.length} 个${coarse ? ` · 候选 ${coarse.candidates} 个` : ''} · 贴近 ${alertRows} 个`
+              : `监控 ${result.scanned.length} 个画线币 · 贴近 ${alertRows} 个`}
+            {coarse ? ` · 日线窗口 ${coarse.windowDays} 天` : ''}
             {hiddenRows > 0 ? ` · 显示 ${visibleRows.length} 个` : ''}
             {hiddenRows > 0 && (
               <button type="button" className="coin-scan-more" onClick={() => setShowAllRows(true)}>
@@ -359,9 +400,9 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               </button>
             )}
           </p>
-          {result.coarse && (
+          {coarse && (
             <p className="coin-scan-note" title="粗筛用最近 23 根日线算「区间振幅」与「净漂移」（盘得够久 / 收住了 / 不在趋势中）；「位」算的是该币在全部历史里的位置，不是 23 天。">
-              日线窗口 {result.coarse.windowDays} 天 = 最近 {result.coarse.windowDays} 根日线算「区间 / 净漂移」；「位」= 该币在全部历史里的位置。
+              日线窗口 {coarse.windowDays} 天 = 最近 {coarse.windowDays} 根日线算「区间 / 净漂移」；「位」= 该币在全部历史里的位置。
             </p>
           )}
           {result.levelScaleNotes && result.levelScaleNotes.length > 0 && (
@@ -369,9 +410,9 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               {result.levelScaleNotes.length} 条标的线未能换算到本行情源的价位（未缩放测量）
             </p>
           )}
-          {result.skippedInstruments && result.skippedInstruments.length > 0 && (
-            <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>
-              已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
+          {skippedInstruments && skippedInstruments.length > 0 && (
+            <p className="coin-scan-skip-hint" title={skippedInstruments.join(', ')}>
+              已跳过 {skippedInstruments.length} 个休市标的:{formatSkippedNames(skippedInstruments)}
             </p>
           )}
           {result.failedInstruments && result.failedInstruments.length > 0 && (
@@ -379,7 +420,12 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               已跳过 {result.failedInstruments.length} 个取数失败标的:{formatSkippedNames(result.failedInstruments)}
             </p>
           )}
-          {result.metadataUnavailable && (
+          {missingInstruments && missingInstruments.length > 0 && (
+            <p className="coin-scan-skip-hint" title={missingInstruments.join(', ')}>
+              已跳过 {missingInstruments.length} 个本行情源没有的画线标的:{formatSkippedNames(missingInstruments)}
+            </p>
+          )}
+          {metadataUnavailable && (
             <p className="coin-scan-skip-hint" title="币安 exchangeInfo 元数据不可用，本次未按交易时段过滤">
               休市过滤未生效:合约类别元数据拉取失败，本次结果可能包含休市标的
             </p>
@@ -395,7 +441,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               <th>24h 涨跌</th>
               <th>成交额</th>
               <th>结构</th>
-              <th>距你标的线</th>
+              <th>距线</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -409,7 +455,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                     <td>{formatPrice(row.lastPrice)}</td>
                     <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
                     <td>{formatVolume(row.quoteVolume24h)}</td>
-                    <td>{formatCoarse(row, result.coarse?.windowDays)}</td>
+                    <td>{formatCoarse(row, coarse?.windowDays)}</td>
                     <td>{formatLevelAlerts(row)}</td>
                     <td>
                       <button
