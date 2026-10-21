@@ -3,8 +3,10 @@ import {
   LEVEL_ALERT_RATIO,
   levelAlert,
   levelPriceAt,
+  levelScaleFactor,
   linesFromDrawings,
   median,
+  scaleLinesToSource,
   scaleStartIndex,
   volatilityScale,
   type LevelLine,
@@ -47,8 +49,8 @@ describe('levelPriceAt', () => {
     const line: LevelLine = {
       kind: 'ray',
       price: 20,
-      p1: { time: 0, price: 10 },
-      p2: { time: 100, price: 20 },
+      p1: { ms: 0, price: 10 },
+      p2: { ms: 100, price: 20 },
     };
     expect(levelPriceAt(line, 0)).toBe(10);
     expect(levelPriceAt(line, 50)).toBe(15);
@@ -61,8 +63,8 @@ describe('levelPriceAt', () => {
     const line: LevelLine = {
       kind: 'ray',
       price: 7,
-      p1: { time: 5, price: 3 },
-      p2: { time: 5, price: 7 },
+      p1: { ms: 5, price: 3 },
+      p2: { ms: 5, price: 7 },
     };
     expect(levelPriceAt(line, 5)).toBe(7);
   });
@@ -142,8 +144,8 @@ describe('levelAlert', () => {
     const line: LevelLine = {
       kind: 'ray',
       price: 100,
-      p1: { time: candles[0].timestamp, price: 100 },
-      p2: { time: at, price: 100 },
+      p1: { ms: candles[0].timestamp, price: 100 },
+      p2: { ms: at, price: 100 },
     };
     const alert = levelAlert(candles, [line], at);
     expect(alert!.distancePct).toBeCloseTo(0, 6);
@@ -227,8 +229,8 @@ describe('scaleStartIndex', () => {
       {
         kind: 'ray',
         price: 100,
-        p1: { time: candles[3].timestamp, price: 100 },
-        p2: { time: candles[5].timestamp, price: 100 },
+        p1: { ms: candles[3].timestamp, price: 100 },
+        p2: { ms: candles[5].timestamp, price: 100 },
       },
     ];
     expect(scaleStartIndex(candles, lines)).toBe(3);
@@ -236,5 +238,130 @@ describe('scaleStartIndex', () => {
 
   it('is undefined without a ray', () => {
     expect(scaleStartIndex(Array.from({ length: 5 }, (_, i) => candle(i, 100)), [])).toBeUndefined();
+  });
+});
+
+describe('时间单位：秒 / 毫秒混用（10/21）', () => {
+  it('产品的画线点（秒）被读成毫秒，射线插值不再出天文数字', () => {
+    // 画线点存的是**秒**（lightweight-charts 的 coordinateToTime），
+    // K 线的时间戳是**毫秒**。修复前两者直接相减，插值出的价位差了 1000 倍。
+    const drawings: ChartDrawing[] = [
+      {
+        id: 'ray',
+        tradeId: null,
+        instrument: 'BTCUSDT',
+        timeframe: '1D',
+        kind: 'ray',
+        // 两点相隔 100 秒，价位 100 → 90。
+        points: [
+          { time: 1_700_000_000, price: 100 },
+          { time: 1_700_000_100, price: 90 },
+        ],
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+    const lines = linesFromDrawings(drawings, 'BTCUSDT', '1D');
+    expect(lines).toHaveLength(1);
+    const p1 = lines[0].p1!;
+    const p2 = lines[0].p2!;
+    expect(p1.ms).toBe(1_700_000_000_000);
+    expect(p2.ms).toBe(1_700_000_100_000);
+    // 在两点中间取价：线性插值。
+    const mid = (p1.ms + p2.ms) / 2;
+    expect(levelPriceAt(lines[0], mid)).toBeCloseTo(95, 6);
+  });
+
+  it('研究标注的毫秒字段（t）原样透传', () => {
+    const lines = linesFromDrawings(
+      [
+        {
+          id: 'r',
+          tradeId: null,
+          instrument: 'BTCUSDT',
+          timeframe: '1D',
+          kind: 'ray',
+          points: [
+            { t: 1_700_000_000_000, price: 100 } as unknown as { time: number; price: number },
+            { t: 1_700_000_100_000, price: 90 } as unknown as { time: number; price: number },
+          ],
+          createdAt: '',
+          updatedAt: '',
+        },
+      ],
+      'BTCUSDT',
+      '1D',
+    );
+    expect(lines[0].p1!.ms).toBe(1_700_000_000_000);
+  });
+
+  it('端点时间缺失的射线整条丢弃（不产生半条线）', () => {
+    const lines = linesFromDrawings(
+      [
+        {
+          id: 'r',
+          tradeId: null,
+          instrument: 'BTCUSDT',
+          timeframe: '1D',
+          kind: 'ray',
+          points: [
+            { time: 1_700_000_000, price: 100 },
+            { time: Number.NaN, price: 90 },
+          ],
+          createdAt: '',
+          updatedAt: '',
+        },
+      ],
+      'BTCUSDT',
+      '1D',
+    );
+    expect(lines).toHaveLength(0);
+  });
+});
+
+describe('levelScaleFactor（跨交易所价位换算，10/21）', () => {
+  it('没有基准价时不换算（因子 1）', () => {
+    const scale = levelScaleFactor({ sourceClose: 100 });
+    expect(scale.factor).toBe(1);
+    expect(scale.note).toBeTruthy();
+  });
+
+  it('扫描源没有同时刻收盘价时不换算', () => {
+    const scale = levelScaleFactor({ refPrice: 100, refTime: 1, sourceClose: undefined });
+    expect(scale.factor).toBe(1);
+    expect(scale.note).toBeTruthy();
+  });
+
+  it('按同时刻的收盘价比换算', () => {
+    const scale = levelScaleFactor({ refPrice: 100, refTime: 1, sourceClose: 101 });
+    expect(scale.factor).toBeCloseTo(1.01, 6);
+    expect(scale.note).toBeUndefined();
+  });
+
+  it('因子超出可信区间时退回 1（面值改名类的跨 scale 错配）', () => {
+    const scale = levelScaleFactor({ refPrice: 1, refTime: 1, sourceClose: 1000 });
+    expect(scale.factor).toBe(1);
+    expect(scale.note).toBeTruthy();
+  });
+});
+
+describe('scaleLinesToSource（逐条换算）', () => {
+  it('每条线用自己的基准', () => {
+    const lines: LevelLine[] = [
+      { kind: 'horizontal', price: 100, refPrice: 100, refTime: 10 },
+      { kind: 'horizontal', price: 200, refPrice: 100, refTime: 20 },
+    ];
+    const closes = new Map([[10, 101], [20, 102]]);
+    const { lines: scaled, notes } = scaleLinesToSource(lines, (refTime) => closes.get(refTime));
+    expect(notes).toHaveLength(0);
+    expect(scaled[0].price).toBeCloseTo(101, 6);
+    expect(scaled[1].price).toBeCloseTo(204, 6);
+  });
+
+  it('找不到基准时代价不变并给出原因', () => {
+    const lines: LevelLine[] = [{ kind: 'horizontal', price: 100, refPrice: 100, refTime: 10 }];
+    const { lines: scaled, notes } = scaleLinesToSource(lines, () => undefined);
+    expect(scaled[0].price).toBe(100);
+    expect(notes.length).toBe(1);
   });
 });

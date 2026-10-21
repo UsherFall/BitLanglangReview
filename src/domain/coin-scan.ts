@@ -391,5 +391,14 @@ export type ScanResponse = {
    * contracts back into the results.
    */
   metadataUnavailable?: boolean;
+  /**
+   * Why a drawn level could not be carried into the scan source's price basis
+   * (10/21). A level is drawn on ONE venue's chart and measured on ANOTHER's
+   * candles, so the two price bases have to be reconciled (see
+   * `levelScaleFactor`). When that fails the level is still measured, but
+   * unscaled — which is why the reason is reported instead of swallowed.
+   * Present only when at least one level degraded.
+   */
+  levelScaleNotes?: string[];
 };
 

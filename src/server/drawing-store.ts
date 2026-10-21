@@ -10,6 +10,8 @@ type DrawingRow = {
   timeframe: ReviewTimeframe;
   kind: ChartDrawing['kind'];
   points_json: string;
+  ref_price: number | null;
+  ref_time: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -28,12 +30,15 @@ export class DrawingStore {
         timeframe text not null,
         kind text not null,
         points_json text not null,
+        ref_price real,
+        ref_time integer,
         created_at text not null,
         updated_at text not null
       );
       create index if not exists idx_chart_drawings_instrument on chart_drawings (instrument);
     `);
     this.allowNullableTradeId();
+    this.allowReferenceColumns();
   }
 
   saveDrawing(input: SaveChartDrawingInput): ChartDrawing {
@@ -46,19 +51,23 @@ export class DrawingStore {
       timeframe: input.timeframe,
       kind: input.kind,
       points: input.points,
+      refPrice: input.refPrice,
+      refTime: input.refTime,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
 
     this.db.prepare(
-      `insert into chart_drawings (id, trade_id, instrument, timeframe, kind, points_json, created_at, updated_at)
-       values (@id, @tradeId, @instrument, @timeframe, @kind, @pointsJson, @createdAt, @updatedAt)
+      `insert into chart_drawings (id, trade_id, instrument, timeframe, kind, points_json, ref_price, ref_time, created_at, updated_at)
+       values (@id, @tradeId, @instrument, @timeframe, @kind, @pointsJson, @refPrice, @refTime, @createdAt, @updatedAt)
        on conflict(id) do update set
          trade_id = excluded.trade_id,
          instrument = excluded.instrument,
          timeframe = excluded.timeframe,
          kind = excluded.kind,
          points_json = excluded.points_json,
+         ref_price = excluded.ref_price,
+         ref_time = excluded.ref_time,
          updated_at = excluded.updated_at`,
     ).run({
       id: drawing.id,
@@ -67,6 +76,8 @@ export class DrawingStore {
       timeframe: drawing.timeframe,
       kind: drawing.kind,
       pointsJson: JSON.stringify(drawing.points),
+      refPrice: drawing.refPrice ?? null,
+      refTime: drawing.refTime ?? null,
       createdAt: drawing.createdAt,
       updatedAt: drawing.updatedAt,
     });
@@ -74,10 +85,14 @@ export class DrawingStore {
     return drawing;
   }
 
-  listDrawings(input: { instrument: string }): ChartDrawing[] {
-    const rows = this.db
-      .prepare('select * from chart_drawings where instrument = @instrument order by created_at asc')
-      .all(input) as DrawingRow[];
+  listDrawings(input: { instrument: string; timeframe?: string }): ChartDrawing[] {
+    const rows = input.timeframe
+      ? (this.db
+          .prepare('select * from chart_drawings where instrument = @instrument and timeframe = @timeframe order by created_at asc')
+          .all({ instrument: input.instrument, timeframe: input.timeframe }) as DrawingRow[])
+      : (this.db
+          .prepare('select * from chart_drawings where instrument = @instrument order by created_at asc')
+          .all({ instrument: input.instrument }) as DrawingRow[]);
     return rows.map(toDrawing);
   }
 
@@ -130,11 +145,50 @@ export class DrawingStore {
       create index if not exists idx_chart_drawings_instrument on chart_drawings (instrument);
     `);
   }
+  /**
+   * Adds the optional reference columns (10/21) — the price basis a level was
+   * drawn in (`ref_price` / `ref_time`). Old rows keep NULL, which the 距线
+   * path reads as "no reference" and measures unscaled.
+   *
+   * The migration copies the table instead of `alter table ... add column`
+   * because `alter table add column` is not supported by every SQLite build
+   * the app may run against, and the existing `allowNullableTradeId` already
+   * established the rebuild pattern in this file.
+   */
+  private allowReferenceColumns(): void {
+    if (columnExists(this.db, 'chart_drawings', 'ref_price')) return;
+    this.db.exec(`
+      alter table chart_drawings rename to chart_drawings_old;
+      create table chart_drawings (
+        id text primary key,
+        trade_id text,
+        instrument text not null,
+        timeframe text not null,
+        kind text not null,
+        points_json text not null,
+        ref_price real,
+        ref_time integer,
+        created_at text not null,
+        updated_at text not null
+      );
+      insert into chart_drawings (id, trade_id, instrument, timeframe, kind, points_json, ref_price, ref_time, created_at, updated_at)
+        select id, trade_id, instrument, timeframe, kind, points_json, null, null, created_at, updated_at
+        from chart_drawings_old;
+      drop table chart_drawings_old;
+      create index if not exists idx_chart_drawings_instrument on chart_drawings (instrument);
+    `);
+  }
 }
 
 function columnAllowsNull(db: Database.Database, table: string, column: string): boolean {
   const rows = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string; notnull: number }>;
   return rows.find((row) => row.name === column)?.notnull === 0;
+}
+
+/** Whether the table already carries the column. */
+function columnExists(db: Database.Database, table: string, column: string): boolean {
+  const rows = db.prepare(`pragma table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
 }
 
 function toDrawing(row: DrawingRow): ChartDrawing {
@@ -145,6 +199,8 @@ function toDrawing(row: DrawingRow): ChartDrawing {
     timeframe: row.timeframe,
     kind: row.kind,
     points: JSON.parse(row.points_json) as ChartDrawing['points'],
+    refPrice: row.ref_price ?? undefined,
+    refTime: row.ref_time ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

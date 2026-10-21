@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "drawing / candlestick 的时间戳单位与存储契约"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选品扫描全流程、两阶段取数、粗筛口径"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "各交易所 K 线来源、时间网格、缓存命名空间"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "图表组件规范、drawing overlay 现状、选品面板契约"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "UI 状态与 localStorage 约定"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "domain→server→ui 三层改动的影响面检查"}
+{"file": ".trellis/tasks/archive/2026-10/10-20-anomaly-level-tracker/research/screen-redo.md", "reason": "粗筛为何不能收紧到 20 个的实测证据"}
+{"file": ".trellis/tasks/archive/2026-10/10-20-level-alert-in-scan/prd.md", "reason": "距线警报的既定口径（尺子/阈值/状态）"}

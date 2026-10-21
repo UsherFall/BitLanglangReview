@@ -1680,6 +1680,15 @@ label,
   margin: 4px 0 0;
 }
 
+/* 说明类的一行（口径解释、显示更多）。与 `.coin-scan-skip-hint` 分开：
+   skip-hint 是「本次扫描的异常清单」，说明行是常驻口径，两者的语义不同。 */
+.coin-scan-note {
+  font-size: 12px;
+  color: #8b949e;
+  margin: 4px 0 0;
+  white-space: normal;
+}
+
 .coin-scan-table-wrap {
   overflow: auto;
   min-height: 0;

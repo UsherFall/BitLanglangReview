@@ -236,3 +236,44 @@ describe('CoinScanResults', () => {
     expect(onToggleLeaderCoin).not.toHaveBeenCalled();
   });
 });
+
+describe('CoinScanResults · 展示层只出 20 个（10/21）', () => {
+  const many = Array.from({ length: 30 }, (_, i) => `C${String(i).padStart(2, '0')}USDT`);
+
+  it('默认只渲染前 20 行，并说明还有多少个', () => {
+    const { container } = renderResults({ result: scanResponse(many) });
+
+    expect(renderedInstruments(container)).toHaveLength(20);
+    expect(renderedInstruments(container)[0]).toBe('C00USDT');
+    expect(container.textContent).toContain('显示 20 个');
+  });
+
+  it('「显示更多」展开到全部行', () => {
+    const { container } = renderResults({ result: scanResponse(many) });
+
+    const more = Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.includes('显示更多'));
+    expect(more).toBeDefined();
+    fireEvent.click(more as Element);
+
+    expect(renderedInstruments(container)).toHaveLength(30);
+  });
+
+  it('降权沉底在截断之前：被降权的币不占前 20 的位置', () => {
+    // 服务端按「距你标的线最近」排序；用户降权的币沉到最末。截断取前 20，
+    // 所以被降权的那个必须出现在第 20 名之后（而不是被截掉前排的名额）。
+    const { container } = renderResults({ result: scanResponse(many), demotedCoins: ['C00USDT'] });
+
+    const rendered = renderedInstruments(container);
+    expect(rendered).toHaveLength(20);
+    expect(rendered).not.toContain('C00USDT');
+    expect(rendered[0]).toBe('C01USDT');
+  });
+
+  it('行数不足 20 时不显示「显示更多」', () => {
+    const { container } = renderResults({ result: scanResponse(['AAAUSDT', 'BBBUSDT']) });
+
+    expect(renderedInstruments(container)).toHaveLength(2);
+    const buttons = Array.from(container.querySelectorAll('button')).map((button) => button.textContent ?? '');
+    expect(buttons.some((text) => text.includes('显示更多'))).toBe(false);
+  });
+});

@@ -385,3 +385,66 @@ describe('OtherCoinChart in Free Replay', () => {
     expect(renderedBarTimes().at(-1)).toBe(Date.parse('2024-05-21T10:10:00+08:00') / 1000);
   });
 });
+
+describe('OtherCoinChart · 画线（10/21）', () => {
+  it('默认只读（交割单复盘的「其他币」面板不该多出一套线）', async () => {
+    stubFetch(({ mode }) => ({ candles: mode === 'later' ? [] : makeSeries('2024-05-21T09:50:00+08:00', 5, 5) }));
+
+    render(<OtherCoinChart entryTime="2024-05-21T10:00:00.000Z" timeframe="5m" onClose={() => {}} />);
+
+    await waitFor(() => expect(chartMocks.setData).toHaveBeenCalled());
+    expect(document.querySelector('.drawing-toolbar')).toBeNull();
+    expect(document.querySelector('.drawing-overlay')).toBeNull();
+  });
+
+  it('drawable 时给出画线工具条与 overlay', async () => {
+    stubFetch(({ mode }) => ({ candles: mode === 'later' ? [] : makeSeries('2024-05-21T09:50:00+08:00', 5, 5) }));
+
+    render(
+      <OtherCoinChart
+        entryTime="2024-05-21T10:00:00.000Z"
+        timeframe="5m"
+        candleSource="binance"
+        initialInstrument="BTCUSDT"
+        drawable
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(chartMocks.setData).toHaveBeenCalled());
+    expect(document.querySelector('.drawing-toolbar')).not.toBeNull();
+    expect(document.querySelector('.drawing-overlay')).not.toBeNull();
+  });
+
+  it('载入该币该周期已有的线（GET 带 instrument 与 timeframe）', async () => {
+    const drawingRequests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const parsed = new URL(`http://localhost${url}`);
+      if (parsed.pathname === '/api/free-replay/instruments') {
+        return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      }
+      if (parsed.pathname === '/api/drawings') {
+        drawingRequests.push(`${parsed.searchParams.get('instrument')}:${parsed.searchParams.get('timeframe')}`);
+        return new Response(JSON.stringify({ drawings: [] }));
+      }
+      if (parsed.pathname === '/api/candles') {
+        return new Response(JSON.stringify({ candles: makeSeries('2024-05-21T09:50:00+08:00', 5, 5) }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(
+      <OtherCoinChart
+        entryTime="2024-05-21T10:00:00.000Z"
+        timeframe="1D"
+        candleSource="binance"
+        initialInstrument="BTCUSDT"
+        drawable
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(drawingRequests.length).toBeGreaterThan(0));
+    expect(drawingRequests[0]).toBe('BTCUSDT:1D');
+  });
+});

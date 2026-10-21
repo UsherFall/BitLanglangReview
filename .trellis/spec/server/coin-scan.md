@@ -80,7 +80,7 @@ type CoarseRow = {
   netPctThreshold: number;
 };
 type ScanResponse = {
-  scanned: ScanRow[];            // the coarse-screen survivors; sorted by highest converged level desc (a survivor with no convergence reads as level -1, so it sinks below every converging row), then qualifiedCount desc, then bestScore desc
+  scanned: ScanRow[];            // the coarse-screen survivors; sorted by closest-to-your-line FIRST (10/20: the user draws the lines, so the only meaningful order is "how close is the price to my line"); a row with no line at all has no ratio and sinks below every measured one
   qualifiedCount: number;        // = scanned.length
   params: ShrinkScanParams;      // echoes effective params, including resolved scope/anchor/source; `topN` is absent when it was not sent
   scannedAt: string;             // ISO
@@ -89,6 +89,7 @@ type ScanResponse = {
   skippedInstruments?: string[]; // closed-market instruments (pool-policy exclusions are NOT listed)
   failedInstruments?: string[];  // 10/13 — candles could not be fetched (timeout / network / exchange business error): the instrument is dropped from THIS scan, not from the pool
   metadataUnavailable?: boolean; // present only when the ticker snapshot carried no instrument classes => gating was off
+  levelScaleNotes?: string[];    // 10/21 — why a drawn level could not be carried into this source's price basis (measured unscaled)
 };
 type CoarseSummary = {
   windowDays: number;            // T = 23 (1D bars)
@@ -479,8 +480,24 @@ Whole-pool pass rate of the floor alone: **97.63%** snapshot / **96.31%** live �
 
 > **Do NOT re-attempt scalarizing the user's "structure" judgement.** Six rules were tried (10/13) and every one failed — each either missed approved labels or degenerated to "everyone passes" (pool pass 44.7%–96%): (1) impulse-anchored band + shrinking volatility (overfit — 0 of 28.4M parameter sets separated the labels); (2) big move + proportionate consolidation + swing triangle (7/9 at best; ACE/SYN contradictory); (3) "trend walked out" + triangle-vs-box typology (6/8, or 66.7% pool when forced to 8/8); (4) stopped-falling + decent rebound + consolidation (rebound direction came out **reversed**: negatives 448% vs positives 107%); (5) consolidation-length-over-decline ratio (labels overlap; exhaustive 17×1D + 14-pair×2D searches found NO rule reaching 6/7 approved ∧ 0 of the 7 newly-named negatives); (6) position + preceding direction (non-separable). The judgement is visual/holistic — new "this isn't a good structure" feedback is a **manual-tagging input, not a missing scalar**. See the "Algorithm: 1D coarse screen" section for the exact definition, the whole-series window and the degenerate cases.
 
-## Convergence criterion research (10/19) — position, not "quieter than before"
+### 距你标的线: units, matching and the cross-venue price basis (10/21)
 
+The scan measures "how far is the price from the level the USER drew" (`src/domain/level-alert.ts`). Three things had to be fixed before that number meant anything:
+
+1. **Time units.** A drawing's points carry **seconds** (`lightweight-charts`' `coordinateToTime` returns seconds) while a candlestick's `timestamp` is **milliseconds**. `LevelLine`'s endpoints are now `{ ms, price }` — the unit is fixed **in the type**, and the single conversion lives in `linesFromDrawings` (`pointTimeMs`: the product's `time` is seconds, the research annotations' `t` is already ms). Before the fix the ray interpolation subtracted seconds from milliseconds (1000× off → the distance was always -100% and the state always «far») and `scaleStartIndex` always found index 0 (so the volatility scale was the whole series' median instead of "the stretch after the ray's start").
+2. **Matching.** A drawing is stored with the instrument of the chart it was drawn on — the trade review draws on OKX (`BTC-USDT-SWAP`) while the scan pool is Bitget/Binance (`BTCUSDT`). The scan groups the lines by the **canonical** name (`canonicalInstrument` in `src/domain/instrument-symbol.ts` — `BTC-USDT-SWAP` / `BTC-USDT` / `BTCUSDT` all → `BTCUSDT`). The canonical name is used for MATCHING ONLY: storage keys, API paths and display names are untouched.
+3. **The price basis.** A level is drawn on ONE venue's chart and measured on ANOTHER venue's candles, so the two price bases have to be reconciled. Every drawing carries the optional `refPrice` / `refTime` (the close of the bar it was drawn on, in the drawing venue's basis) and the scan multiplies the level price by `sourceClose(refTime) / refPrice` before measuring (`levelScaleFactor`). **Degradation is deliberate**: no `refPrice` (levels drawn before 10/21) → factor 1; no source close at that instant → factor 1 + a note; a factor outside `[0.5, 2]` (a face-value rename, see the hard rule in `instrument-symbol.ts`) → factor 1 + a note. The reasons are reported in `levelScaleNotes` — a degraded level is still measured, but never silently.
+
+### The 选品 list shows 20 rows, not 150 (10/21)
+
+The coarse screen is deliberately WIDE (≈44% of the pool at the calibration point), so a live scan listed ~150 rows. The cut belongs to the **DISPLAY**, not to the screen: the percentile thresholds (`COARSE_SCREEN_PCT_RANGE` / `COARSE_SCREEN_PCT_NET` / `COARSE_POS_RANGE_FLOOR`) are the recall, and every attempt to tighten them dropped coins the user had already approved as "structurally good" (measured — `10-20-anomaly-level-tracker/research/screen-redo.md`: 5 tightening conditions, the best kept 1/9 of the wanted coins, the worst 0/9).
+
+- `COLLAPSED_ROW_COUNT = 20` in `src/ui/CoinScanPanel.tsx`; the server still returns every survivor.
+- The rows are already ordered by the server ("closest to the level you drew comes first"), so the first 20 are the 20 worth looking at.
+- Manual demotion (降权) is applied **before** the cut: a coin the user explicitly pushed down must not hold one of the 20 slots.
+- 「显示更多」 opens the rest; the header reports both numbers ("粗筛 N 个 · 显示 20 个").
+
+## Convergence criterion research (10/19) — position, not "quieter than before"
 Trigger: CFX came out #1 in the live scan while the user read it as "fake breakout, fell back, never held" (no re-test). Recomputing confirmed it: after the 10/09–10/10 spike (+55%) the price bled back down and BOTH detectors still passed it — `detectConvergence` (score 0.716) and `detectBoxBrace` (box height only 0.36 of a "preceding move" that is exactly the two spike bars).
 
 Root cause: both measure "**the recent stretch is quieter than what came before**". Neither knows what the preceding stretch was, nor where the price is sitting. "Spike then bleed-and-drift" and "a finished rally consolidating high" are identical to them.

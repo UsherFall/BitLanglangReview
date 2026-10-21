@@ -14,6 +14,7 @@ import {
   type ScanScope,
 } from '../domain/scan-scope';
 import type { BoxBraceScanResponse } from '../server/coin-scan-service';
+import { shortInstrument } from '../domain/instrument-symbol';
 import { orderScanRows } from './coin-scan-rows';
 
 /** 选品扫描结果: 按方法区分载荷。`shrink` 的 scope 由 `data.params.scope` 回显。 */
@@ -31,6 +32,18 @@ export type CoinScanPanelProps = {
 };
 
 const SCOPE_LABELS: Record<ScanScope, string> = { crypto: '加密', equity: '股票' };
+
+/**
+ * How many rows the 选品 list shows before the user asks for more (10/21).
+ *
+ * The coarse screen is intentionally wide (≈44% of the pool at the calibration
+ * point), so a live scan produced ~150 rows. The user asked for 20 — but the
+ * cut belongs to the DISPLAY, not to the screen: the percentile thresholds are
+ * the recall, and every attempt to tighten them dropped coins the user had
+ * already approved as "structurally good" (measured — see
+ * `10-20-anomaly-level-tracker/research/screen-redo.md`).
+ */
+const COLLAPSED_ROW_COUNT = 20;
 
 const SOURCE_LABELS: Record<MarketDataSource, string> = { binance: '币安', okx: 'OKX', bitget: 'Bitget' };
 
@@ -275,6 +288,19 @@ export type CoinScanResultsProps = {
 export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demotedCoins, onToggleDemotedCoin, onDrawLevel }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
   const [expandedInstrument, setExpandedInstrument] = useState<string | null>(null);
+  /**
+   * 10/21: the coarse screen is deliberately WIDE (it keeps ~44% of the pool by
+   * design — see `coin-scan.md`), so a live scan listed ~150 rows. The user asked
+   * for 20. The cut is a DISPLAY cut, not a screen change: the server still
+   * returns every survivor and the percentile thresholds are untouched, because
+   * tightening them was measured to drop the coins the user had already
+   * approved (see `10-20-anomaly-level-tracker/research/screen-redo.md`).
+   *
+   * The rows are already ordered by the server ("closest to the line you drew
+   * comes first"), so the first 20 are the 20 worth looking at — and
+   * 「显示更多」 opens the rest.
+   */
+  const [showAllRows, setShowAllRows] = useState(false);
 
   function copyInstrument(instrument: string) {
     const copyText = shortInstrument(instrument).toLowerCase();
@@ -297,6 +323,11 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
   const rows = orderScanRows(result.scanned, demotedCoins);
   // 行入选 = 通过 1D 粗筛;「贴近」是行内子集(你画了线、且价格已经贴到线边的币)。
   const alertRows = rows.filter((row) => row.alertTimeframes.length > 0).length;
+  // The DISPLAY cut (10/21). Demoted rows already sank to the bottom, so they
+  // never hold one of the 20 slots — a coin the user explicitly pushed down must
+  // not take a place in the short list.
+  const visibleRows = showAllRows ? rows : rows.slice(0, COLLAPSED_ROW_COUNT);
+  const hiddenRows = rows.length - visibleRows.length;
   return (
     <>
       <header className="detail-header">
@@ -305,7 +336,32 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
           <p>
             粗筛 {result.scanned.length} 个{result.coarse ? ` · 候选 ${result.coarse.candidates} 个` : ''} · 贴近 {alertRows} 个
             {result.coarse ? ` · 日线窗口 ${result.coarse.windowDays} 天` : ''}
+            {hiddenRows > 0 ? ` · 显示 ${visibleRows.length} 个` : ''}
           </p>
+          {hiddenRows > 0 && (
+            <p className="coin-scan-note">
+              <button type="button" className="coin-scan-copy" onClick={() => setShowAllRows(true)}>
+                显示更多（还有 {hiddenRows} 个）
+              </button>
+            </p>
+          )}
+          {showAllRows && rows.length > COLLAPSED_ROW_COUNT && (
+            <p className="coin-scan-note">
+              <button type="button" className="coin-scan-copy" onClick={() => setShowAllRows(false)}>
+                收起，只看前 {COLLAPSED_ROW_COUNT} 个
+              </button>
+            </p>
+          )}
+          {result.coarse && (
+            <p className="coin-scan-note" title="粗筛用最近 23 根日线算「区间振幅」与「净漂移」（盘得够久 / 收住了 / 不在趋势中）；「位」算的是该币在全部历史里的位置，不是 23 天。">
+              日线窗口 {result.coarse.windowDays} 天 = 最近 {result.coarse.windowDays} 根日线算「区间 / 净漂移」；「位」= 该币在全部历史里的位置。
+            </p>
+          )}
+          {result.levelScaleNotes && result.levelScaleNotes.length > 0 && (
+            <p className="coin-scan-note" title={result.levelScaleNotes.join('\n')}>
+              {result.levelScaleNotes.length} 条标的线未能换算到本行情源的价位（未缩放测量）
+            </p>
+          )}
           {result.skippedInstruments && result.skippedInstruments.length > 0 && (
             <p className="coin-scan-skip-hint" title={result.skippedInstruments.join(', ')}>
               已跳过 {result.skippedInstruments.length} 个休市标的:{formatSkippedNames(result.skippedInstruments)}
@@ -337,7 +393,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {visibleRows.map((row) => {
               const isDemoted = demotedCoins.includes(row.instrument);
               return (
                 <Fragment key={row.instrument}>
@@ -441,10 +497,8 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
 
 // OKX symbols carry a `-USDT-SWAP` suffix (BTC-USDT-SWAP) that we strip for
 // display; Binance perpetuals (XAUUSDT, BTCUSDT) have no suffix and pass through
-// as-is.
-function shortInstrument(instrument: string): string {
-  return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
-}
+// as-is. The helper now lives in `domain/instrument-symbol.ts` (10/21) so the
+// display name and the canonical matching name cannot drift apart.
 
 /** First 8 skipped instruments, then "等 N 个" when truncated (full list in `title`). */
 const SKIPPED_NAME_LIMIT = 8;

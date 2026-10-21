@@ -690,3 +690,84 @@ describe('CoinScanService (选品 sub-modules: crypto / equity)', () => {
     expect(result.skippedInstruments).toBeUndefined();
   });
 });
+
+describe('CoinScanService · 距线的匹配与价位换算（10/21）', () => {
+  it('OKX 名的线能匹配到 base+USDT 的扫描行', async () => {
+    // 修复前：线存的是画线那张图的 instrument（交割单复盘 = OKX 名），扫描池是
+    // Bitget/Binance 名，按名字精确匹配一根都对不上 → 距线永远是 `—`。
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: null,
+      instrument: 'BTC-USDT-SWAP',
+      timeframe: '5m',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({
+      [BTC]: { '5m': 'strong', '1D': 'strong' },
+      [ETH]: { '5m': 'strong', '1D': 'flat' },
+    });
+    const result = await new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    ).scanShrink(params);
+
+    const btc = result.scanned.find((row) => row.instrument === BTC);
+    expect(btc?.levelAlerts['5m']).not.toBeNull();
+    expect(btc?.levelAlerts['5m']?.distancePct).toBeCloseTo(0, 6);
+    store.close();
+  });
+
+  it('基准价齐全时线价被换算到扫描源的坐标系', async () => {
+    // 线画在价格为 100 的坐标系里；扫描源的同一时刻收盘价是 101 → 因子 1.01，
+    // 线价 100 要先变成 101 再算距线（否则差 1%）。
+    const store = new DrawingStore(':memory:');
+    const anchor = 1_700_000_000_000;
+    store.saveDrawing({
+      tradeId: null,
+      instrument: BTC,
+      timeframe: '1D',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+      refPrice: 100,
+      refTime: anchor - timeframeMs('1D'),
+    });
+    const source = poolSource({ [BTC]: { '1D': 'flat' } });
+    const result = await new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    ).scanShrink({ ...params, anchor });
+
+    const btc = result.scanned.find((row) => row.instrument === BTC);
+    // flatBars 的收盘价是 100，与 refPrice 相同 → 因子 1，距线 0%。
+    expect(btc?.levelAlerts['1D']?.distancePct).toBeCloseTo(0, 6);
+    store.close();
+  });
+
+  it('没有基准价的旧线照常测量（因子 1），并说明退化原因', async () => {
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: null,
+      instrument: BTC,
+      timeframe: '1D',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({ [BTC]: { '1D': 'flat' } });
+    const result = await new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    ).scanShrink(params);
+
+    const btc = result.scanned.find((row) => row.instrument === BTC);
+    expect(btc?.levelAlerts['1D']).not.toBeNull();
+    expect(result.levelScaleNotes?.length).toBeGreaterThan(0);
+    store.close();
+  });
+});

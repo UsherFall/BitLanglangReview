@@ -14,6 +14,45 @@ function okxBaseAsset(instId: string): string | null {
 }
 
 /**
+ * 归一到「base + USDT」的 canonical 名，**只用于匹配**。
+ *
+ * 为什么需要（10/21）：画线存在 `drawing-store` 里，用的是画线那张图的
+ * instrument —— 交割单复盘是 OKX 名（`BTC-USDT-SWAP`），选品扫描的池子却是
+ * Bitget/Binance 名（`BTCUSDT`）。扫描服务按 instrument 精确匹配，一根线都
+ * 匹配不上，于是「距你标的线」永远是 `—`。
+ *
+ * 规则（大小写不敏感）：
+ *   `BTC-USDT-SWAP` → `BTCUSDT`
+ *   `BTC-USDT`      → `BTCUSDT`
+ *   `BTCUSDT`       → `BTCUSDT`
+ *   `BTCUSDT_PERP`  → `BTCUSDT`
+ *   `BTCUSDT`（无法识别的形状）→ 原样（大写）
+ *
+ * 边界：**不改存储、不改展示、不改 API 路径**。canonical 只用来回答
+ * 「这两串名字是不是同一个币」，真正的取数仍然用各交易所自己的名字。
+ */
+export function canonicalInstrument(instrument: string): string {
+  const trimmed = instrument.trim().toUpperCase();
+  if (!trimmed) return trimmed;
+  const swap = /^([A-Z0-9]{2,})-USDT-SWAP$/.exec(trimmed);
+  if (swap) return `${swap[1]}USDT`;
+  const dash = /^([A-Z0-9]{2,})-USDT$/.exec(trimmed);
+  if (dash) return `${dash[1]}USDT`;
+  const perp = /^([A-Z0-9]{2,})USDT_(?:PERP|SWAP|M)$/.exec(trimmed);
+  if (perp) return `${perp[1]}USDT`;
+  return trimmed;
+}
+
+/**
+ * 展示用的短名：去掉 OKX 的 `-USDT-SWAP` 后缀，其余原样。
+ *
+ * 选品结果表与复制按钮都用它（用户复制的是 `btc` 而不是 `btc-usdt-swap`）。
+ */
+export function shortInstrument(instrument: string): string {
+  return instrument.endsWith('-USDT-SWAP') ? instrument.slice(0, -'-USDT-SWAP'.length) : instrument;
+}
+
+/**
  * OKX-style base asset -> the Binance USDT-M symbol of the SAME asset, for the
  * cases where Binance's plain `base+USDT` is missing or no longer tradable.
  *

@@ -249,7 +249,14 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           if (!instrument) {
             return send(res, 400, { error: 'instrument is required' });
           }
-          return send(res, 200, { drawings: drawingStore.listDrawings({ instrument }) });
+          // The timeframe filter is optional: a chart wants the levels of ITS
+          // own timeframe (each level is measured with its own volatility
+          // scale), while the 选品 scan asks for every timeframe at once.
+          const timeframe = url.searchParams.get('timeframe');
+          const drawings = timeframe
+            ? drawingStore.listDrawings({ instrument, timeframe })
+            : drawingStore.listDrawings({ instrument });
+          return send(res, 200, { drawings });
         }
         if (req.method === 'POST') {
           const parsed = JSON.parse(await readBody(req) || '{}');

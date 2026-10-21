@@ -12,7 +12,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { levelAlert, scaleStartIndex, type LevelLine } from '../src/domain/level-alert';
 
-const SRC = '.trellis/tasks/10-20-anomaly-level-tracker/research';
+const SRC = '.trellis/tasks/archive/2026-10/10-20-anomaly-level-tracker/research';
 const dayOf = (t: number): string =>
   new Date(Number(t) + 8 * 3600 * 1000).toISOString().slice(0, 10);
 
@@ -44,8 +44,12 @@ const lastDay = allDays.at(-1) ?? '';
 const nowBJ = new Date(Date.now() + 8 * 3600 * 1000);
 const judgeDay = nowBJ.getUTCHours() >= 8 ? allDays.filter((d) => d < lastDay).at(-1) : lastDay;
 
-/** 端点时间：产品的 `time` 与研究标注的 `t` 都认。 */
-const refTime = (point: { time?: number; t?: number }): number => point.time ?? point.t ?? Number.NaN;
+/**
+ * 端点时间（毫秒）。10/21 起 `LevelLine` 的端点是 `{ ms, price }` —— 单位在
+ * 类型上就确定了，产品口径（秒）与研究口径（毫秒）的换算只发生在
+ * `linesFromDrawings` 里。
+ */
+const refTime = (point: { ms: number }): number => point.ms;
 
 /**
  * alert.mjs 的口径，独立复算一遍。
@@ -120,7 +124,7 @@ describe('level-alert 与研究脚本口径一致 (AC4)', () => {
         const lines: LevelLine[] = [];
         for (const l of s.lines ?? []) {
           if (l.kind === 'h') lines.push({ kind: 'horizontal', price: l.price });
-          else lines.push({ kind: 'ray', price: l.p2.price, p1: l.p1, p2: l.p2 });
+          else lines.push({ kind: 'ray', price: l.p2.price, p1: { ms: l.p1.t, price: l.p1.price }, p2: { ms: l.p2.t, price: l.p2.price } });
         }
         if (!lines.length) continue;
         const at = slice.at(-1)!.timestamp;
@@ -158,7 +162,7 @@ describe('level-alert 与研究脚本口径一致 (AC4)', () => {
     const slice = candles.slice(0, E + 1);
     const label = labels.find((c) => c.inst === 'BTCUSDT');
     const ray = label!.segments![0].lines!.find((l) => l.kind === 'r')!;
-    const lines: LevelLine[] = [{ kind: 'ray', price: ray.p2.price, p1: ray.p1, p2: ray.p2 }];
+    const lines: LevelLine[] = [{ kind: 'ray', price: ray.p2.price, p1: { ms: ray.p1.t, price: ray.p1.price }, p2: { ms: ray.p2.t, price: ray.p2.price } }];
     const alert = levelAlert(slice, lines, slice.at(-1)!.timestamp, scaleStartIndex(slice, lines));
     expect(alert!.state).toBe('watch');
   });

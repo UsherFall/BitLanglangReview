@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
+import { canonicalInstrument } from '../domain/instrument-symbol';
+import { useChartDrawings } from './chart-drawing';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { formatChartPrice } from './chart-price';
 import { entryVisibleRange, formatChartTime, markerTimeForEvent, timeframeMs, type CandleGrid } from './chart-time';
@@ -20,7 +22,7 @@ type InstrumentResponse = {
 
 type LoadDirection = 'earlier' | 'later';
 
-export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', initialInstrument, onClose }: {
+export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', initialInstrument, drawable = false, onClose }: {
   entryTime: string;
   timeframe: ReviewTimeframe;
   /**
@@ -45,6 +47,18 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
    * to its default rather than showing nothing.
    */
   initialInstrument?: string;
+  /**
+   * Whether the panel can DRAW on its chart (10/21).
+   *
+   * The 选品 page's level drawer renders this panel, and the user found it
+   * read-only — "画线点开后里面并没有画线功能". With `drawable` the panel grows
+   * the drawing tool row and the SVG overlay, and the levels it draws are the
+   * ones the 选品 scan measures (same store, same instrument + timeframe).
+   *
+   * Off by default: the trade review's 其他币 panel is a comparison view and
+   * must not grow a second, separate set of levels.
+   */
+  drawable?: boolean;
   onClose: () => void;
 }) {
   const isReplay = cursorTime != null;
@@ -100,16 +114,40 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
   // Adopt the caller's instrument once the venue's own list has loaded, so the
   // panel can confirm the symbol exists here (a Binance symbol offered to the
   // OKX-backed panel loads nothing at all).
+  //
+  // 10/21: the 选品 drawer draws on BINANCE, but the scan's rows are named in
+  // the scan source's vocabulary — and the OKX scope's rows are OKX names
+  // (`BTC-USDT-SWAP`). The canonical name bridges the two: `BTCUSDT` is the
+  // Binance symbol of the same base, so the drawer still opens the right coin.
   useEffect(() => {
     if (!initialInstrument) return;
     if (!instruments.length) return;
-    if (instruments.includes(initialInstrument)) setInstrument(initialInstrument);
+    if (instruments.includes(initialInstrument)) {
+      setInstrument(initialInstrument);
+      return;
+    }
+    const canonical = canonicalInstrument(initialInstrument);
+    const match = instruments.find((item) => canonicalInstrument(item) === canonical);
+    if (match) setInstrument(match);
   }, [initialInstrument, instruments]);
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [status, setStatus] = useState('加载 K 线');
   const [showCandidates, setShowCandidates] = useState(false);
   // Entry-candle reference line position in CSS px; null = not loaded / off-scale.
   const [entryX, setEntryX] = useState<number | null>(null);
+  /**
+   * The drawing layer (10/21). It is a HOOK, not a component: the chart's
+   * `chartApiRef` / `seriesRef` are created below, and the hook needs them.
+   */
+  const drawings = useChartDrawings({
+    instrument,
+    timeframe,
+    tradeId: null,
+    chartApiRef,
+    seriesRef,
+    candles: loadedCandles,
+    enabled: drawable,
+  });
 
   useEffect(() => {
     // The list must be named in the venue's own vocabulary, and it must be the
@@ -399,7 +437,9 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
       </div>
       <div className="other-coin-title">{instrument}</div>
       <div ref={chartWrapRef} className="other-coin-chart-wrap">
+        {drawings.toolbar}
         <div ref={chartRef} className="other-coin-chart" />
+        {drawings.overlay}
         <svg className="other-coin-marker-overlay" aria-hidden="true">
           {entryX != null && <line x1={entryX} x2={entryX} y1={0} y2="100%" />}
         </svg>

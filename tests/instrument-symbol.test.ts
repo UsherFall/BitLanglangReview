@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BINANCE_SYMBOL_ALIASES, resolveCandleChain } from '../src/domain/instrument-symbol';
+import { BINANCE_SYMBOL_ALIASES, canonicalInstrument, resolveCandleChain, shortInstrument } from '../src/domain/instrument-symbol';
 
 const TRADING = new Map([
   ['BTCUSDT', 'TRADING'],
@@ -66,5 +66,42 @@ describe('resolveCandleChain', () => {
     // `1000SHIBUSDT` prices at 1000x the trade's entry/exit prices; that case is
     // served by the OKX fallback instead of a price-scaling layer.
     expect(BINANCE_SYMBOL_ALIASES.SHIB).toBeUndefined();
+  });
+});
+
+describe('canonicalInstrument（匹配用，10/21）', () => {
+  it('把三个交易所的写法归一到同一个名', () => {
+    // 画线存在 OKX 名（交割单复盘），扫描池是 Bitget/Binance 名 —— 修复前
+    // 按名字精确匹配，一根线都匹配不上，「距你标的线」永远是 `—`。
+    expect(canonicalInstrument('BTC-USDT-SWAP')).toBe('BTCUSDT');
+    expect(canonicalInstrument('BTC-USDT')).toBe('BTCUSDT');
+    expect(canonicalInstrument('BTCUSDT')).toBe('BTCUSDT');
+  });
+
+  it('大小写不敏感', () => {
+    expect(canonicalInstrument('btc-usdt-swap')).toBe('BTCUSDT');
+    expect(canonicalInstrument('BtcUsdt')).toBe('BTCUSDT');
+  });
+
+  it('剥掉 Bitget 的后缀写法', () => {
+    expect(canonicalInstrument('BTCUSDT_PERP')).toBe('BTCUSDT');
+    expect(canonicalInstrument('BTCUSDT_SWAP')).toBe('BTCUSDT');
+  });
+
+  it('无法识别的形状原样返回（大写）', () => {
+    expect(canonicalInstrument('ETHBTC')).toBe('ETHBTC');
+    expect(canonicalInstrument('')).toBe('');
+  });
+
+  it('不改变面值前缀的币（1000PEPE 与 PEPE 不是同一个币）', () => {
+    expect(canonicalInstrument('1000PEPE-USDT-SWAP')).toBe('1000PEPEUSDT');
+    expect(canonicalInstrument('1000PEPEUSDT')).toBe('1000PEPEUSDT');
+  });
+});
+
+describe('shortInstrument（展示用）', () => {
+  it('去掉 OKX 后缀，其它原样', () => {
+    expect(shortInstrument('BTC-USDT-SWAP')).toBe('BTC');
+    expect(shortInstrument('BTCUSDT')).toBe('BTCUSDT');
   });
 });

@@ -18,10 +18,12 @@ import {
 import {
   levelAlert,
   linesFromDrawings,
+  scaleLinesToSource,
   scaleStartIndex,
   type LevelAlert,
   type LevelLine,
 } from '../domain/level-alert';
+import { canonicalInstrument } from '../domain/instrument-symbol';
 import { isCandleInSession, isMarketOpen, marketSession } from '../domain/market-session';
 import type { MarketClass } from '../domain/market-class';
 import { isScannable } from '../domain/scan-pool';
@@ -178,10 +180,19 @@ export class CoinScanService {
     const refresh = params.anchor === undefined;
 
     /**
-     * The user's drawn levels, per timeframe. Only the timeframes the user
-     * actually drew on are measured — the scan fetches a timeframe's candles
-     * ONLY for instruments that have a line on it, so the extra requests scale
-     * with the number of watched coins, not with the pool.
+     * The user's drawn levels, per timeframe, keyed by the CANONICAL instrument
+     * name (`BTCUSDT`), not the stored name.
+     *
+     * 10/21: the drawings are stored with the instrument of the chart they were
+     * drawn on — the trade review draws on OKX (`BTC-USDT-SWAP`) while the scan
+     * pool is Bitget/Binance (`BTCUSDT`). Matching the raw names found NOTHING,
+     * so every row read `—` and the 距线 column never meant anything. The
+     * canonical name is used for MATCHING only; the stored names are untouched.
+     *
+     * Only the timeframes the user actually drew on are measured — the scan
+     * fetches a timeframe's candles ONLY for instruments that have a line on it,
+     * so the extra requests scale with the number of watched coins, not with
+     * the pool.
      */
     const linesByTimeframe = new Map<ReviewTimeframe, Map<string, LevelLine[]>>();
     if (this.drawingStore) {
@@ -192,9 +203,10 @@ export class CoinScanService {
         for (const drawing of drawings) {
           const lines = linesFromDrawings([drawing], drawing.instrument, timeframe);
           if (!lines.length) continue;
-          const bucket = byInstrument.get(drawing.instrument) ?? [];
+          const canonical = canonicalInstrument(drawing.instrument);
+          const bucket = byInstrument.get(canonical) ?? [];
           bucket.push(...lines);
-          byInstrument.set(drawing.instrument, bucket);
+          byInstrument.set(canonical, bucket);
         }
         if (byInstrument.size) linesByTimeframe.set(timeframe, byInstrument);
       }
@@ -210,6 +222,11 @@ export class CoinScanService {
     // omission by nature, which is what `failedInstruments` in the response is
     // there to undo.
     const failedInstruments = new Set<string>();
+    /**
+     * Why a line could NOT be carried into this source's price basis (10/21).
+     * Reported so a «—» or a slightly-off distance is never silently wrong.
+     */
+    const scaleNotes = new Set<string>();
     const coarseFetches = await mapLimit(candidates, SCAN_CONCURRENCY, async (ticker) => {
       try {
         return { ticker, completed: await this.completedCandles(ticker, COARSE_TIMEFRAME, anchor, refresh) };
@@ -237,15 +254,23 @@ export class CoinScanService {
       .filter((_, index) => passes[index])
       .flatMap(({ ticker }) =>
         [...linesByTimeframe.entries()]
-          .filter(([, byInstrument]) => byInstrument.has(ticker.instrument))
+          .filter(([, byInstrument]) => byInstrument.has(canonicalInstrument(ticker.instrument)))
           .map(([timeframe]) => ({ ticker, timeframe })),
       );
     const results = await mapLimit(tasks, SCAN_CONCURRENCY, async ({ ticker, timeframe }) => {
       try {
         const completed = await this.completedCandles(ticker, timeframe, anchor, refresh);
-        const lines = linesByTimeframe.get(timeframe)?.get(ticker.instrument) ?? [];
+        const lines = linesByTimeframe.get(timeframe)?.get(canonicalInstrument(ticker.instrument)) ?? [];
+        // 10/21: the line was drawn on ANOTHER venue's chart, so its price has
+        // to be carried into this venue's price basis before the distance is
+        // meaningful. `scaleLinesToSource` uses the drawing's frozen reference
+        // (the close of the bar it was drawn on) and this source's close at the
+        // same instant; when either is missing it falls back to factor 1 and
+        // says so.
+        const { lines: scaled, notes } = scaleLinesToSource(lines, (refTime) => closeAt(completed, refTime));
+        for (const note of notes) scaleNotes.add(`${ticker.instrument} ${timeframe}: ${note}`);
         const at = completed.at(-1)?.timestamp ?? anchor;
-        const alert = levelAlert(completed, lines, at, scaleStartIndex(completed, lines));
+        const alert = levelAlert(completed, scaled, at, scaleStartIndex(completed, scaled));
         return { ticker, timeframe, alert };
       } catch (error) {
         if (isIpBanned(this.rateLimitGate)) throw error;
@@ -267,11 +292,16 @@ export class CoinScanService {
       for (const timeframe of scanTimeframes) {
         if (timeframe === COARSE_TIMEFRAME) {
           // Already fetched in stage 1 — the coarse window IS this series.
-          const lines = linesByTimeframe.get(timeframe)?.get(ticker.instrument) ?? [];
+          // Same canonical match and same cross-venue price basis as stage 2.
+          const lines = linesByTimeframe.get(timeframe)?.get(canonicalInstrument(ticker.instrument)) ?? [];
           const at = completed.at(-1)?.timestamp ?? anchor;
-          levelAlerts[timeframe] = lines.length
-            ? levelAlert(completed, lines, at, scaleStartIndex(completed, lines))
-            : null;
+          if (!lines.length) {
+            levelAlerts[timeframe] = null;
+            continue;
+          }
+          const { lines: scaled, notes } = scaleLinesToSource(lines, (refTime) => closeAt(completed, refTime));
+          for (const note of notes) scaleNotes.add(`${ticker.instrument} ${timeframe}: ${note}`);
+          levelAlerts[timeframe] = levelAlert(completed, scaled, at, scaleStartIndex(completed, scaled));
           continue;
         }
         levelAlerts[timeframe] = alertByCoinAndTimeframe.get(`${ticker.instrument}:${timeframe}`) ?? null;
@@ -345,6 +375,10 @@ export class CoinScanService {
     // make the scan a failure — the rest of the pool is real — but it must be
     // visible, because these are valid candidates missing from the result.
     if (failedInstruments.size > 0) response.failedInstruments = [...failedInstruments];
+    // Lines that could not be carried into this source's price basis (10/21).
+    // Present only when at least one line degraded — a degraded line still
+    // measures, but on the wrong price basis, so the user has to know.
+    if (scaleNotes.size > 0) response.levelScaleNotes = [...scaleNotes];
     return response;
   }
 
@@ -470,6 +504,25 @@ export class CoinScanService {
       (candle) => candle.timestamp + step <= anchor && isCandleInSession(marketClass, candle.timestamp, step),
     );
   }
+}
+
+/**
+ * The close of the bar at (or just before) `timestamp`.
+ *
+ * Used to carry a line's price basis across venues (10/21): the line was drawn
+ * against the close of some bar, and the factor is this source's close at the
+ * SAME instant divided by that one. The bar is matched by EXACT timestamp
+ * first and then by the newest bar at or before it, because the two venues cut
+ * their days differently (Binance 00:00Z, OKX/Bitget 00:00 Beijing) — a
+ * timestamp is therefore a moment, not a bar.
+ */
+function closeAt(candles: readonly Candlestick[], timestamp: number): number | undefined {
+  let best: Candlestick | undefined;
+  for (const candle of candles) {
+    if (candle.timestamp === timestamp) return candle.close;
+    if (candle.timestamp < timestamp && (!best || candle.timestamp > best.timestamp)) best = candle;
+  }
+  return best?.close;
 }
 
 /** Runs `mapper` over `items` with at most `concurrency` in-flight promises. */

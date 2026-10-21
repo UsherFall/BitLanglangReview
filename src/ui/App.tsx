@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
 import type { ScanScope } from '../domain/scan-scope';
-import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
+import type { ChartDrawing, ChartPoint } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
@@ -17,7 +17,8 @@ import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountFor
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
 import { CoinScanPanel, CoinScanResults, type ScanResult } from './CoinScanPanel';
-import { nextMagnetMode, snapDrawingPoint, type MagnetMode } from './drawing-snap';
+import { nextMagnetMode, type MagnetMode } from './drawing-snap';
+import { useChartDrawings } from './chart-drawing';
 import { HeatScanResults } from './HeatScanResults';
 import { BoxScanResults } from './BoxScanResults';
 import { BitgetControlBar } from './BitgetControlBar';
@@ -150,28 +151,6 @@ type SidebarDrag = {
   startWidth: number;
   moved: boolean;
 };
-
-type DrawingDrag = {
-  drawing: ChartDrawing;
-  target: DrawingDragTarget;
-  /**
-   * The **unsnapped** pointer point captured on pointer down. It feeds the
-   * incremental `'body'` translation in `moveDrawing`, so reusing a snapped
-   * point here would quantize the delta and make a whole drawing jump bar by
-   * bar (both horizontally and price-wise) instead of following the pointer.
-   */
-  startPoint: ChartPoint;
-};
-
-/** Everything a drawing point needs in order to snap to the candlestick under the pointer. */
-type DrawingSnapOptions = {
-  candles: Candlestick[];
-  timeframe: ReviewTimeframe;
-  mode: MagnetMode;
-};
-
-const MAGNET_MODE_LABELS: Record<MagnetMode, string> = { off: '关', weak: '弱', strong: '强' };
-const MAGNET_MODE_HINTS: Record<MagnetMode, string> = { off: '磁吸：关（点击切换为弱）', weak: '磁吸：弱（点击切换为强）', strong: '磁吸：强（点击切换为关）' };
 
 function clampSidebarWidth(width: number): number {
   const maxWidth = typeof window === 'undefined' ? DEFAULT_SIDEBAR_WIDTH : Math.floor(window.innerWidth * 0.7);
@@ -900,6 +879,7 @@ export function App() {
                     timeframe={drawTimeframe}
                     candleSource="binance"
                     initialInstrument={drawTarget}
+                    drawable
                     onClose={() => setDrawTarget(null)}
                   />
                 </div>
@@ -1192,7 +1172,6 @@ function stopLossDirectionHint(direction: PaperDirection, currentPrice: number):
 
 function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; futureRetryToken: number; onCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<SVGSVGElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
@@ -1204,7 +1183,6 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   const suppressAutoLoadRef = useRef(false);
   const pointerRef = useRef<{ inside: boolean; x: number; y: number }>({ inside: false, x: 0, y: 0 });
   const loadedCandlesRef = useRef<Candlestick[]>([]);
-  const dragRef = useRef<DrawingDrag | null>(null);
   const cursorFollowRangeKeyRef = useRef('');
   const pendingSwitchVisibleBarsRef = useRef<number | null>(null);
   const historyBackfillVisibleBarsRef = useRef<number | null>(null);
@@ -1214,21 +1192,32 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   const [renderedCandles, setRenderedCandles] = useState<Candlestick[]>([]);
   const [status, setStatus] = useState('加载 K 线');
   const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Logarithmic);
-  const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
-  const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
-  const [selectedDrawingId, setSelectedDrawingId] = useState('');
-  const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
-  const [draftEndPoint, setDraftEndPoint] = useState<ChartPoint | null>(null);
-  const [overlayVersion, setOverlayVersion] = useState(0);
   const [hoverPercentage, setHoverPercentage] = useState<number | null>(null);
   const [markersVisible, setMarkersVisible] = useState(true);
-  const [magnetMode, setMagnetMode] = useState<MagnetMode>('weak');
   // Free Replay keeps later candlesticks loaded (prefetch for the next reveal) but
   // hidden until the cursor reaches them. The magnet must only see the revealed
   // ones: otherwise a point drawn in the blank right padding would snap to a
   // future candle's OHLC and leak its levels.
   const magnetCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime);
-  const drawingSnap: DrawingSnapOptions = { candles: magnetCandles, timeframe, mode: magnetMode };
+  // The drawing layer (10/21): the tool row, the overlay, the drag handling and
+  // the persistence now live in `chart-drawing.tsx`, shared with the trade-review
+  // chart and the 选品 level drawer.
+  const drawings = useChartDrawings({
+    instrument: replay.instrument,
+    timeframe,
+    tradeId: null,
+    chartApiRef,
+    seriesRef,
+    candles: renderedCandles,
+    snapCandles: magnetCandles,
+    toolbarExtra: (
+      <>
+        <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
+        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+      </>
+    ),
+  });
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1259,7 +1248,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
     resetChartPriceScale(chart);
-    const refreshOverlay = () => setOverlayVersion((version) => version + 1);
+    const refreshOverlay = () => drawings.bumpOverlay();
     chart.timeScale().subscribeVisibleTimeRangeChange(refreshOverlay);
     return () => chart.remove();
   }, []);
@@ -1269,15 +1258,6 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     if (!chart) return;
     applyChartPriceScaleMode(chart, priceScaleMode);
   }, [priceScaleMode]);
-
-  useEffect(() => {
-    setSelectedDrawingId('');
-    setDraftPoint(null);
-    setDraftEndPoint(null);
-    fetch(`/api/drawings?${new URLSearchParams({ instrument: replay.instrument })}`)
-      .then((response) => response.json())
-      .then(({ drawings: next }: { drawings?: ChartDrawing[] }) => setDrawings(next ?? []));
-  }, [replay.instrument]);
 
   useEffect(() => {
     const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
@@ -1488,23 +1468,6 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     return Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null;
   }
 
-  async function saveDrawing(input: SaveChartDrawingInput) {
-    const saved = (await fetch('/api/drawings', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then((response) => response.json())) as ChartDrawing;
-    setDrawings((current) => [...current.filter((drawing) => drawing.id !== saved.id), saved]);
-    setSelectedDrawingId(saved.id);
-  }
-
-  async function deleteSelectedDrawing() {
-    if (!selectedDrawingId) return;
-    await fetch(`/api/drawings?${new URLSearchParams({ id: selectedDrawingId })}`, { method: 'DELETE' });
-    setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawingId));
-    setSelectedDrawingId('');
-  }
-
   function resetPriceScale() {
     const chart = chartApiRef.current;
     if (!chart) return;
@@ -1528,106 +1491,12 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     setHoverPercentage(hoverPricePercentage(pointerPrice, baseline));
   }
 
-  function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
-    if (!drawingTool) {
-      setSelectedDrawingId('');
-      return;
-    }
-    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
-    if (!point) return;
-    if (drawingTool === 'horizontal') {
-      void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: 'horizontal', points: [point] });
-      return;
-    }
-    if (!draftPoint) {
-      setDraftPoint(point);
-      setDraftEndPoint(point);
-      return;
-    }
-    void saveDrawing({ tradeId: null, instrument: replay.instrument, timeframe, kind: drawingTool, points: [draftPoint, point] });
-    setDraftPoint(null);
-    setDraftEndPoint(null);
-  }
-
-  /** Picking a tool abandons any half-drawn point. Without this the leftover
-   * draft keeps rendering — in the NEW tool's shape, since the preview follows
-   * the active tool — as a line the user never drew and cannot click away. */
-  function selectDrawingTool(tool: ChartDrawingKind | null) {
-    setDrawingTool(tool);
-    setDraftPoint(null);
-    setDraftEndPoint(null);
-  }
-
-  function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
-    if (drawing.id === 'draft') return;
-    // Unsnapped on purpose: this point only feeds the incremental 'body' translation.
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
-    if (!point) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setDrawingTool(null);
-    setSelectedDrawingId(drawing.id);
-    dragRef.current = { drawing, target, startPoint: point };
-    overlayRef.current?.setPointerCapture(event.pointerId);
-  }
-
-  function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
-    const drag = dragRef.current;
-    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
-    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
-    if (!snappedPoint || !rawPoint) return;
-    if (!drag) {
-      if ((drawingTool === 'segment' || drawingTool === 'ray') && draftPoint) setDraftEndPoint(snappedPoint);
-      return;
-    }
-    event.preventDefault();
-    // Endpoint drags take the snapped point; 'body' translation stays continuous on the raw one.
-    const point = drag.target === 'body' ? rawPoint : snappedPoint;
-    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
-    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
-  }
-
-  function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
-    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
-    dragRef.current = null;
-    overlayRef.current?.releasePointerCapture(event.pointerId);
-    const point = drag.target === 'body' ? rawPoint : snappedPoint;
-    if (!point) return;
-    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
-    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
-    void saveDrawing(updated);
-  }
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && selectedDrawingId) {
-        setSelectedDrawingId('');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedDrawingId]);
-
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
-      <div className="drawing-toolbar">
-        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => selectDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
-        <button className={drawingTool === 'ray' ? 'selected' : ''} title="射线" onClick={() => selectDrawingTool(drawingTool === 'ray' ? null : 'ray')}><MoveUpRight size={16} /></button>
-        <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
-        <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
-        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
-        <button type="button" className={`magnet-mode${magnetMode !== 'off' ? ' selected' : ''}`} title={MAGNET_MODE_HINTS[magnetMode]} aria-label="磁吸模式" aria-pressed={magnetMode !== 'off'} onClick={() => setMagnetMode((current) => nextMagnetMode(current))}><Magnet size={16} />{MAGNET_MODE_LABELS[magnetMode]}</button>
-        <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
-      </div>
+      {drawings.toolbar}
       {hoverPercentage !== null && <div className="hover-price-percentage">{formatHoverPricePercentage(hoverPercentage)}</div>}
       <div ref={chartRef} className="chart" />
-      <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
-        {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} draftKind={drawingTool} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandles} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
-      </svg>
+      {drawings.overlay}
       {status && <div className="chart-status">{status}</div>}
     </div>
   );
@@ -1635,7 +1504,6 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
 
 function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade: ReviewedTrade; timeframe: ReviewTimeframe; candleSource: CandleSourceId; tradesEndpoint: string }) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<SVGSVGElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markerPrimitiveRef = useRef<TradeMarkerPrimitive | null>(null);
   const markerTooltipRef = useRef<TradeMarkerTooltip | null>(null);
@@ -1650,31 +1518,40 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   const latestAnchorRef = useRef<NavigationAnchor | null>(null);
   const activeKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
-  const dragRef = useRef<DrawingDrag | null>(null);
   const markersVisibleRef = useRef(true);
   const [status, setStatus] = useState('加载 K 线');
   const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Logarithmic);
-  const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
-  const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
-  const [selectedDrawingId, setSelectedDrawingId] = useState<string>('');
-  const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
-  const [draftEndPoint, setDraftEndPoint] = useState<ChartPoint | null>(null);
   const [activeCandle, setActiveCandle] = useState<Candlestick | null>(null);
-  const [overlayVersion, setOverlayVersion] = useState(0);
   const [markersVisible, setMarkersVisible] = useState(true);
   const [showAllMarkers, setShowAllMarkers] = useState(false);
   const [showPointPrices, setShowPointPrices] = useState(false);
-  const [magnetMode, setMagnetMode] = useState<MagnetMode>('weak');
   const [allTrades, setAllTrades] = useState<ReviewedTrade[]>([]);
   const showAllMarkersRef = useRef(false);
   const allTradesRef = useRef<ReviewedTrade[]>([]);
   /** Kept in a ref so the crosshair handler (bound once) reads the live trade. */
   const tradeRef = useRef(trade);
-
-  // Read the ref at call time: this chart updates rendered candles without a re-render.
-  function drawingSnapOptions(): DrawingSnapOptions {
-    return { candles: renderedCandlesRef.current, timeframe, mode: magnetMode };
-  }
+  // The drawing layer (10/21) — shared with the free-replay chart and the 选品
+  // level drawer. The trade's candles live in a ref (the chart re-renders for
+  // other reasons), so the hook is handed the ref.
+  const drawings = useChartDrawings({
+    instrument: trade.instrument,
+    timeframe,
+    tradeId: trade.id,
+    chartApiRef,
+    seriesRef,
+    candles: renderedCandlesRef,
+    toolbarExtra: (
+      <>
+        <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
+        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
+        <button type="button" className={showAllMarkers ? 'selected' : ''} title={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-label={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-pressed={showAllMarkers} onClick={() => setShowAllMarkers((current) => !current)}><MapPin size={16} /></button>
+        <button type="button" className={showPointPrices ? 'selected' : ''} title={showPointPrices ? '隐藏点位价格' : '显示点位价格'} aria-label={showPointPrices ? '隐藏点位价格' : '显示点位价格'} aria-pressed={showPointPrices} onClick={() => setShowPointPrices((current) => !current)}><CircleDollarSign size={16} /></button>
+        {!showAllMarkers ? (
+          <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+        ) : null}
+      </>
+    ),
+  });
 
   useEffect(() => {
     markersVisibleRef.current = markersVisible;
@@ -1746,7 +1623,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     const tooltip = createTradeMarkerTooltip(container);
     markerTooltipRef.current = tooltip;
     resetChartPriceScale(chart);
-    const refreshOverlay = () => setOverlayVersion((version) => version + 1);
+    const refreshOverlay = () => drawings.bumpOverlay();
     const updateActiveCandle = (param: MouseEventParams) => {
       setActiveCandle(candlestickAtTime(renderedCandlesRef.current, param.time));
       const hit = param.point ? markerPrimitive.findPointAt(param.point.x, param.point.y) : null;
@@ -1772,15 +1649,6 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     if (!chart) return;
     applyChartPriceScaleMode(chart, priceScaleMode);
   }, [priceScaleMode]);
-
-  useEffect(() => {
-    setSelectedDrawingId('');
-    setDraftPoint(null);
-    setDraftEndPoint(null);
-    fetch(`/api/drawings?${new URLSearchParams({ instrument: trade.instrument })}`)
-      .then((response) => response.json())
-      .then(({ drawings: next }: { drawings: ChartDrawing[] }) => setDrawings(next));
-  }, [trade.instrument]);
 
   useEffect(() => {
     setStatus('加载 K 线');
@@ -1894,7 +1762,7 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
       const target = event.target as HTMLElement | null;
       if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
       if (event.key === 'Escape') {
-        setSelectedDrawingId('');
+        drawings.setSelectedDrawingId('');
         return;
       }
       if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
@@ -2015,23 +1883,6 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     }
   }
 
-  async function saveDrawing(input: SaveChartDrawingInput) {
-    const saved = (await fetch('/api/drawings', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    }).then((response) => response.json())) as ChartDrawing;
-    setDrawings((current) => [...current.filter((drawing) => drawing.id !== saved.id), saved]);
-    setSelectedDrawingId(saved.id);
-  }
-
-  async function deleteSelectedDrawing() {
-    if (!selectedDrawingId) return;
-    await fetch(`/api/drawings?${new URLSearchParams({ id: selectedDrawingId })}`, { method: 'DELETE' });
-    setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawingId));
-    setSelectedDrawingId('');
-  }
-
   function resetPriceScale() {
     const chart = chartApiRef.current;
     if (!chart) return;
@@ -2043,100 +1894,12 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
     setPriceScaleMode((current) => current === PriceScaleMode.Logarithmic ? PriceScaleMode.Normal : PriceScaleMode.Logarithmic);
   }
 
-  function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
-    if (!drawingTool) {
-      setSelectedDrawingId('');
-      return;
-    }
-    const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnapOptions());
-    if (!point) return;
-    if (drawingTool === 'horizontal') {
-      void saveDrawing({ tradeId: trade.id, instrument: trade.instrument, timeframe, kind: 'horizontal', points: [point] });
-      return;
-    }
-    if (!draftPoint) {
-      setDraftPoint(point);
-      setDraftEndPoint(point);
-      return;
-    }
-    void saveDrawing({ tradeId: trade.id, instrument: trade.instrument, timeframe, kind: drawingTool, points: [draftPoint, point] });
-    setDraftPoint(null);
-    setDraftEndPoint(null);
-  }
-
-  /** Picking a tool abandons any half-drawn point. Without this the leftover
-   * draft keeps rendering — in the NEW tool's shape, since the preview follows
-   * the active tool — as a line the user never drew and cannot click away. */
-  function selectDrawingTool(tool: ChartDrawingKind | null) {
-    setDrawingTool(tool);
-    setDraftPoint(null);
-    setDraftEndPoint(null);
-  }
-
-  function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
-    if (drawing.id === 'draft') return;
-    // Unsnapped on purpose: this point only feeds the incremental 'body' translation.
-    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
-    if (!point) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setDrawingTool(null);
-    setSelectedDrawingId(drawing.id);
-    dragRef.current = { drawing, target, startPoint: point };
-    overlayRef.current?.setPointerCapture(event.pointerId);
-  }
-
-  function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
-    const drag = dragRef.current;
-    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnapOptions());
-    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
-    if (!snappedPoint || !rawPoint) return;
-    if (!drag) {
-      if ((drawingTool === 'segment' || drawingTool === 'ray') && draftPoint) setDraftEndPoint(snappedPoint);
-      return;
-    }
-    event.preventDefault();
-    // Endpoint drags take the snapped point; 'body' translation stays continuous on the raw one.
-    const point = drag.target === 'body' ? rawPoint : snappedPoint;
-    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
-    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
-  }
-
-  function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnapOptions());
-    const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
-    dragRef.current = null;
-    overlayRef.current?.releasePointerCapture(event.pointerId);
-    const point = drag.target === 'body' ? rawPoint : snappedPoint;
-    if (!point) return;
-    const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
-    setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
-    void saveDrawing(updated);
-  }
-
   return (
     <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; }} onPointerLeave={() => { pointerRef.current.inside = false; setActiveCandle(null); }}>
-      <div className="drawing-toolbar">
-        <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => selectDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
-        <button className={drawingTool === 'ray' ? 'selected' : ''} title="射线" onClick={() => selectDrawingTool(drawingTool === 'ray' ? null : 'ray')}><MoveUpRight size={16} /></button>
-        <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
-        <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
-        <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
-        <button type="button" className={`magnet-mode${magnetMode !== 'off' ? ' selected' : ''}`} title={MAGNET_MODE_HINTS[magnetMode]} aria-label="磁吸模式" aria-pressed={magnetMode !== 'off'} onClick={() => setMagnetMode((current) => nextMagnetMode(current))}><Magnet size={16} />{MAGNET_MODE_LABELS[magnetMode]}</button>
-        <button type="button" className={showAllMarkers ? 'selected' : ''} title={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-label={showAllMarkers ? '隐藏全部开平仓' : '显示全部开平仓'} aria-pressed={showAllMarkers} onClick={() => setShowAllMarkers((current) => !current)}><MapPin size={16} /></button>
-        <button type="button" className={showPointPrices ? 'selected' : ''} title={showPointPrices ? '隐藏点位价格' : '显示点位价格'} aria-label={showPointPrices ? '隐藏点位价格' : '显示点位价格'} aria-pressed={showPointPrices} onClick={() => setShowPointPrices((current) => !current)}><CircleDollarSign size={16} /></button>
-        {!showAllMarkers ? (
-          <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
-        ) : null}
-      </div>
+      {drawings.toolbar}
       <CandlestickReadout candle={activeCandle} timeframe={timeframe} />
       <div ref={chartRef} className="chart" />
-      <svg ref={overlayRef} className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`} onClick={handleOverlayClick} onPointerMove={handleOverlayPointerMove} onPointerUp={handleOverlayPointerUp} onPointerCancel={handleOverlayPointerUp}>
-        {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
-        <DrawingOverlay drawings={drawings} selectedDrawingId={selectedDrawingId} draftPoint={draftPoint} draftEndPoint={draftEndPoint} draftKind={drawingTool} chart={chartApiRef.current} series={seriesRef.current} timeframe={timeframe} candles={renderedCandlesRef.current} version={overlayVersion} onSelect={setSelectedDrawingId} onPointerDown={handleDrawingPointerDown} />
-      </svg>
+      {drawings.overlay}
       {status && <div className="chart-status">{status}</div>}
     </div>
   );
@@ -2156,135 +1919,6 @@ function CandlestickReadout({ candle, timeframe }: { candle: Candlestick | null;
       {fields.map(([label, value]) => <span key={label}><span>{label}</span>{formatCandlestickPrice(value)}</span>)}
     </div>
   );
-}
-
-function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint, draftKind, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
-  drawings: ChartDrawing[];
-  selectedDrawingId: string;
-  draftPoint: ChartPoint | null;
-  draftEndPoint: ChartPoint | null;
-  /** Kind of the in-progress drawing; the preview must render in the active tool's shape. */
-  draftKind: ChartDrawingKind | null;
-  chart: IChartApi | null;
-  series: ISeriesApi<'Candlestick'> | null;
-  timeframe: ReviewTimeframe;
-  candles: Candlestick[];
-  version: number;
-  onSelect: (id: string) => void;
-  onPointerDown: (event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) => void;
-}) {
-  void version;
-  if (!chart || !series) return null;
-  return (
-    <>
-      {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} onPointerDown={onPointerDown} />)}
-      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: draftKind ?? 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
-    </>
-  );
-}
-
-function DrawingShape({ drawing, selected, chart, series, timeframe, candles, onSelect, onPointerDown }: { drawing: ChartDrawing; selected: boolean; chart: IChartApi; series: ISeriesApi<'Candlestick'>; timeframe: ReviewTimeframe; candles: Candlestick[]; onSelect: (id: string) => void; onPointerDown: (event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) => void }) {
-  const color = selected ? '#FACC15' : '#38BDF8';
-  const style = drawingStyleForTimeframe(timeframe);
-  const width = selected ? style.selectedStrokeWidth : style.strokeWidth;
-  if (drawing.kind === 'horizontal') {
-    const y = series.priceToCoordinate(drawing.points[0]?.price ?? NaN);
-    if (y == null) return null;
-    return (
-      <g>
-        <line x1="0" x2="100%" y1={y} y2={y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
-        {selected && <circle cx="24" cy={y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />}
-      </g>
-    );
-  }
-  const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
-  if (points.some((point) => !point)) return null;
-  // A ray keeps its two handles on the real points (`'start'` = endpoint,
-  // `'end'` = direction point) and only the drawn line runs past `'end'`.
-  const start = points[0]!;
-  const directionPoint = points[1]!;
-  const end = drawing.kind === 'ray' ? rayEndPoint(start, directionPoint) : directionPoint;
-  return (
-    <g>
-      <line x1={start.x} y1={start.y} x2={end.x} y2={end.y} stroke={color} strokeWidth={width} className="drawing-shape" onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }} onPointerDown={(event) => onPointerDown(event, drawing, 'body')} />
-      {selected && <circle cx={start.x} cy={start.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'start')} />}
-      {selected && <circle cx={directionPoint.x} cy={directionPoint.y} r={style.handleRadius} className="drawing-handle" onClick={(event) => event.stopPropagation()} onPointerDown={(event) => onPointerDown(event, drawing, 'end')} />}
-    </g>
-  );
-}
-
-/**
- * How far, in pixels, a ray is projected past its direction point.
- *
- * The overlay is a root `<svg>` filling `.chart-wrap`, so the root viewport
- * clips anything outside it (and `.chart-wrap` adds `overflow: hidden`). A
- * constant this large therefore ends at the visible edge without needing the
- * overlay's size — no size props and no `ResizeObserver`, and no dependency on
- * `timeScale().width()` / `paneSize()`, which the chart test mocks do not
- * provide.
- */
-const RAY_LENGTH = 20000;
-
-/** `start` projected towards `direction`, `RAY_LENGTH` pixels away. */
-function rayEndPoint(start: { x: number; y: number }, direction: { x: number; y: number }): { x: number; y: number } {
-  const dx = direction.x - start.x;
-  const dy = direction.y - start.y;
-  const length = Math.hypot(dx, dy);
-  // Two clicks on the same spot leave no direction to extend along; fall back to
-  // the plain two-point shape instead of dividing by zero (`NaN` coordinates).
-  if (!Number.isFinite(length) || length === 0) return direction;
-  return { x: start.x + (dx / length) * RAY_LENGTH, y: start.y + (dy / length) * RAY_LENGTH };
-}
-
-function drawingStyleForTimeframe(timeframe: ReviewTimeframe): { strokeWidth: number; selectedStrokeWidth: number; handleRadius: number } {
-  if (timeframe === '5m' || timeframe === '15m') return { strokeWidth: 1, selectedStrokeWidth: 2, handleRadius: 4 };
-  if (timeframe === '1H' || timeframe === '4H') return { strokeWidth: 1.5, selectedStrokeWidth: 2.5, handleRadius: 5 };
-  return { strokeWidth: 2, selectedStrokeWidth: 3, handleRadius: 5 };
-}
-
-function pointFromMouse(event: React.MouseEvent<SVGSVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null, snap: DrawingSnapOptions | null = null): ChartPoint | null {
-  return pointFromClient(event.clientX, event.clientY, chart, series, overlay, snap);
-}
-
-function pointFromPointer(event: React.PointerEvent<SVGElement>, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null, snap: DrawingSnapOptions | null = null): ChartPoint | null {
-  return pointFromClient(event.clientX, event.clientY, chart, series, overlay, snap);
-}
-
-function pointFromClient(clientX: number, clientY: number, chart: IChartApi | null, series: ISeriesApi<'Candlestick'> | null, overlay: SVGSVGElement | null, snap: DrawingSnapOptions | null = null): ChartPoint | null {
-  if (!chart || !series || !overlay) return null;
-  const rect = overlay.getBoundingClientRect();
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
-  const time = chart.timeScale().coordinateToTime(x);
-  const price = series.coordinateToPrice(y);
-  if (typeof time !== 'number' || price == null) return null;
-  const point: ChartPoint = { time, price };
-  if (!snap) return point;
-  // The same pointer y drives both the raw price and the OHLC pixel distances.
-  return snapDrawingPoint({
-    point,
-    pointerY: y,
-    candles: snap.candles,
-    timeframe: snap.timeframe,
-    mode: snap.mode,
-    priceToY: (candidate) => series.priceToCoordinate(candidate),
-  });
-}
-
-function moveDrawing(drawing: ChartDrawing, target: DrawingDragTarget, startPoint: ChartPoint, currentPoint: ChartPoint): ChartDrawing {
-  const priceDelta = currentPoint.price - startPoint.price;
-  const timeDelta = currentPoint.time - startPoint.time;
-  const points = drawing.points.map((point, index) => {
-    if (drawing.kind === 'horizontal') {
-      return { ...point, price: point.price + priceDelta };
-    }
-    if (target === 'body') {
-      return { time: point.time + timeDelta, price: point.price + priceDelta };
-    }
-    const shouldMove = (target === 'start' && index === 0) || (target === 'end' && index === 1);
-    return shouldMove ? { time: currentPoint.time, price: currentPoint.price } : point;
-  });
-  return { ...drawing, points };
 }
 
 function visibleBarsForChart(chart: IChartApi, element: HTMLElement | null): number {
