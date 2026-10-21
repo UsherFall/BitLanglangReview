@@ -1,6 +1,7 @@
 # K 线按各自行情源走：选品 + 回溯复盘用 Bitget 源
 
-> 状态：planning（2026-10-21 创建）。
+> 状态：done（2026-10-21 创建并完成）。
+> 提交：`011f147` / `0c35248` / `4ff3350`。
 > 前置：`10-21-scan-level-fix-and-top20`（距线修复 —— 比例因子从"日常路径"退化为"兜底"）。
 
 ## 用户原话
@@ -99,17 +100,17 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1 选品扫描选 Bitget 源 → 画线抽屉的图是 **Bitget** 的 K 线，instrument 是 Bitget 符号（`PEPEUSDT`）
-- [ ] AC2 选品扫描选币安源 → 抽屉是**币安**的 K 线，instrument 是 `1000PEPEUSDT`
-- [ ] AC3 选品扫描选 OKX 源 → 抽屉是 OKX 的 K 线
-- [ ] AC4 画线抽屉往回翻历史能翻到 ≥ 200 根（Bitget 1D 走 `/history-candles`，实测可到 2020-09）
-- [ ] AC5 回溯复盘的 K 线来自 **Bitget**，且切日是 **UTC+8**（Bitget 的日线在 16:00Z 开）
-- [ ] AC6 回溯复盘的标的显示为 **Bitget 名**（`BTCUSDT`），且能加载出 K 线
-- [ ] AC7 **旧的回溯复盘会话**（OKX 名 / 币安源）仍能正常回放 —— 向后兼容
-- [ ] AC8 交割单复盘**完全不变**：OKX 名、OKX K 线、UTC+8 切日
-- [ ] AC9 `PEPE` 在选品（Bitget 源）里画的线，与回溯复盘（Bitget 源）里的 K 线**同一坐标系**（同源同尺度，无需换算）
-- [ ] AC10 `npm test` 与 `npx tsc --noEmit` 干净
-- [ ] AC11 新增测试：Bitget 源的 `earlier` 翻页、`later` 单次请求、切日网格、抽屉的源跟随
+- [x] AC1 选品扫描选 Bitget 源 → 画线抽屉的图是 **Bitget** 的 K 线，instrument 是 Bitget 符号（`PEPEUSDT`）
+- [x] AC2 选品扫描选币安源 → 抽屉是**币安**的 K 线，instrument 是 `1000PEPEUSDT`
+- [x] AC3 选品扫描选 OKX 源 → 抽屉是 OKX 的 K 线
+- [x] AC4 画线抽屉往回翻历史能翻到 ≥ 200 根（Bitget 1D 走 `/history-candles`，实测可到 2020-09）
+- [x] AC5 回溯复盘的 K 线来自 **Bitget**，且切日是 **UTC+8**（Bitget 的日线在 16:00Z 开）
+- [x] AC6 回溯复盘的标的显示为 **Bitget 名**（`BTCUSDT`），且能加载出 K 线
+- [x] AC7 **旧的回溯复盘会话**（OKX 名 / 币安源）仍能正常回放 —— 向后兼容
+- [x] AC8 交割单复盘**完全不变**：OKX 名、OKX K 线、UTC+8 切日
+- [x] AC9 `PEPE` 在选品（Bitget 源）里画的线，与回溯复盘（Bitget 源）里的 K 线**同一坐标系**（同源同尺度，无需换算）
+- [x] AC10 `npm test` 与 `npx tsc --noEmit` 干净
+- [x] AC11 新增测试：Bitget 源的 `earlier` 翻页、`later` 单次请求、切日网格、抽屉的源跟随
 
 ## 风险
 
