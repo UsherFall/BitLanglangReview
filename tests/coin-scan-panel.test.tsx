@@ -248,3 +248,24 @@ describe('CoinScanPanel 行情源 (data source)', () => {
     expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/api/scan?'))).toBe(false);
   });
 });
+
+describe('CoinScanPanel 行情源变更上报（10/21：画线抽屉跟着源走）', () => {
+  it('切换行情源时通知调用方（抽屉要跟着换源）', async () => {
+    stubFetch();
+    const onSourceChange = vi.fn();
+    render(<CoinScanPanel scope="crypto" onScopeChange={vi.fn()} onScanned={vi.fn()} onSourceChange={onSourceChange} />);
+
+    fireEvent.click(panelButton('币安'));
+
+    expect(onSourceChange).toHaveBeenCalledWith('binance');
+  });
+
+  it('没有传 onSourceChange 时也不报错', async () => {
+    stubFetch();
+    render(<CoinScanPanel scope="crypto" onScopeChange={vi.fn()} onScanned={vi.fn()} />);
+
+    fireEvent.click(panelButton('币安'));
+
+    expect(screen.getByRole('button', { name: '币安' })).toBeInTheDocument();
+  });
+});

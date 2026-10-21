@@ -143,17 +143,18 @@ describe('Bitget review module', () => {
     vi.unstubAllGlobals();
   });
 
-  it('loads Binance candlesticks for a personal-review trade (source=binance)', async () => {
+  it('loads Bitget candlesticks for a personal-review trade (10/21: source=bitget)', async () => {
     const fetchMock = makeFetch({ configured: true, bitgetTrades: [makeBitgetTrade()] });
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
 
     fireEvent.click(screen.getByRole('button', { name: '个人交割单复盘' }));
-    // The personal-review chart fetches its candlesticks from the Binance source.
+    // 10/21: the personal-review chart fetches its candlesticks from BITGET -
+    // the position's entry price comes from Bitget, so the candles must too.
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url]) => {
         const target = String(url);
-        return target.startsWith('/api/candles') && target.includes('source=binance');
+        return target.startsWith('/api/candles') && target.includes('source=bitget');
       })).toBe(true);
     });
     vi.unstubAllGlobals();

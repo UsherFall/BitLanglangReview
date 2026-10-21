@@ -28,6 +28,15 @@ export type CoinScanPanelProps = {
   scope: ScanScope;
   /** 切换子模块; App 负责清空上一次结果。 */
   onScopeChange: (scope: ScanScope) => void;
+  /**
+   * Reports the venue the scan is running against (10/21).
+   *
+   * The level drawer draws on a chart, and that chart must come from the SAME
+   * venue as the scan: the line's price and the scan's candles then share one
+   * price basis, and the cross-venue rescale (`levelScaleFactor`) stays a
+   * fallback instead of the daily path.
+   */
+  onSourceChange?: (source: MarketDataSource) => void;
   onScanned: (result: ScanResult) => void;
 };
 
@@ -69,7 +78,7 @@ function topNInput(value: number | undefined): string {
   return value === undefined ? '' : String(value);
 }
 
-export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanelProps) {
+export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange }: CoinScanPanelProps) {
   const [method, setMethod] = useState<'shrink' | 'heat' | 'box'>('shrink');
   // 行情源: 初值 = 共享默认源, 挂载后由服务端启动源校正(见下)。
   const [source, setSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
@@ -129,6 +138,8 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
   /** 换行情源: 扫描请求带 source, 默认参数随之重新推导。 */
   function changeSource(next: MarketDataSource) {
     if (next === source) return;
+    // 10/21: the caller keeps the venue so the level drawer can follow it.
+    onSourceChange?.(next);
     setSource(next);
     applyDefaults(next, scope);
     setError(null);

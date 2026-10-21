@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BINANCE_SYMBOL_ALIASES, canonicalInstrument, resolveCandleChain, shortInstrument } from '../src/domain/instrument-symbol';
+import { BINANCE_SYMBOL_ALIASES, canonicalInstrument, okxInstrumentToBitgetSymbol, resolveCandleChain, shortInstrument } from '../src/domain/instrument-symbol';
 
 const TRADING = new Map([
   ['BTCUSDT', 'TRADING'],
@@ -103,5 +103,23 @@ describe('shortInstrument（展示用）', () => {
   it('去掉 OKX 后缀，其它原样', () => {
     expect(shortInstrument('BTC-USDT-SWAP')).toBe('BTC');
     expect(shortInstrument('BTCUSDT')).toBe('BTCUSDT');
+  });
+});
+
+describe('okxInstrumentToBitgetSymbol（10/21：改名，不改尺度）', () => {
+  it('把 OKX 名翻译成 Bitget 名', () => {
+    // Bitget 与 OKX 是**同一面值**（实测 2026-10-21：OKX PEPE-USDT-SWAP =
+    // 0.000004561，Bitget PEPEUSDT = 0.0000045647），所以这只是改名，不涉及
+    // 任何价格缩放 —— 这正是「仓位价与 K 线同源」的含义。
+    expect(okxInstrumentToBitgetSymbol('PEPE-USDT-SWAP')).toBe('PEPEUSDT');
+    expect(okxInstrumentToBitgetSymbol('BTC-USDT-SWAP')).toBe('BTCUSDT');
+    expect(okxInstrumentToBitgetSymbol('XAU-USDT-SWAP')).toBe('XAUUSDT');
+  });
+
+  it('非 USDT 永续返回 null（而不是问交易所要一个不存在的符号）', () => {
+    expect(okxInstrumentToBitgetSymbol('BTC-USDC-SWAP')).toBeNull();
+    expect(okxInstrumentToBitgetSymbol('BTC-USDT-SPOT')).toBeNull();
+    expect(okxInstrumentToBitgetSymbol('BTCUSDT')).toBeNull();
+    expect(okxInstrumentToBitgetSymbol('')).toBeNull();
   });
 });

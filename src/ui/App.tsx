@@ -3,7 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDollarSign, Er
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
-import type { ScanScope } from '../domain/scan-scope';
+import { DEFAULT_MARKET_DATA_SOURCE, type MarketDataSource, type ScanScope } from '../domain/scan-scope';
 import type { ChartDrawing, ChartPoint } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
 import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
@@ -106,7 +106,11 @@ type ReviewMode = 'trade' | 'bitget' | 'freeReplay' | 'scan';
 type ReviewModeBinding = { endpoint: string; candleSource: CandleSourceId };
 const reviewModeBindings: Partial<Record<ReviewMode, ReviewModeBinding>> = {
   trade: { endpoint: '/api/trades', candleSource: 'okx' },
-  bitget: { endpoint: '/api/bitget/trades', candleSource: 'binance' },
+  // 10/21: the Bitget positions are charted against BITGET's candles. The
+  // position's entry price comes from Bitget, so the candles must too — a
+  // Binance chart of a Bitget position puts the entry price on a different
+  // price scale (PEPE: Bitget 0.000005 vs Binance's 1000PEPE 0.0045).
+  bitget: { endpoint: '/api/bitget/trades', candleSource: 'bitget' },
 };
 
 /** Both review modes share the same queue/detail workspace, only the data source differs. */
@@ -239,6 +243,12 @@ export function App() {
   // 选品 sub-module (加密 / 股票). Held here so the parameter panel and the result
   // panel always describe the same scan; switching clears the stale result.
   const [scanScope, setScanScope] = useState<ScanScope>('crypto');
+  /**
+   * The venue the 选品 scan runs against (10/21). The level drawer draws
+   * on a chart, and that chart must come from the SAME venue: the line's
+   * price and the scan's candles then share one price basis.
+   */
+  const [scanSource, setScanSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
   // Bumped by the Bitget sync bar so the trade queue refetches after a sync.
   const [tradeRefreshToken, setTradeRefreshToken] = useState(0);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
@@ -777,6 +787,7 @@ export function App() {
               setScanScope(next);
             }}
             onScanned={setScanResult}
+            onSourceChange={setScanSource}
           />
         ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
@@ -880,7 +891,7 @@ export function App() {
                   <OtherCoinChart
                     entryTime={new Date().toISOString()}
                     timeframe={drawTimeframe}
-                    candleSource="binance"
+                    candleSource={scanSource}
                     initialInstrument={drawTarget}
                     drawable
                     onClose={() => setDrawTarget(null)}

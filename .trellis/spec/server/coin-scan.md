@@ -488,6 +488,14 @@ The scan measures "how far is the price from the level the USER drew" (`src/doma
 2. **Matching.** A drawing is stored with the instrument of the chart it was drawn on — the trade review draws on OKX (`BTC-USDT-SWAP`) while the scan pool is Bitget/Binance (`BTCUSDT`). The scan groups the lines by the **canonical** name (`canonicalInstrument` in `src/domain/instrument-symbol.ts` — `BTC-USDT-SWAP` / `BTC-USDT` / `BTCUSDT` all → `BTCUSDT`). The canonical name is used for MATCHING ONLY: storage keys, API paths and display names are untouched.
 3. **The price basis.** A level is drawn on ONE venue's chart and measured on ANOTHER venue's candles, so the two price bases have to be reconciled. Every drawing carries the optional `refPrice` / `refTime` (the close of the bar it was drawn on, in the drawing venue's basis) and the scan multiplies the level price by `sourceClose(refTime) / refPrice` before measuring (`levelScaleFactor`). **Degradation is deliberate**: no `refPrice` (levels drawn before 10/21) → factor 1; no source close at that instant → factor 1 + a note; a factor outside `[0.5, 2]` (a face-value rename, see the hard rule in `instrument-symbol.ts`) → factor 1 + a note. The reasons are reported in `levelScaleNotes` — a degraded level is still measured, but never silently.
 
+### The level drawer follows the scan's venue (10/21)
+
+The 选品 list's 「画线」 opens a chart so the user can draw a level. That chart must come from the **same venue the scan used**: the level's price and the scan's candles then share one price basis, and the cross-venue rescale (`levelScaleFactor`) is a fallback rather than the daily path.
+
+- The panel reports its venue through `onSourceChange`; `App` owns `scanSource` and hands it to the drawer.
+- The instrument is the scan row's own instrument — already that venue's symbol (`PEPEUSDT` for a Bitget scan, `1000PEPEUSDT` for a Binance one).
+- **No face-value conversion is involved anywhere**: each venue names its own coins, and a screen only ever uses the symbols of the venue it reads.
+
 ### The 选品 list shows 20 rows, not 150 (10/21)
 
 The coarse screen is deliberately WIDE (≈44% of the pool at the calibration point), so a live scan listed ~150 rows. The cut belongs to the **DISPLAY**, not to the screen: the percentile thresholds (`COARSE_SCREEN_PCT_RANGE` / `COARSE_SCREEN_PCT_NET` / `COARSE_POS_RANGE_FLOOR`) are the recall, and every attempt to tighten them dropped coins the user had already approved as "structurally good" (measured — `10-20-anomaly-level-tracker/research/screen-redo.md`: 5 tightening conditions, the best kept 1/9 of the wanted coins, the worst 0/9).

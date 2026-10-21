@@ -148,6 +148,16 @@ Coverage is in `tests/binance-tickers.test.ts`.
 - Rate handling: `defaultBitgetMarketFetchJson` (in `http.ts`) paces request starts through `bitgetMarketRatePacer` (50ms + 10ms jitter ≈ 20 req/s) and attaches `bitgetMarketRateGate`, wired into `CoinScanService` as the scan's warning source so a Bitget 429 surfaces as a user-visible warning ("Bitget限频(HTTP 429)…") instead of a silent stall. Bitget's nominal bucket is ~20 req/s per IP (response header `X-MBX-USED-REMAIN-LIMIT`); measured behaviour is burst-tolerant (150 requests at 30-way parallelism, zero 429) but soft-throttled under sustained concurrency (~2s per request), which is why the pacer is not optional. The silent weight monitor is injected so Bitget 429s never print `[binance]` lines.
 - Rolling retention (5m ≈ 3–4 months intraday, 1D+ years) only limits anchored historical scans past the window; refresh scans read the newest 100–200 bars and are unaffected.
 
+### Bitget as a CHART source (10/21)
+
+The Bitget source was written for the coin scan (10/12) and is now also the chart source for the venues whose data comes from Bitget. Three things were added:
+
+- **`/api/candles?source=bitget`** (`src/server/review-candle-source.ts` — `getBitgetCandles`). The instrument may be given in EITHER vocabulary: a Bitget symbol (`PEPEUSDT`) or an OKX-style instrument (`PEPE-USDT-SWAP`), which is renamed via `okxInstrumentToBitgetSymbol` (`src/domain/instrument-symbol.ts`). The rename is a pure RENAME — Bitget and OKX use the same face value (measured 2026-10-21: OKX `PEPE-USDT-SWAP` = 0.000004561, Bitget `PEPEUSDT` = 0.0000045647), so a Bitget POSITION charts against Bitget candles with no price scaling at all. `allowPaging` is ON here (the charts ask for 150 bars; Bitget's `/candles` caps one request at 90) — unlike the coin scan, which keeps paging off because turning it on would move `coarseStructure`'s `posRange` and therefore the candidate set.
+- **`later` paging** (`fetchLaterPaged`), the mirror of the existing `earlier` paging. It was missing because the scan only ever reads backwards. **The page window must be exactly ONE page wide**: a wider window lets the endpoint answer with the NEWEST bars inside it, which leaves a hole right after the anchor — and `contiguousCandles` then judges the whole read as discontinuous and returns nothing. (Measured and fixed; the `earlier` walk has the mirror-image constraint, documented in its own comment.)
+- **The day boundary is UTC+8**: Bitget's daily bars open at 16:00Z (= 00:00 Beijing), like OKX. Binance opens at 00:00Z. So the `CandleGrid` per source is `utc` for Binance and `shanghai` for OKX and Bitget.
+
+**The invariant (10/21)**: every screen reads its candles from the venue ITS OWN data came from, so a price and the chart it is drawn on always share one basis. The venues' symbols do NOT line up across exchanges (Binance writes `1000PEPEUSDT` at 1000x the face value; OKX and Bitget write `PEPE-USDT-SWAP` / `PEPEUSDT` at 1x), which is why a chart must not be borrowed from another venue. The residual tool for the cases where that is unavoidable (a level drawn on one venue, measured on another) is `levelScaleFactor` in `src/domain/level-alert.ts`.
+
 Coverage is in `tests/bitget-tickers.test.ts` and `tests/bitget-candles.test.ts`.
 
 ## Error Handling
