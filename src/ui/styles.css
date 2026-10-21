@@ -594,6 +594,87 @@ textarea {
   pointer-events: auto;
 }
 
+/* 画线浮层停靠在左侧（不遮住选品列表的「距线」列）。
+   `chart-float-stack` 自带 `width: min(520px, ...)`，这里要放开——浮层里的
+   周期按钮一排 8 个，520px 装不下会折行。 */
+.level-drawer-stack {
+  right: auto;
+  left: 18px;
+  align-items: flex-start;
+  width: min(880px, calc(100% - 36px));
+}
+
+/* 选品页的画线浮层：比「其他币」面板宽一些（要能看日线的形态），
+   顶部是币种 + 周期切换 + 关闭。
+   停靠在左侧而不是右上角——右上角会盖住选品列表的「距线」列，
+   而那正是用户画完线要回来看的地方。
+
+   高度由内容决定：`chart-float-stack` 是 `align-items: flex-end` 的列 flex，
+   这里改成 stretch 并给图表一个确定的高度，否则 `other-coin-panel` 的
+   `flex: 0 1 auto` 会被压成 0（实测高度只剩 2px，图表看不见）。 */
+.level-drawer {
+  position: absolute;
+  top: 76px;
+  left: 18px;
+  width: min(880px, calc(100% - 36px));
+  background: #0b1017;
+  border: 1px solid #2d333b;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.level-drawer .other-coin-panel {
+  height: 420px;
+  flex: 0 0 auto;
+}
+
+.level-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2d333b;
+  background: #11161d;
+  font-size: 13px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.level-drawer-head b {
+  color: #e6edf3;
+  flex: 0 0 auto;
+}
+
+.level-drawer-head .timeframes {
+  display: flex;
+  gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.level-drawer-head button {
+  background: #161b22;
+  border: 1px solid #2d333b;
+  color: #8b949e;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.level-drawer-head button.selected {
+  border-color: #2f81f7;
+  color: #e6edf3;
+}
+
+/* 关闭固定在右侧，不被周期按钮挤走。 */
+.level-drawer-head .level-drawer-close {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 /* Free Replay reserves a 340px paper-trading column on the right, so the
    default `right: 18px` would drop the panel on top of it. Shift the stack
    left of that column; the chart column keeps its own full width underneath. */

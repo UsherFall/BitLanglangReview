@@ -204,7 +204,9 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
       <label>
         方法
         <select value={method} onChange={(event) => setMethod(event.target.value as 'shrink' | 'heat')}>
-          <option value="shrink">收敛结构</option>
+          {/* 10/20: 收敛结构 → 距线。收敛检测器已删除（用户明确「收敛算法实现不了」），
+              现在这个方法报的是"现价距你标的线还有多少"。 */}
+          <option value="shrink">距你标的线</option>
           {scope === 'crypto' && <option value="heat">热度</option>}
         </select>
       </label>
@@ -238,7 +240,10 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
           ? '范围 = 美股 + 韩股:休市时段整体剔除,序列只含真实交易时段 K 线(盘前 04:00 – 盘后 20:00 ET)。'
           : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
         {method === 'shrink'
-          ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中,再排除趴在序列绝对底部的品种),只对通过者再取 5m/15m/1H/4H,每币一行。结构强度阈值调高 = 宁少勿滥,大级别(4H/1D)自动更宽容;时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
+          ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中,再排除趴在序列绝对底部的品种),每币一行。'
+            + '「距你标的线」用的是你自己画的线(水平线/趋势线):价格离那条线近 → 贴近,远 → 不接近,'
+            + '距离按该币自己的波动折算(所以 BTC 和山寨币的门槛不一样)。没画线的币只报距线为「—」。'
+            + '时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
           : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
       </p>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
@@ -259,9 +264,15 @@ export type CoinScanResultsProps = {
   /** Instruments the user manually demoted (日线结构不适合做多); rendered last and dimmed. */
   demotedCoins: string[];
   onToggleDemotedCoin: (instrument: string) => void;
+  /**
+   * Open the chart for this instrument so the user can DRAW a level on it.
+   * The 选品 list has no chart of its own, so the request has to leave this
+   * module — the caller decides where it lands.
+   */
+  onDrawLevel?: (instrument: string) => void;
 };
 
-export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demotedCoins, onToggleDemotedCoin }: CoinScanResultsProps) {
+export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demotedCoins, onToggleDemotedCoin, onDrawLevel }: CoinScanResultsProps) {
   const [copiedInstrument, setCopiedInstrument] = useState<string | null>(null);
   const [expandedInstrument, setExpandedInstrument] = useState<string | null>(null);
 
@@ -341,11 +352,21 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                       <button
                         type="button"
                         className="coin-scan-copy"
-                        title="展开各周期结构明细"
+                        title="展开各周期距线明细"
                         onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
                       >
                         {expandedInstrument === row.instrument ? '收起' : '详情'}
                       </button>
+                      {onDrawLevel && (
+                        <button
+                          type="button"
+                          className="coin-scan-copy"
+                          title="打开这个币的图表，标一条压力位/趋势线"
+                          onClick={() => onDrawLevel(row.instrument)}
+                        >
+                          画线
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="coin-scan-copy"

@@ -158,6 +158,22 @@ describe('CoinScanResults', () => {
     expect(cell?.textContent).toContain('贴近');
   });
 
+  it('offers a 画线 button that asks for that instrument', () => {
+    const onDrawLevel = vi.fn();
+    const { container } = renderResults({ onDrawLevel });
+
+    const button = [...container.querySelectorAll('button')].find((b) => b.textContent === '画线');
+    expect(button).toBeDefined();
+    fireEvent.click(button!);
+    expect(onDrawLevel).toHaveBeenCalledWith('AAAUSDT');
+  });
+
+  it('hides the 画线 button when no drawer is wired up', () => {
+    const { container } = renderResults();
+    const buttons = [...container.querySelectorAll('button')].map((b) => b.textContent);
+    expect(buttons).not.toContain('画线');
+  });
+
   it('reports the coarse candidates against the alert subset in the header', () => {
     const { container } = renderResults({ result: scanResponse(['AAAUSDT', 'BBBUSDT']) });
 

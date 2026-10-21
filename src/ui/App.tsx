@@ -230,6 +230,24 @@ export function App() {
   const [leaderCoins, setLeaderCoins] = useState<string[]>(() => loadStoredStringList(LEADER_COINS_KEY));
   const [demotedCoins, setDemotedCoins] = useState<string[]>(() => loadStoredStringList(SCAN_DEMOTED_KEY));
   const [reviewMode, setReviewMode] = useState<ReviewMode>('trade');
+  /**
+   * The instrument the 选品 list asked to draw on ("去画线"). The scan list has
+   * no chart of its own — the levels are drawn in the review chart's 其他币
+   * panel — so this is how the request crosses from the scan module into the
+   * chart module. `null` = no pending request.
+   */
+  const [drawTarget, setDrawTarget] = useState<string | null>(null);
+  /** The timeframe the level drawer draws on (the user's levels are per-level). */
+  const [drawTimeframe, setDrawTimeframe] = useState<ReviewTimeframe>('1D');
+
+  /**
+   * Open the level drawer for one instrument. The 选品 list has no chart, so
+   * this switches the draw panel to the instrument the user picked.
+   */
+  function openLevelDrawer(instrument: string) {
+    setDrawTimeframe('1D');
+    setDrawTarget(instrument);
+  }
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
@@ -841,13 +859,53 @@ export function App() {
         ) : (
           <div className="empty-state">选择交易对和开始时间，开始回溯复盘</div>
         ) : reviewMode === 'scan' ? (
-          scanResult && scanResult.method === 'heat' ? (
-            <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} />
-          ) : scanResult && scanResult.method === 'box' ? (
-            <BoxScanResults result={scanResult.data} />
-          ) : (
-            <CoinScanResults result={scanResult ? scanResult.data : null} leaderCoins={leaderCoins} onToggleLeaderCoin={toggleLeaderCoin} demotedCoins={demotedCoins} onToggleDemotedCoin={toggleDemotedCoin} />
-          )
+          <>
+            {scanResult && scanResult.method === 'heat' ? (
+              <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} />
+            ) : scanResult && scanResult.method === 'box' ? (
+              <BoxScanResults result={scanResult.data} />
+            ) : (
+              <CoinScanResults
+                result={scanResult ? scanResult.data : null}
+                leaderCoins={leaderCoins}
+                onToggleLeaderCoin={toggleLeaderCoin}
+                demotedCoins={demotedCoins}
+                onToggleDemotedCoin={toggleDemotedCoin}
+                onDrawLevel={openLevelDrawer}
+              />
+            )}
+            {drawTarget && (
+              // 选品页没有自己的图，所以画线在一个浮层里做：OtherCoinChart 自己拉
+              // K 线、不依赖某一笔交易，锚点取"现在"——画的是当下这条线。
+              <div className="chart-float-stack level-drawer-stack">
+                <div className="level-drawer">
+                  <div className="level-drawer-head">
+                    <b>{drawTarget}</b>
+                    <div className="timeframes">
+                      {reviewTimeframes.map((item) => (
+                        <button
+                          key={item}
+                          type="button"
+                          className={item === drawTimeframe ? 'selected' : ''}
+                          onClick={() => setDrawTimeframe(item)}
+                        >
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" className="level-drawer-close" onClick={() => setDrawTarget(null)}>关闭</button>
+                  </div>
+                  <OtherCoinChart
+                    entryTime={new Date().toISOString()}
+                    timeframe={drawTimeframe}
+                    candleSource="binance"
+                    initialInstrument={drawTarget}
+                    onClose={() => setDrawTarget(null)}
+                  />
+                </div>
+              </div>
+            )}
+          </>
         ) : selectedTrade ? (
           <>
             <header className="detail-header">

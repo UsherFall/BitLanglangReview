@@ -20,7 +20,7 @@ type InstrumentResponse = {
 
 type LoadDirection = 'earlier' | 'later';
 
-export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', onClose }: {
+export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', initialInstrument, onClose }: {
   entryTime: string;
   timeframe: ReviewTimeframe;
   /**
@@ -38,6 +38,13 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
    * against. Defaults to OKX, the trade-review source.
    */
   candleSource?: CandleSourceId;
+  /**
+   * The instrument to show when the panel opens. The 选品 list uses it to send
+   * the user straight to the coin they picked ("去画线"). When the symbol is
+   * not in this venue's list (a different venue's naming), the panel falls back
+   * to its default rather than showing nothing.
+   */
+  initialInstrument?: string;
   onClose: () => void;
 }) {
   const isReplay = cursorTime != null;
@@ -73,15 +80,31 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
   const lastPrefetchAnchorRef = useRef<number | null>(null);
   const [instruments, setInstruments] = useState<string[]>([]);
   const [query, setQuery] = useState('');
-  const [instrument, setInstrument] = useState(DEFAULT_INSTRUMENT_BY_SOURCE[venue]);
+  const [instrument, setInstrument] = useState(initialInstrument ?? DEFAULT_INSTRUMENT_BY_SOURCE[venue]);
+  // The panel picks from a venue-specific instrument list, so it always knows
+  // the native symbol already and never needs the candidate chain — that chain
+  // exists to translate a *trade's* OKX-style name, and it returns an empty
+  // list for anything that is not a trade symbol.
+  //
   // A venue switch invalidates the shown instrument: the previous one's symbol
-  // belongs to the other exchange's vocabulary.
+  // belongs to the other exchange's vocabulary. A caller-supplied
+  // `initialInstrument` only applies to THIS venue though — it names a symbol
+  // in the venue the caller is looking at, and a later venue switch must not
+  // resurrect it.
   const previousVenueRef = useRef(venue);
   useEffect(() => {
     if (previousVenueRef.current === venue) return;
     previousVenueRef.current = venue;
     setInstrument(DEFAULT_INSTRUMENT_BY_SOURCE[venue]);
   }, [venue]);
+  // Adopt the caller's instrument once the venue's own list has loaded, so the
+  // panel can confirm the symbol exists here (a Binance symbol offered to the
+  // OKX-backed panel loads nothing at all).
+  useEffect(() => {
+    if (!initialInstrument) return;
+    if (!instruments.length) return;
+    if (instruments.includes(initialInstrument)) setInstrument(initialInstrument);
+  }, [initialInstrument, instruments]);
   const [loadedCandles, setLoadedCandles] = useState<Candlestick[]>([]);
   const [status, setStatus] = useState('加载 K 线');
   const [showCandidates, setShowCandidates] = useState(false);
