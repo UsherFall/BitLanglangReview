@@ -27,3 +27,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 选品正名「主升浪候选」+ 新增「标线监控」视图
+<!-- trellis-session: v=2 fp=077e0f24c0f88f46 -->
+
+**Date**: 2026-10-21
+**Task**: 选品正名「主升浪候选」+ 新增「标线监控」视图
+**Branch**: `master`
+
+### Summary
+
+范围 B 落地：方法下拉「距你标的线」改「主升浪候选」并新增「标线监控」(method=watch)——行集合为画了线的币，不经粗筛/品种/休市门，解析不到的币走 missingInstruments 上报；距线测量与排序同 shrink 共用 measureLevelAlert/closestRatio（有一致性测试）。粗筛判据按用户确认不动。顺带按用户指示删除 tools/（dsh 插件 49 个 tsc 错误 + 已归档的 labeling 工具）并把 tsconfig include 收窄，全库 tsc 归零；71 文件 586 测试全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d0541d7` | feat(scan): 选品「距你标的线」正名「主升浪候选」，新增「标线监控」视图 |
+| `2b8570b` | chore(tools): 删除 tools/ —— dsh-trellis-plugin 类型错误与已归档的 labeling 工具 |
+
+### Status
+
+[OK] **Completed**
