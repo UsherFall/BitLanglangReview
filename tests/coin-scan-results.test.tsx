@@ -2,34 +2,33 @@
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { scanTimeframes, type ScanResponse, type ScanRow, type StructureResult } from '../src/domain/coin-scan';
+import { scanTimeframes, type ScanResponse, type ScanRow } from '../src/domain/coin-scan';
+import type { LevelAlert } from '../src/domain/level-alert';
 import { CoinScanResults, type CoinScanResultsProps } from '../src/ui/CoinScanPanel';
 
-function structure(qualified: boolean): StructureResult {
+function alert(distancePct: number, state: LevelAlert['state'] = 'alert'): LevelAlert {
   return {
-    structure: qualified ? 'convergence' : null,
-    position: 0.5,
-    score: qualified ? 0.8 : 0.2,
-    touchCount: 0,
-    qualified,
+    distancePct,
+    scalePct: 4,
+    ratio: Math.abs(distancePct) / 4,
+    state,
+    line: { kind: 'horizontal', price: 100 },
   };
 }
 
 function scanRow(instrument = 'AAAUSDT'): ScanRow {
-  const structures = {} as ScanRow['structures'];
+  const levelAlerts = {} as ScanRow['levelAlerts'];
   for (const [index, timeframe] of scanTimeframes.entries()) {
-    structures[timeframe] = structure(index === 0);
+    // Only the first timeframe has a drawn line — the others read as "no line".
+    levelAlerts[timeframe] = index === 0 ? alert(1.2) : null;
   }
   return {
     instrument,
     lastPrice: 12.5,
     change24h: 1.25,
     quoteVolume24h: 2e9,
-    structures,
-    convergedTimeframes: [scanTimeframes[0]],
-    qualifiedCount: 1,
-    bestScore: 0.8,
-    qualified: true,
+    levelAlerts,
+    alertTimeframes: [scanTimeframes[0]],
     // Row inclusion IS the 1D coarse screen, so every row carries its measures and
     // this scan's pool-relative cuts.
     coarse: { pass: true, rangePct: 0.459, netPct: 0.0948, posRange: 0.5, rangePctThreshold: 0.41, netPctThreshold: 0.06 },
@@ -134,7 +133,7 @@ describe('CoinScanResults', () => {
     const { container } = renderResults();
 
     const headers = [...container.querySelectorAll('.coin-scan-table thead th')].map((th) => th.textContent);
-    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '收敛结构', '强度分', '操作']);
+    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '距你标的线', '操作']);
 
     const cell = container.querySelector('.coin-scan-coarse');
     // 区间/净漂移 are pool-relative measures, 位 is the row's position inside its
@@ -148,12 +147,23 @@ describe('CoinScanResults', () => {
     expect(cell?.getAttribute('title')).toContain('3.0%');
   });
 
-  it('reports the coarse candidates against the converged subset in the header', () => {
+  it('shows the distance to the user\'s own line, with its state', () => {
+    const { container } = renderResults();
+
+    const cell = container.querySelector('.coin-scan-level');
+    expect(cell).not.toBeNull();
+    // The timeframe the line was drawn on, the distance in %, and the state.
+    expect(cell?.textContent).toContain('5m');
+    expect(cell?.textContent).toContain('+1.20%');
+    expect(cell?.textContent).toContain('贴近');
+  });
+
+  it('reports the coarse candidates against the alert subset in the header', () => {
     const { container } = renderResults({ result: scanResponse(['AAAUSDT', 'BBBUSDT']) });
 
     const summary = container.querySelector('.detail-header p')?.textContent ?? '';
     expect(summary).toContain('候选 465 个');
-    expect(summary).toContain('收敛 2 个');
+    expect(summary).toContain('贴近 2 个');
   });
 
   it('sinks demoted rows to the bottom while keeping the order inside each group', () => {

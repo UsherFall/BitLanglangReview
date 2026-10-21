@@ -1,18 +1,21 @@
-﻿/**
- * Box-braces (閽冨嫬濮忕粻鍙樼秼) detection on top of the shrink method.
+/**
+ * Box-braces (箱体蓄力) detection — an independent scan method, kept alongside
+ * the 距线 scan.
  *
- * The shipped `detectConvergence` asks "is the recent band quieter than the
- * same-length stretch before it". That measures a SHRINK of volatility, and it
- * misses the pattern the user actually looks for (2026-10-18): after a move, a
- * box whose HEIGHT is a small fraction of the move's own travel, still holding
- * the upper half of that move and not yet broken. On the 26 hand-picked "good
- * stretches" that pattern was found on the bar before the breakout 22/25 times
- * (the other 3 had no daily data), while `detectConvergence` found few.
+ * 10/20: the volatility-shrink detector this module used to contrast itself
+ * against (`detectConvergence`) was REMOVED from the product — nine attempts at
+ * it had all failed and the user ruled that "收敛算法实现不了"
+ * (10-19-fakeout-retest-quality/research/HANDOFF.md §3.1). The 选品 scan now
+ * measures the distance to the user's OWN drawn lines instead. This module stays
+ * because the user did NOT reject it: it finds a box whose HEIGHT is a small
+ * fraction of the preceding move's own travel, still holding the upper half of
+ * that move and not yet broken — on the 26 hand-picked "good stretches" that
+ * pattern was found on the bar before the breakout 22/25 times.
  *
  * Everything here is look-ahead free (`candles[last]` is the decision bar) and
- * relative 閳?no absolute percentage thresholds 閳?so one calibration works on a
- * quiet blue chip and on a 5%-per-bar alt alike. Deriving the shipped detector
- * or the coarse screen is NOT part of this module.
+ * relative — no absolute percentage thresholds — so one calibration works on a
+ * quiet blue chip and on a 5%-per-bar alt alike. Deriving the coarse screen is
+ * NOT part of this module.
  */
 import type { Candlestick } from './candlestick';
 

@@ -8,11 +8,8 @@ function row(instrument: string): ScanRow {
     lastPrice: 1,
     change24h: 0,
     quoteVolume24h: 0,
-    structures: {} as ScanRow['structures'],
-    convergedTimeframes: [],
-    qualifiedCount: 1,
-    bestScore: 0.5,
-    qualified: true,
+    levelAlerts: {} as ScanRow['levelAlerts'],
+    alertTimeframes: [],
   };
 }
 

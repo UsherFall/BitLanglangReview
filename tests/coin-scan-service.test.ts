@@ -4,6 +4,7 @@ import { COARSE_TIMEFRAME, DEFAULT_COARSE_PARAMS, scanTimeframes, type ShrinkSca
 import type { ReviewTimeframe } from '../src/domain/trade';
 import { timeframeMs } from '../src/server/candlestick-service';
 import { CoinScanService } from '../src/server/coin-scan-service';
+import { DrawingStore } from '../src/server/drawing-store';
 import type { CandleRequest, CandleSource, Ticker } from '../src/server/market-data';
 
 // ---------------------------------------------------------------------------
@@ -226,48 +227,8 @@ const requestedTimeframes = (source: Source, instrument: string) => [
 
 const params: ShrinkScanParams = { method: 'shrink', minQuoteVolume24h: 0 };
 
-describe('CoinScanService (coarse screen → per-timeframe convergence)', () => {
-  it('scans the coarse survivors across all 5 timeframes and reports every qualified structure', async () => {
-    const source = poolSource({
-      [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' },
-      [ETH]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' },
-      // SOL converges everywhere EXCEPT 1D — and its trending 1D is what the
-      // coarse screen rejects, so it never reaches stage 2 at all.
-      [SOL]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong' },
-    });
-    const service = serviceFrom(source);
-    const result = await service.scanShrink(params);
-
-    expect(result.scanned.map((row) => row.instrument)).toEqual([BTC, ETH]);
-    for (const row of result.scanned) {
-      expect(row.convergedTimeframes).toEqual(scanTimeframes);
-      expect(row.qualifiedCount).toBe(5);
-      expect(row.qualified).toBe(true);
-      for (const timeframe of scanTimeframes) {
-        expect(row.structures[timeframe].structure).toBe('convergence');
-        expect(row.structures[timeframe].qualified).toBe(true);
-        // The strong fixture's band is far quieter than its preceding stretch →
-        // the score IS that shrink depth (band ~1.0% vs lead ~6.4%) ≈ 0.86.
-        expect(row.structures[timeframe].score).toBeGreaterThan(0.85);
-      }
-      expect(row.coarse?.pass).toBe(true);
-      expect(row.coarse?.rangePctThreshold).toBeGreaterThan(0);
-    }
-    expect(result.qualifiedCount).toBe(2);
-    // Equal counts and equal bestScore keep the stable ticker (quote-volume) order.
-    expect(result.scanned[0].instrument).toBe(BTC);
-    expect(result.params).toEqual({ ...params, scope: 'crypto', anchor: expect.any(Number) });
-    // The response echoes what the screen ran on and with.
-    expect(result.coarse).toMatchObject({
-      windowDays: DEFAULT_COARSE_PARAMS.windowDays,
-      pctRange: DEFAULT_COARSE_PARAMS.pctRange,
-      pctNet: DEFAULT_COARSE_PARAMS.pctNet,
-      poolSize: POOL_SIZE,
-      candidates: POOL_SIZE,
-    });
-  });
-
-  it('fetches 1D for the whole pool and the other four timeframes only for its survivors', async () => {
+describe('CoinScanService (coarse screen → 距你标的线)', () => {
+  it('fetches 1D for the whole pool and NO other timeframe when nobody drew a line', async () => {
     const source = poolSource({
       [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' },
       [ETH]: { '5m': 'strong', '1H': 'strong', '1D': 'flat' },
@@ -277,53 +238,49 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     // Every candidate pays exactly one request (the coarse timeframe)...
     expect([...requestedInstruments(source)].sort()).toEqual([...POOL].sort());
     for (const instrument of POOL) {
-      expect(requestedTimeframes(source, instrument)[0]).toBe(COARSE_TIMEFRAME);
+      expect(requestedTimeframes(source, instrument)).toEqual([COARSE_TIMEFRAME]);
     }
-    // ...and the fillers pay nothing more: the screen rejected them before stage 2.
-    for (const filler of FILLERS) {
-      expect(requestedTimeframes(source, filler)).toEqual([COARSE_TIMEFRAME]);
-    }
-    // 20 candidates × 1 + 2 survivors × 4 = 28 requests.
-    expect(source.getCandlesticks).toHaveBeenCalledTimes(POOL_SIZE + 2 * (scanTimeframes.length - 1));
+    // 10/20: the other four timeframes are fetched ONLY for instruments the user
+    // drew a line on. With no lines at all, the scan costs one request per coin.
+    expect(source.getCandlesticks).toHaveBeenCalledTimes(POOL_SIZE);
+  });
+
+  it('fetches a second timeframe ONLY for the instruments that drew a line on it', async () => {
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: null,
+      instrument: BTC,
+      timeframe: '5m',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({
+      [BTC]: { '5m': 'strong', '1D': 'strong' },
+      [ETH]: { '5m': 'strong', '1D': 'flat' },
+    });
+    const service = new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    );
+    await service.scanShrink(params);
+
+    // BTC has a 5m line → 5m was fetched for it. ETH has none → 5m untouched.
+    expect(requestedTimeframes(source, BTC)).toContain('5m');
+    expect(requestedTimeframes(source, ETH)).toEqual([COARSE_TIMEFRAME]);
+    store.close();
   });
 
   it('fetches each (coin, timeframe) with a uniform window for every timeframe', async () => {
     const source = poolSource({ [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' } });
     await serviceFrom(source).scanShrink(params);
 
-    for (const timeframe of scanTimeframes) {
-      expect(source.getCandlesticks).toHaveBeenCalledWith(
-        expect.objectContaining({ timeframe, limit: 100, direction: 'earlier', anchor: expect.any(Number), refresh: true }),
-      );
-    }
+    // Without lines only the coarse timeframe is requested, and it uses the
+    // same uniform window as every other request would.
     expect(source.getCandlesticks).toHaveBeenCalledWith(
-      expect.objectContaining({ instrument: BTC, timeframe: '5m' }),
+      expect.objectContaining({ timeframe: COARSE_TIMEFRAME, limit: 100, direction: 'earlier', anchor: expect.any(Number), refresh: true }),
     );
-  });
-
-  it('drops the still-forming bar by time without dropping the newest completed bar', async () => {
-    const anchor = Date.parse('2026-08-04T00:00:00Z');
-    const allStrong: Partial<Record<ReviewTimeframe, Shape>> = {
-      '5m': 'strong',
-      '15m': 'strong',
-      '1H': 'strong',
-      '4H': 'strong',
-      '1D': 'strong',
-    };
-    const plan: Plan = (instrument, timeframe) =>
-      instrument === BTC ? allStrong[timeframe] ?? 'trend' : timeframe === COARSE_TIMEFRAME ? 'trend' : 'none';
-    // Same data, once with a forming bar appended at `anchor` and once without.
-    const withForming = buildSource(tickersFor(), plan, true);
-    const withoutForming = buildSource(tickersFor(), plan, false);
-    const [resultWith, resultWithout] = await Promise.all([
-      serviceFrom(withForming).scanShrink({ ...params, anchor }),
-      serviceFrom(withoutForming).scanShrink({ ...params, anchor }),
-    ]);
-    // The forming bar must not change the verdict — it is dropped by time, and
-    // the newest COMPLETED bar is never sliced away.
-    expect(resultWith.scanned.map((row) => row.qualifiedCount)).toEqual([5]);
-    expect(resultWithout.scanned.map((row) => row.qualifiedCount)).toEqual([5]);
-    expect(resultWith.scanned[0].instrument).toBe(BTC);
   });
 
   it('carries the 24h change percentage and last price from the ticker onto each row', async () => {
@@ -335,37 +292,13 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     expect(row?.quoteVolume24h).toBe(20_000_000_000);
   });
 
-  it('includes a row on the coarse screen alone, and rejects a 1D trend even when a small timeframe converges', async () => {
-    const source = poolSource({
-      // BTC converges on 5m but its 1D trends → the coarse screen drops it, so
-      // its 5m is never even requested.
-      [BTC]: { '5m': 'strong' },
-      // ETH is coarse-tight (narrow range, no drift) but converges NOWHERE.
-      [ETH]: { '1D': 'flat' },
-    });
-    const result = await serviceFrom(source).scanShrink(params);
-
-    expect(result.scanned.map((row) => row.instrument)).toEqual([ETH]);
-    const row = result.scanned[0];
-    expect(row.coarse?.pass).toBe(true);
-    expect(row.coarse?.rangePct).toBeCloseTo(0.02, 10);
-    expect(row.coarse?.netPct).toBeCloseTo(0, 10);
-    // The position the absolute floor judges, echoed on the row (mid-series here).
-    expect(row.coarse?.posRange).toBeCloseTo(0.5, 10);
-    expect(row.convergedTimeframes).toEqual([]);
-    expect(row.qualifiedCount).toBe(0);
-    expect(row.bestScore).toBe(0);
-    expect(row.qualified).toBe(true);
-    expect(requestedTimeframes(source, BTC)).toEqual([COARSE_TIMEFRAME]);
-  });
-
-  it('drops a coin sitting on its series absolute bottom — even when a small timeframe converges', async () => {
+  it('drops a coin sitting on its series absolute bottom — even when a small timeframe is drawn on', async () => {
     const source = poolSource({
       // BTC's 23-day window is the TIGHTEST box in the pool (2% range, zero drift),
       // so both pool-relative cuts admit it — but its 40-bar series dumped from 220
       // to 100 and its newest close is 101, i.e. it hugs the absolute bottom. Only
-      // the ABSOLUTE position floor can reject it, and its converging 5m must not
-      // buy it a row (that 5m is never requested either).
+      // the ABSOLUTE position floor can reject it, and a drawn 5m line must not
+      // buy it a row.
       [BTC]: { '5m': 'strong', '1D': 'bottom' },
       [ETH]: { '1D': 'flat' },
     });
@@ -374,112 +307,7 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     expect(result.scanned.map((row) => row.instrument)).toEqual([ETH]);
     // The rejected coin paid exactly ONE request: the coarse timeframe.
     expect(requestedTimeframes(source, BTC)).toEqual([COARSE_TIMEFRAME]);
-    expect(source.getCandlesticks).toHaveBeenCalledTimes(POOL_SIZE + 1 * (scanTimeframes.length - 1));
-  });
-
-  it('sorts by highest qualified level, then qualifiedCount desc, then bestScore desc', async () => {
-    const source = poolSource({
-      [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' }, // all 5, strong
-      [ETH]: { '5m': 'strong', '1D': 'flat' }, // 1 tf, strong
-      [SOL]: { '5m': 'weak', '1D': 'flat' }, // 1 tf, weak
-    });
-    const service = serviceFrom(source);
-    const result = await service.scanShrink(params);
-
-    // BTC (up to 1D) first; ETH and SOL both converge on 5m only — same highest
-    // level and same count, so ETH's strong band outscores SOL's weak one.
-    expect(result.scanned.map((row) => row.instrument)).toEqual([BTC, ETH, SOL]);
-    expect(result.scanned[0].qualifiedCount).toBe(5);
-    expect(result.scanned[0].convergedTimeframes).toEqual(scanTimeframes);
-    expect(result.scanned[1].convergedTimeframes).toEqual(['5m']);
-    expect(result.scanned[2].convergedTimeframes).toEqual(['5m']);
-    expect(result.scanned[1].bestScore).toBeGreaterThan(result.scanned[2].bestScore);
-    expect(result.scanned[1].bestScore).toBeGreaterThan(0.85);
-    expect(result.scanned[2].bestScore).toBeLessThan(0.7);
-  });
-
-  it('ranks a lone 1D convergence ahead of a coin converging on three small timeframes', async () => {
-    const source = poolSource({
-      // BTC only on 1D (score ≈ 0.51, just over the 1D threshold) — one timeframe.
-      [BTC]: { '1D': 'mild' },
-      // ETH on the three small timeframes, all strong — three timeframes.
-      [ETH]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '1D': 'flat' },
-    });
-    const service = serviceFrom(source);
-    const result = await service.scanShrink({ ...params, minScore: 0.6 });
-
-    // The higher LEVEL wins over the higher COUNT: a daily-level contraction is
-    // the earlier, rarer signal even when it is the coin's only timeframe.
-    expect(result.scanned.map((row) => row.instrument)).toEqual([BTC, ETH]);
-    expect(result.scanned[0].convergedTimeframes).toEqual(['1D']);
-    expect(result.scanned[0].qualifiedCount).toBe(1);
-    expect(result.scanned[0].bestScore).toBeLessThan(result.scanned[1].bestScore);
-    expect(result.scanned[1].convergedTimeframes).toEqual(['5m', '15m', '1H']);
-    expect(result.scanned[1].qualifiedCount).toBe(3);
-  });
-
-  it('sinks a coarse survivor that converges nowhere below every converging row', async () => {
-    const source = poolSource({
-      [BTC]: { '5m': 'strong', '1D': 'flat' },
-      [ETH]: { '1D': 'flat' },
-    });
-    const result = await serviceFrom(source).scanShrink(params);
-
-    expect(result.scanned.map((row) => row.instrument)).toEqual([BTC, ETH]);
-    expect(result.scanned[1].qualifiedCount).toBe(0);
-    expect(result.scanned[1].convergedTimeframes).toEqual([]);
-  });
-
-  it('judges each timeframe against its own effective threshold (single knob, larger levels more lenient)', async () => {
-    const source = poolSource({ [BTC]: { '1D': 'mild', '4H': 'shallow' } });
-    const service = serviceFrom(source);
-    const result = await service.scanShrink({ ...params, minScore: 0.6 });
-
-    expect(result.scanned).toHaveLength(1);
-    const row = result.scanned[0];
-    // Both bands ARE structures — the per-timeframe gate, not the detector,
-    // decides: at minScore 0.6 the effective thresholds are 0.50 (1D) and 0.55
-    // (4H), so the 1D band passes its bar while the 4H band misses its own.
-    expect(row.structures['1D'].structure).toBe('convergence');
-    expect(row.structures['1D'].score).toBeCloseTo(0.51, 2);
-    expect(row.structures['4H'].structure).toBe('convergence');
-    expect(row.structures['4H'].score).toBeCloseTo(0.44, 2);
-    expect(row.convergedTimeframes).toEqual(['1D']);
-    expect(row.qualifiedCount).toBe(1);
-    // The 4H verdict is reported truthfully, it just does not count as converged.
-    expect(row.structures['4H'].qualified).toBe(true);
-  });
-
-  it('clears only the levels whose own bar a mid-strength band reaches (the 4H offset is additive)', async () => {
-    // Same 0.576 band served for EVERY timeframe: it is above the 4H bar (0.55)
-    // and the 1D bar (0.50) but below the small timeframes' bar (0.60), so the
-    // converged set is decided purely by the per-level offsets.
-    const source = poolSource({ [BTC]: { '5m': 'mid', '15m': 'mid', '1H': 'mid', '4H': 'mid', '1D': 'mid' } });
-    const result = await serviceFrom(source).scanShrink({ ...params, minScore: 0.6 });
-
-    expect(result.scanned).toHaveLength(1);
-    const row = result.scanned[0];
-    for (const timeframe of scanTimeframes) {
-      expect(row.structures[timeframe].score).toBeCloseTo(0.576, 2);
-      expect(row.structures[timeframe].qualified).toBe(true);
-    }
-    // Removing the 4H offset (or reading `score >= minScore` per timeframe) drops
-    // 4H from this set — that is what this case exists to catch.
-    expect(row.convergedTimeframes).toEqual(['4H', '1D']);
-    expect(row.qualifiedCount).toBe(2);
-    expect(row.structures['5m'].score).toBeLessThan(0.6);
-  });
-
-  it('cannot be rescued by the 4H offset once the knob is raised past the shallow band', async () => {
-    // Control for the threshold test above: the offset is a fixed -0.05, so a
-    // shallow band leaves the converged set entirely as soon as the knob clears
-    // it (the row itself survives — it is coarse-passing).
-    const source = poolSource({ [BTC]: { '1D': 'flat', '4H': 'shallow' } });
-    const strict = await serviceFrom(source).scanShrink({ ...params, minScore: 0.7 });
-    const permissive = await serviceFrom(source).scanShrink({ ...params, minScore: 0.4 });
-
-    expect(strict.scanned.map((row) => row.convergedTimeframes)).toEqual([[]]);
-    expect(permissive.scanned.map((row) => row.convergedTimeframes)).toEqual([['4H']]);
+    expect(source.getCandlesticks).toHaveBeenCalledTimes(POOL_SIZE);
   });
 
   it('filters out instruments below the minimum 24h quote volume before the coarse screen', async () => {
@@ -492,66 +320,16 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     expect(result.coarse?.poolSize).toBe(16);
   });
 
-  it('applies the minScore gate: weaker convergences are filtered out when the knob is raised', async () => {
-    // BTC converges strongly (shrink depth ≈ 0.86), ETH weakly (≈ 0.41).
-    const source = poolSource({
-      [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'strong' },
-      [ETH]: { '5m': 'weak', '1D': 'flat' },
-    });
-    const service = serviceFrom(source);
-    const permissive = await service.scanShrink({ ...params, minScore: 0.4 });
-    expect(permissive.scanned).toHaveLength(2);
-    expect(permissive.scanned.find((row) => row.instrument === ETH)?.convergedTimeframes).toEqual(['5m']);
-
-    // minScore 0.7 clears the weak band: ETH is still a coarse survivor (so its
-    // row stays) but it converged nowhere.
-    const strict = await service.scanShrink({ ...params, minScore: 0.7 });
-    expect(strict.scanned.find((row) => row.instrument === ETH)?.convergedTimeframes).toEqual([]);
-    expect(strict.scanned.find((row) => row.instrument === BTC)?.convergedTimeframes).toEqual(scanTimeframes);
-  });
-
-  it('applies a past anchor to every timeframe and echoes it in params', async () => {
+  it('applies a past anchor to every request and echoes it in params', async () => {
     const source = poolSource({ [BTC]: { '5m': 'strong', '1D': 'flat' } });
     const pastAnchor = Date.parse('2026-08-04T00:00:00Z');
     const result = await serviceFrom(source).scanShrink({ ...params, anchor: pastAnchor });
 
-    for (const timeframe of scanTimeframes) {
-      expect(source.getCandlesticks).toHaveBeenCalledWith(expect.objectContaining({ anchor: pastAnchor, timeframe }));
+    for (const call of source.getCandlesticks.mock.calls) {
+      expect(call[0]).toEqual(expect.objectContaining({ anchor: pastAnchor }));
     }
     expect(result.params.anchor).toBe(pastAnchor);
     expect(result.scanned.length).toBeGreaterThan(0);
-  });
-
-  it('reports one coin converging on multiple timeframes as a single row', async () => {
-    // BTC converges on 5m and 1H, nothing elsewhere. One row carries both.
-    const source = poolSource({ [BTC]: { '5m': 'strong', '1H': 'strong', '1D': 'flat' } });
-    const result = await serviceFrom(source).scanShrink({ ...params });
-
-    const row = result.scanned.find((candidate) => candidate.instrument === BTC)!;
-    expect(result.scanned).toHaveLength(1);
-    expect(row.convergedTimeframes).toEqual(['5m', '1H']);
-    expect(row.qualifiedCount).toBe(2);
-    expect(row.structures['5m'].structure).toBe('convergence');
-    expect(row.structures['1H'].structure).toBe('convergence');
-    expect(row.bestScore).toBeGreaterThan(0.85);
-  });
-
-  it('fills neutral zeros for timeframes without a convergence', async () => {
-    const source = poolSource({ [BTC]: { '5m': 'strong', '1D': 'flat' } });
-    const result = await serviceFrom(source).scanShrink(params);
-    const row = result.scanned[0];
-    expect(row.convergedTimeframes).toEqual(['5m']);
-    expect(row.qualifiedCount).toBe(1);
-    expect(row.structures['5m'].structure).toBe('convergence');
-    for (const timeframe of ['15m', '1H', '4H', '1D'] as ReviewTimeframe[]) {
-      expect(row.structures[timeframe]).toEqual({
-        structure: null,
-        position: 0,
-        score: 0,
-        touchCount: 0,
-        qualified: false,
-      });
-    }
   });
 
   it('skips coins with insufficient candle history on every timeframe', async () => {
@@ -614,10 +392,10 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     const source = sourceFailingOn(poolSource(shapes), (instrument) => instrument === BTC, TIMEOUT_ERROR);
     const result = await serviceFrom(source).scanShrink(params);
 
-    // The scan still RESOLVES: the other survivors and their structures are the
-    // control's rows minus BTC, not an empty list.
+    // The scan still RESOLVES: the other survivors are the control's rows minus
+    // BTC, not an empty list.
     expect(result.scanned.map((row) => row.instrument)).toEqual([ETH, SOL]);
-    expect(result.scanned[0]?.structures).toEqual(control.scanned[1]?.structures);
+    expect(result.scanned[0]?.levelAlerts).toEqual(control.scanned[1]?.levelAlerts);
     expect(result.coarse?.candidates).toBe(POOL_SIZE);
     // An unmeasurable candidate leaves the percentile base, exactly like a short
     // history — the failed fetch is not a third kind of pool member.
@@ -625,27 +403,48 @@ describe('CoinScanService (coarse screen → per-timeframe convergence)', () => 
     expect(result.failedInstruments).toEqual([BTC]);
   });
 
-  it('drops the whole row when a stage-2 fetch fails, rather than judging it on partial data', async () => {
-    const shapes = {
+  it('drops the whole row when a line-timeframe fetch fails, rather than judging it on partial data', async () => {
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: null,
+      instrument: BTC,
+      timeframe: '4H',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({
       [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'flat' },
       [ETH]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'flat' },
-    } as const;
-    const control = await serviceFrom(poolSource(shapes)).scanShrink(params);
+    } as const);
+    const service = new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    );
+    const control = await service.scanShrink(params);
     expect(control.scanned.map((row) => row.instrument)).toEqual([BTC, ETH]);
-    // BTC's 4H is a real convergence, so any "keep the row on a neutral 4H"
-    // implementation would visibly change its score/count instead of dropping it.
-    expect(control.scanned[0]?.structures['4H'].structure).toBe('convergence');
 
-    const source = sourceFailingOn(
-      poolSource(shapes),
+    const failing = sourceFailingOn(
+      poolSource({
+        [BTC]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'flat' },
+        [ETH]: { '5m': 'strong', '15m': 'strong', '1H': 'strong', '4H': 'strong', '1D': 'flat' },
+      } as const),
       (instrument, timeframe) => instrument === BTC && timeframe === '4H',
       TIMEOUT_ERROR,
     );
-    const result = await serviceFrom(source).scanShrink(params);
+    const failed = await new CoinScanService(
+      { listTickers: failing.listTickers },
+      { getCandlesticks: failing.getCandlesticks },
+      undefined,
+      store,
+    ).scanShrink(params);
 
-    expect(result.scanned.map((row) => row.instrument)).toEqual([ETH]);
-    expect(result.scanned[0]?.structures['4H']).toEqual(control.scanned[1]?.structures['4H']);
-    expect(result.failedInstruments).toEqual([BTC]);
+    // The coin whose 4H fetch failed loses its row rather than reporting a
+    // half-measured alert.
+    expect(failed.scanned.map((row) => row.instrument)).toEqual([ETH]);
+    expect(failed.failedInstruments).toEqual([BTC]);
+    store.close();
   });
 
   it('aborts the whole scan when the IP was banned (HTTP 418), instead of skipping the instrument', async () => {
@@ -761,13 +560,11 @@ describe('CoinScanService (session-only candle series)', () => {
     const cryptoResult = await serviceFrom(cryptoSource).scanShrink({ ...params, anchor });
     const equityResult = await serviceFrom(closedEquities).scanShrink({ ...params, scope: 'equity', anchor });
 
-    // The identical candle series converges for crypto — and the SAME 5m verdict
-    // is gone for the equity, because its candles sit in the closed overnight
-    // window and are dropped before any detector sees them.
+    // The identical candle series is scanned for crypto — and the equity's
+    // closed overnight candles are dropped before the series is measured, so the
+    // equity row carries no 距线 while the crypto one does.
     expect(cryptoResult.scanned.map((row) => row.instrument)).toEqual([BTC]);
-    expect(cryptoResult.scanned[0].convergedTimeframes).toEqual(['5m']);
     expect(equityResult.scanned.map((row) => row.instrument)).toEqual([TSLA]);
-    expect(equityResult.scanned[0].convergedTimeframes).toEqual([]);
     expect(equityResult.skippedInstruments).toBeUndefined();
   });
 

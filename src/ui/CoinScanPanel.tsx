@@ -1,10 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import {
-  scanTimeframes,
-  type ConvergenceStructure,
-  type ScanResponse,
-  type ScanRow,
-} from '../domain/coin-scan';
+import { scanTimeframes, type ScanResponse, type ScanRow } from '../domain/coin-scan';
+import type { LevelAlert, LevelAlertState } from '../domain/level-alert';
+import type { ReviewTimeframe } from '../domain/trade';
 import type { MarketHeatResult } from '../domain/market-heat';
 import {
   COARSE_POS_RANGE_FLOOR,
@@ -67,8 +64,6 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
   // 全池 —— topN 只是上限保护, 不再是硬门槛(见 `scan-scope.ts`)。
   const [topN, setTopN] = useState(topNInput(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).topN));
   const [minQuoteVolume24h, setMinQuoteVolume24h] = useState(String(defaultScanParams(DEFAULT_MARKET_DATA_SOURCE, scope).minQuoteVolume24h));
-  // 结构强度阈值主旋钮:调高 = 宁少勿滥.
-  const [minScore, setMinScore] = useState('0.6');
   // Optional scan anchor (local datetime); empty = scan "now".
   const [anchorInput, setAnchorInput] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -128,7 +123,7 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
 
   async function scan() {
     if (method === 'shrink') {
-      const inputs = [minQuoteVolume24h, minScore];
+      const inputs = [minQuoteVolume24h];
       if (inputs.some((value) => value.trim() === '' || !Number.isFinite(Number(value)))) {
         setError('参数无效,请检查');
         return;
@@ -153,7 +148,6 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
         // 留空 = 不发 topN = 全池。
         if (topN.trim() !== '') query.set('topN', topN);
         query.set('minQuoteVolume24h', minQuoteVolume24h);
-        query.set('minScore', minScore);
       }
       if (anchorEpoch !== null) query.set('anchor', String(anchorEpoch));
       const response = await fetch(`/api/scan?${query.toString()}`);
@@ -232,18 +226,6 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned }: CoinScanPanel
               最低成交额
               <input type="number" min="0" value={minQuoteVolume24h} onChange={(event) => setMinQuoteVolume24h(event.target.value)} />
             </label>
-            <label>
-              结构强度阈值
-              <input
-                type="number"
-                min="0"
-                max="1"
-                step="0.05"
-                value={minScore}
-                onChange={(event) => setMinScore(event.target.value)}
-                title="调高 = 宁少勿滥"
-              />
-            </label>
           </>
         )}
         <label>
@@ -298,20 +280,19 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
   if (!result) {
     return <div className="empty-state">在左侧选择参数并点击「扫描」</div>;
   }
-  // The service sorts scanned rows (highest converged level, then qualifiedCount,
-  // then bestScore — a coarse survivor that converges nowhere reads as level -1
-  // and sinks) and the UI keeps that order, except that manually demoted rows sink
-  // to the bottom (a stable partition, not a re-rank).
+  // The service sorts scanned rows (10/20: the coin whose price is CLOSEST to a
+  // line the user drew comes first) and the UI keeps that order, except that
+  // manually demoted rows sink to the bottom (a stable partition, not a re-rank).
   const rows = orderScanRows(result.scanned, demotedCoins);
-  // 行入选 = 通过 1D 粗筛,所以「收敛」是行内子集(粗筛放行的币可能在所有周期都不收敛)。
-  const convergedRows = rows.filter((row) => row.qualifiedCount > 0).length;
+  // 行入选 = 通过 1D 粗筛;「贴近」是行内子集(你画了线、且价格已经贴到线边的币)。
+  const alertRows = rows.filter((row) => row.alertTimeframes.length > 0).length;
   return (
     <>
       <header className="detail-header">
         <div>
           <h1>选品结果 · {SCOPE_LABELS[result.params.scope ?? 'crypto']}</h1>
           <p>
-            粗筛 {result.scanned.length} 个{result.coarse ? ` · 候选 ${result.coarse.candidates} 个` : ''} · 收敛 {convergedRows} 个
+            粗筛 {result.scanned.length} 个{result.coarse ? ` · 候选 ${result.coarse.candidates} 个` : ''} · 贴近 {alertRows} 个
             {result.coarse ? ` · 日线窗口 ${result.coarse.windowDays} 天` : ''}
           </p>
           {result.skippedInstruments && result.skippedInstruments.length > 0 && (
@@ -340,8 +321,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               <th>24h 涨跌</th>
               <th>成交额</th>
               <th>结构</th>
-              <th>收敛结构</th>
-              <th>强度分</th>
+              <th>距你标的线</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -356,8 +336,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                     <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
                     <td>{formatVolume(row.quoteVolume24h)}</td>
                     <td>{formatCoarse(row, result.coarse?.windowDays)}</td>
-                    <td>{formatConvergedStructures(row)}</td>
-                    <td>{formatScore(row.bestScore)}</td>
+                    <td>{formatLevelAlerts(row)}</td>
                     <td>
                       <button
                         type="button"
@@ -401,24 +380,26 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                           <thead>
                             <tr>
                               <th>周期</th>
-                              <th>结构类型</th>
-                              <th>位置</th>
-                              <th>强度分</th>
-                              <th>触碰次数</th>
+                              <th>距线</th>
+                              <th>该币尺子</th>
+                              <th>倍数</th>
                               <th>状态</th>
                             </tr>
                           </thead>
                           <tbody>
                             {scanTimeframes.map((timeframe) => {
-                              const structure = row.structures[timeframe];
+                              const alert = row.levelAlerts[timeframe];
                               return (
-                                <tr key={timeframe} className={structure.qualified ? 'qualified' : ''}>
+                                <tr key={timeframe} className={alert?.state === 'alert' ? 'qualified' : ''}>
                                   <td>{timeframe}</td>
-                                  <td>{structureLabel(structure.structure)}</td>
-                                  <td>{formatPosition(structure.position)}</td>
-                                  <td>{formatScore(structure.score)}</td>
-                                  <td>{structure.touchCount}</td>
-                                  <td>{structure.qualified ? '合格' : '—'}</td>
+                                  <td>
+                                    {alert
+                                      ? `${alert.distancePct >= 0 ? '+' : ''}${alert.distancePct.toFixed(2)}%`
+                                      : '—'}
+                                  </td>
+                                  <td>{alert ? `${alert.scalePct.toFixed(2)}%` : '—'}</td>
+                                  <td>{alert ? `${alert.ratio.toFixed(2)}×` : '—'}</td>
+                                  <td>{alert ? levelStateLabel(alert.state) : '—'}</td>
                                 </tr>
                               );
                             })}
@@ -452,15 +433,34 @@ function formatSkippedNames(skipped: readonly string[]): string {
   return extra > 0 ? `${names} 等 ${extra} 个` : names;
 }
 
-// 收敛结构 column: each qualified timeframe shown with its structure type
-// (always 收敛 now). Rows always have >= 1 qualified timeframe, but a defensive
-// dash keeps the column readable if a row ever arrives empty.
-function formatConvergedStructures(row: ScanRow): string {
-  const parts = row.convergedTimeframes.map((timeframe) => {
-    const structure = row.structures[timeframe].structure;
-    return `${timeframe}${structureLabel(structure)}`;
-  });
-  return parts.length > 0 ? parts.join(' ') : '—';
+// 距线 column: how far the price is from the line the USER drew, per timeframe.
+// The ratio (distance ÷ that coin's own volatility scale) is what the alert
+// state is built on, so it is the number shown first.
+function formatLevelAlerts(row: ScanRow): ReactNode {
+  const parts = scanTimeframes
+    .map((timeframe) => ({ timeframe, alert: row.levelAlerts[timeframe] }))
+    .filter((entry): entry is { timeframe: ReviewTimeframe; alert: LevelAlert } => entry.alert !== null);
+  if (!parts.length) return '—';
+  return (
+    <>
+      {parts.map(({ timeframe, alert }) => (
+        <div key={timeframe} className={`coin-scan-level ${alert.state}`}>
+          <span className="coin-scan-level-tf">{timeframe}</span>
+          <span className="coin-scan-level-dist">
+            {alert.distancePct >= 0 ? '+' : ''}
+            {alert.distancePct.toFixed(2)}%
+          </span>
+          <span className="coin-scan-level-state">{levelStateLabel(alert.state)}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function levelStateLabel(state: LevelAlertState): string {
+  if (state === 'alert') return '贴近';
+  if (state === 'watch') return '接近';
+  return '远';
 }
 
 // 结构 column: the 1D coarse screen's own measures — 盘得够久(窗口天数)/ 收住了(区间)/
@@ -484,20 +484,6 @@ function formatCoarse(row: ScanRow, windowDays: number | undefined): ReactNode {
 /** A 0..1 relative measure as a percent (0.459 → "45.9%"); unknown cuts read as "—". */
 function formatPercent(value: number): string {
   return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '—';
-}
-
-function structureLabel(structure: ConvergenceStructure | null): string {
-  return structure === 'convergence' ? '收敛' : '—';
-}
-
-function formatPosition(value: number): string {
-  // position is a 0..1 fraction; show it as a percent (0.28 → "28%").
-  return `${Math.round(value * 100)}%`;
-}
-
-function formatScore(value: number): string {
-  // score is normalized to 0..1 (larger = stronger convergence).
-  return value.toFixed(2);
 }
 
 function formatPrice(value: number): string {

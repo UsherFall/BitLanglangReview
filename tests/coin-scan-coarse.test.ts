@@ -5,8 +5,6 @@ import {
   DEFAULT_COARSE_PARAMS,
   coarseScreen,
   coarseStructure,
-  defaultStructureParams,
-  detectConvergence,
   scanTimeframes,
 } from '../src/domain/coin-scan';
 import {
@@ -127,16 +125,6 @@ describe('coarseStructure (1D 粗筛的度量)', () => {
     expect(coarseStructure([])).toBeNull();
     expect(coarseStructure(dailyBars(Array.from({ length: 23 }, () => [0, 100] as const)))).toBeNull();
     expect(coarseStructure(dailyBars([...Array.from({ length: 22 }, () => flatBar), [99, NaN] as const]))).toBeNull();
-  });
-
-  it('does not touch the convergence detector (separate pure measure, separate contract)', () => {
-    // Same uniformly calm series: the coarse measure is happy (narrow range, no
-    // drift) while `detectConvergence` finds nothing — no shrinkage anywhere.
-    // The 1D screen is deliberately WIDE, so it must not inherit the detector's
-    // "越来越小" requirement.
-    const calm = dailyBars(Array.from({ length: 40 }, () => flatBar));
-    expect(coarseStructure(calm)).not.toBeNull();
-    expect(detectConvergence(calm, defaultStructureParams())).toBeNull();
   });
 });
 

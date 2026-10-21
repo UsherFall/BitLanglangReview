@@ -10,15 +10,18 @@ import {
   DEFAULT_COARSE_PARAMS,
   coarseScreen,
   coarseStructure,
-  defaultStructureParams,
-  probeStructure,
   scanTimeframes,
-  timeframeMinScore,
   type ScanResponse,
   type ScanRow,
   type ShrinkScanParams,
-  type StructureResult,
 } from '../domain/coin-scan';
+import {
+  levelAlert,
+  linesFromDrawings,
+  scaleStartIndex,
+  type LevelAlert,
+  type LevelLine,
+} from '../domain/level-alert';
 import { isCandleInSession, isMarketOpen, marketSession } from '../domain/market-session';
 import type { MarketClass } from '../domain/market-class';
 import { isScannable } from '../domain/scan-pool';
@@ -27,12 +30,10 @@ import type { ReviewTimeframe } from '../domain/trade';
 import { timeframeMs } from './candlestick-service';
 import type { CandleSource, Ticker, TickerSource } from './market-data';
 import { binanceRateGate, type RateGate } from './http';
+import type { DrawingStore } from './drawing-store';
 
 /** Concurrency cap for the per-(coin, timeframe) candle fetches. */
 const SCAN_CONCURRENCY = 5;
-
-/** Every timeframe except the coarse one: fetched ONLY for the coarse screen's survivors. */
-const REMAINING_TIMEFRAMES = scanTimeframes.filter((timeframe) => timeframe !== COARSE_TIMEFRAME);
 
 /**
  * Candle window per (coin, timeframe) — a single value for EVERY timeframe
@@ -92,10 +93,6 @@ export type BoxBraceScanResponse = {
 };
 
 /** Neutral placeholders for a timeframe with no convergence structure. */
-function neutralStructure(): StructureResult {
-  return { structure: null, position: 0, score: 0, touchCount: 0, qualified: false };
-}
-
 /** Raw candles to request for one instrument: gated classes pay for the dropped bars. */
 function scanWindowFor(marketClass: MarketClass | undefined): number {
   return marketClass !== undefined && marketSession(marketClass) !== null ? GATED_SCAN_WINDOW : SCAN_WINDOW;
@@ -121,22 +118,33 @@ export class CoinScanService {
     private readonly tickerSource: TickerSource,
     private readonly candleSource: CandleSource,
     private readonly rateLimitGate: Pick<RateGate, 'takeWarnings' | 'reason'> = binanceRateGate,
+    /**
+     * The user's own drawn levels. Optional: a scan without a store still works,
+     * it just reports no 距线 for anybody (the column shows `—`).
+     */
+    private readonly drawingStore?: DrawingStore,
   ) {}
 
   /**
-   * Two-stage convergence scan over the scope's whole open pool.
+   * Two-stage scan over the scope's whole open pool.
    *
    * Stage 1 fetches the coarse timeframe (1D) for EVERY candidate — one klines
    * request each — and screens the pool on its own percentiles: keep the coins
    * whose 23-day range and net drift both sit in the pool's lowest `qR`/`qN`
    * fraction AND whose position inside their whole 1D series is not at the
    * absolute bottom (`COARSE_POS_RANGE_FLOOR` — an absolute rail, unlike the two
-   * pool-relative cuts). Stage 2 then fetches the remaining four timeframes ONLY
-   * for the survivors, which is what makes the expanded pool affordable (a
-   * rejected coin costs exactly one request). Rows are the survivors, ordered by
-   * their highest converged level, then `qualifiedCount`, then `bestScore`; the
-   * per-timeframe convergence verdicts are reported alongside but no longer decide
-   * inclusion.
+   * pool-relative cuts). Rows are the survivors.
+   *
+   * Stage 2 measures 距你标的线: for every timeframe the USER drew a line on,
+   * and only for the instruments that drew one, the scan fetches that
+   * timeframe's candles and reports how far the price is from the line, scaled
+   * by that coin's own volatility. A coin with no line costs nothing beyond
+   * its stage-1 request.
+   *
+   * 10/20: the automatic convergence detector was removed from this scan — nine
+   * attempts at it had all failed, and the user ruled that "收敛算法实现不了"
+   * (10-19-fakeout-retest-quality/research/HANDOFF.md §3.1). The user draws the
+   * lines; the scan only measures the distance.
    */
   async scanShrink(params: ShrinkScanParams): Promise<ScanResponse> {
     // Discard stale rate-limit warnings (e.g. left by an earlier scan) so only
@@ -164,16 +172,33 @@ export class CoinScanService {
     // as 24h-volume rank #319, so a hard top-N gate hid them. Absent → the whole
     // open pool.
     const candidates = params.topN === undefined ? open : open.slice(0, params.topN);
-    const structureParams = defaultStructureParams();
-    // minScore gate: a timeframe counts as converged only when its structure is
-    // qualified AND its score reaches its OWN effective threshold — the single
-    // knob shifted by the level's offset, so a 4H/1D contraction clears a
-    // slightly lower bar (see `TIMEFRAME_SCORE_OFFSET`).
-    const minScore = params.minScore ?? 0;
     // Current scans request a refresh so every click on 扫描 gets fresh bars;
     // historical anchored scans still reuse the shared candle cache because that
     // data does not change.
     const refresh = params.anchor === undefined;
+
+    /**
+     * The user's drawn levels, per timeframe. Only the timeframes the user
+     * actually drew on are measured — the scan fetches a timeframe's candles
+     * ONLY for instruments that have a line on it, so the extra requests scale
+     * with the number of watched coins, not with the pool.
+     */
+    const linesByTimeframe = new Map<ReviewTimeframe, Map<string, LevelLine[]>>();
+    if (this.drawingStore) {
+      for (const timeframe of scanTimeframes) {
+        const drawings = this.drawingStore.listDrawingsByTimeframe(timeframe);
+        if (!drawings.length) continue;
+        const byInstrument = new Map<string, LevelLine[]>();
+        for (const drawing of drawings) {
+          const lines = linesFromDrawings([drawing], drawing.instrument, timeframe);
+          if (!lines.length) continue;
+          const bucket = byInstrument.get(drawing.instrument) ?? [];
+          bucket.push(...lines);
+          byInstrument.set(drawing.instrument, bucket);
+        }
+        if (byInstrument.size) linesByTimeframe.set(timeframe, byInstrument);
+      }
+    }
 
     // ---- Stage 1: the coarse timeframe for the WHOLE candidate pool ----
     // Per-instrument failures are isolated here (10/13): one timed-out klines
@@ -201,62 +226,65 @@ export class CoinScanService {
     );
     const { screen, passes } = coarseScreen(measures, DEFAULT_COARSE_PARAMS);
 
-    // ---- Stage 2: the other four timeframes, only for the survivors ----
+    /**
+     * ---- Stage 2: the timeframes the user drew lines on ----
+     *
+     * Only (survivor × timeframe-with-a-line-on-it) pairs are fetched. A coin
+     * with no drawn line needs no extra candles at all, so the request count
+     * scales with the WATCH LIST, not with the pool.
+     */
     const tasks = coarseFetches
       .filter((_, index) => passes[index])
-      .flatMap(({ ticker }) => REMAINING_TIMEFRAMES.map((timeframe) => ({ ticker, timeframe })));
+      .flatMap(({ ticker }) =>
+        [...linesByTimeframe.entries()]
+          .filter(([, byInstrument]) => byInstrument.has(ticker.instrument))
+          .map(([timeframe]) => ({ ticker, timeframe })),
+      );
     const results = await mapLimit(tasks, SCAN_CONCURRENCY, async ({ ticker, timeframe }) => {
       try {
         const completed = await this.completedCandles(ticker, timeframe, anchor, refresh);
-        return { ticker, timeframe, structure: probeStructure(completed, structureParams) };
+        const lines = linesByTimeframe.get(timeframe)?.get(ticker.instrument) ?? [];
+        const at = completed.at(-1)?.timestamp ?? anchor;
+        const alert = levelAlert(completed, lines, at, scaleStartIndex(completed, lines));
+        return { ticker, timeframe, alert };
       } catch (error) {
         if (isIpBanned(this.rateLimitGate)) throw error;
         failedInstruments.add(ticker.instrument);
-        // Dropped rather than filled with `neutralStructure()`: "no convergence
-        // here" is a VERDICT about complete data, so using it for a fetch that
-        // never returned would let `convergedTimeframes` / `qualifiedCount` /
-        // `bestScore` and the row order run on a half-empty input — a silent
-        // wrong answer instead of a reported omission. `null` marks the row for
-        // removal below.
-        return { ticker, timeframe, structure: null };
+        // Dropped rather than faked: a missing alert is an omission, and filling
+        // it with a "far" verdict would claim a measurement that never happened.
+        return { ticker, timeframe, alert: null };
       }
     });
-    const byCoinAndTimeframe = new Map<string, StructureResult>();
-    for (const { ticker, timeframe, structure } of results) {
-      if (structure !== null) byCoinAndTimeframe.set(`${ticker.instrument}:${timeframe}`, structure);
+    const alertByCoinAndTimeframe = new Map<string, LevelAlert>();
+    for (const { ticker, timeframe, alert } of results) {
+      if (alert !== null) alertByCoinAndTimeframe.set(`${ticker.instrument}:${timeframe}`, alert);
     }
 
     const scanned: ScanRow[] = [];
     for (const [index, { ticker, completed }] of coarseFetches.entries()) {
-      // A survivor whose OTHER timeframes failed loses its row entirely — the
-      // row's own convergence columns cannot be reported on partial data.
       if (!passes[index] || completed === null || failedInstruments.has(ticker.instrument)) continue;
-      const structures = {} as Record<ReviewTimeframe, StructureResult>;
+      const levelAlerts = {} as Record<ReviewTimeframe, LevelAlert | null>;
       for (const timeframe of scanTimeframes) {
         if (timeframe === COARSE_TIMEFRAME) {
           // Already fetched in stage 1 — the coarse window IS this series.
-          structures[timeframe] = probeStructure(completed, structureParams) ?? neutralStructure();
+          const lines = linesByTimeframe.get(timeframe)?.get(ticker.instrument) ?? [];
+          const at = completed.at(-1)?.timestamp ?? anchor;
+          levelAlerts[timeframe] = lines.length
+            ? levelAlert(completed, lines, at, scaleStartIndex(completed, lines))
+            : null;
           continue;
         }
-        structures[timeframe] = byCoinAndTimeframe.get(`${ticker.instrument}:${timeframe}`) ?? neutralStructure();
+        levelAlerts[timeframe] = alertByCoinAndTimeframe.get(`${ticker.instrument}:${timeframe}`) ?? null;
       }
-      const converged = scanTimeframes.filter((timeframe) => {
-        const structure = structures[timeframe];
-        return structure.qualified && structure.score >= timeframeMinScore(timeframe, minScore);
-      });
+      const alertTimeframes = scanTimeframes.filter((timeframe) => levelAlerts[timeframe]?.state === 'alert');
       const measure = measures[index]!;
       scanned.push({
         instrument: ticker.instrument,
         lastPrice: ticker.lastPrice,
         change24h: ticker.change24h,
         quoteVolume24h: ticker.quoteVolume24h,
-        structures,
-        convergedTimeframes: converged,
-        qualifiedCount: converged.length,
-        // Strongest score across the converged timeframes (larger = stronger);
-        // 0 when the coarse screen kept a coin that converges nowhere.
-        bestScore: converged.length > 0 ? Math.max(...converged.map((timeframe) => structures[timeframe].score)) : 0,
-        qualified: true,
+        levelAlerts,
+        alertTimeframes,
         coarse: {
           pass: true,
           rangePct: measure.rangePct,
@@ -268,22 +296,24 @@ export class CoinScanService {
       });
     }
 
-    // Order: the highest qualified level first (a lone 1D contraction is a rarer
-    // setup than a short-timeframe one), then cross-timeframe consistency, then
-    // the strongest structure within each count. The level is the
-    // `scanTimeframes` index (5m = 0 … 1D = 4), derived here rather than stored
-    // on the row — `ScanRow` keeps its contract, and `convergedTimeframes`
-    // already lets a caller read the strongest timeframe off. A coin the coarse
-    // screen kept but which converges nowhere has no level, reads as -1, and
-    // sinks below every converging row. Equal keys keep the original ticker
-    // (24h-volume) order: `Array#sort` is stable.
-    const highestLevel = (row: ScanRow) =>
-      row.convergedTimeframes.length === 0
-        ? -1
-        : Math.max(...row.convergedTimeframes.map((timeframe) => scanTimeframes.indexOf(timeframe)));
-    scanned.sort(
-      (a, b) => highestLevel(b) - highestLevel(a) || b.qualifiedCount - a.qualifiedCount || b.bestScore - a.bestScore,
-    );
+    /**
+     * Order: the coins the user should look at FIRST — the ones whose price is
+     * closest to a line they drew. 10/20: the old order was "highest converged
+     * level, then cross-timeframe consistency, then the strongest score", which
+     * ranked a coin by the STRENGTH of a structure the algorithm guessed. Now the
+     * user draws the lines, so the only meaningful order is "how close is the
+     * price to my line".
+     *
+     * Key: the smallest ratio (distance ÷ that coin's own volatility scale) wins.
+     * A row with no line at all has no ratio and sinks below every measured one.
+     */
+    const closestRatio = (row: ScanRow): number => {
+      const ratios = Object.values(row.levelAlerts)
+        .filter((alert): alert is LevelAlert => alert !== null)
+        .map((alert) => alert.ratio);
+      return ratios.length ? Math.min(...ratios) : Number.POSITIVE_INFINITY;
+    };
+    scanned.sort((a, b) => closestRatio(a) - closestRatio(b));
     // Echo the effective params, including the resolved scope and anchor
     // (Date.now() when absent), so the response always reflects what ran.
     const echoedParams = { ...params, scope, anchor };

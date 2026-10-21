@@ -1656,6 +1656,43 @@ label,
   color: #8b949e;
 }
 
+/* 距你标的线列:每个周期一行(周期 / 距线% / 状态)。 */
+.coin-scan-level {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+.coin-scan-level-tf {
+  color: #8b949e;
+  font-size: 11px;
+  min-width: 22px;
+}
+
+.coin-scan-level-dist {
+  font-weight: 600;
+}
+
+/* 贴近 = 该看了;接近 = 还差一点;远 = 不在范围内。 */
+.coin-scan-level.alert .coin-scan-level-dist {
+  color: #f85149;
+}
+
+.coin-scan-level.watch .coin-scan-level-dist {
+  color: #d29922;
+}
+
+.coin-scan-level.far .coin-scan-level-dist {
+  color: #6e7681;
+}
+
+.coin-scan-level-state {
+  font-size: 11px;
+  color: #8b949e;
+}
+
 .coin-scan-detail-row td {
   padding: 0 !important;
   background: #0b1017;

@@ -209,7 +209,8 @@ describe('CoinScanPanel 行情源 (data source)', () => {
     const query = new URLSearchParams(scanUrls[0].slice(scanUrls[0].indexOf('?') + 1));
     expect(query.get('source')).toBe('binance');
     expect(query.get('minQuoteVolume24h')).toBe(String(cryptoDefaults('binance').minQuoteVolume24h));
-    expect(query.get('minScore')).toBe('0.6');
+    // 10/20: the 结构强度阈值 knob was removed with the convergence detector.
+    expect(query.get('minScore')).toBeNull();
   });
 
   it('leaves 扫描数量 empty by default and sends NO topN (= 全池)', async () => {

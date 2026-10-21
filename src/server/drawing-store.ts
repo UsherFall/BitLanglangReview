@@ -81,6 +81,21 @@ export class DrawingStore {
     return rows.map(toDrawing);
   }
 
+  /**
+   * All drawings of one timeframe, across every instrument.
+   *
+   * The 选品 scan needs this: it measures "how far is the price from the line the
+   * user drew" for a whole pool at once, so it must know which instruments have
+   * lines before it fetches their candles. `timeframe` is part of the filter
+   * because each level is measured with its OWN volatility scale.
+   */
+  listDrawingsByTimeframe(timeframe: ReviewTimeframe): ChartDrawing[] {
+    const rows = this.db
+      .prepare('select * from chart_drawings where timeframe = @timeframe order by created_at asc')
+      .all({ timeframe }) as DrawingRow[];
+    return rows.map(toDrawing);
+  }
+
   deleteDrawing(id: string): void {
     this.db.prepare('delete from chart_drawings where id = ?').run(id);
   }

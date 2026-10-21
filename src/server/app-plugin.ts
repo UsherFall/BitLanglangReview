@@ -100,15 +100,17 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       // Both services are stateless across requests, so one instance per source
       // is enough — and `MarketHeatService`'s anchor cache is per source by
       // construction, which is the isolation the scan's source switching needs.
+      // The drawing store comes first: the scan measures "距你标的线" from the
+      // levels the user drew, so it needs the store at construction time.
+      const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const coinScanServices = buildPerSource((source) => {
         const { tickerSource, candleSource, gate } = marketSources[source];
-        return new CoinScanService(tickerSource, candleSource, gate);
+        return new CoinScanService(tickerSource, candleSource, gate, drawingStore);
       });
       const marketHeatServices = buildPerSource((source) => {
         const { tickerSource, candleSource } = marketSources[source];
         return new MarketHeatService(tickerSource, candleSource);
       });
-      const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));
       // OKX instruments back the Other Coin Panel when it reads OKX candles
@@ -343,18 +345,14 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         // silently scan nothing instead of failing loudly.
         const topN = parseOptionalNumber(url.searchParams.get('topN'));
         const minQuoteVolume24h = parseOptionalNumber(url.searchParams.get('minQuoteVolume24h')) ?? scopeDefaults.minQuoteVolume24h;
-        // anchor/minScore are optional: parse them with the optional parser that
+        // anchor is optional: parse it with the optional parser that
         // maps null/empty/NaN → undefined, so an absent param never becomes 0 and
         // trips the guard below.
         const anchor = parseOptionalNumber(url.searchParams.get('anchor'));
-        const minScore = parseOptionalNumber(url.searchParams.get('minScore'));
         if ((topN !== undefined && topN < 1) || minQuoteVolume24h < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (anchor !== undefined && anchor <= 0) {
-          return send(res, 400, { error: 'Invalid scan parameters' });
-        }
-        if (minScore !== undefined && minScore < 0) {
           return send(res, 400, { error: 'Invalid scan parameters' });
         }
         if (method === 'box') {
@@ -398,7 +396,6 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
             topN,
             minQuoteVolume24h,
             anchor,
-            minScore,
           });
           send(res, 200, result);
         } catch (error) {

@@ -44,8 +44,12 @@ const med = (xs) => {
 };
 
 function volScale(arr, afterIdx) {
-  const from = afterIdx ?? Math.max(0, arr.length - 60);
-  const xs = arr.slice(from).map((b) => ((b.h - b.l) / b.c) * 100);
+  const fallback = Math.max(0, arr.length - 60);
+  const from = afterIdx ?? fallback;
+  // 射线起点之后样本不足 30 根时退回最近 60 根（尺子不能因为样本太少而抖动）。
+  const source = arr.slice(from).length < 30 ? arr.slice(fallback) : arr.slice(from);
+  if (!source.length) return 0.02;
+  const xs = source.map((b) => ((b.h - b.l) / b.c) * 100);
   return med(xs);
 }
 
@@ -71,16 +75,25 @@ for (const c of labels) {
   const arr = bars.get(c.inst);
   if (!arr) continue;
   const short = c.inst.replace(/USDT$/, '');
+  // The scale is measured on the SAME data the verdict uses: up to the judge day
+  // (the last CLOSED bar). Measuring it on the live bar would mix a forming
+  // price into the ruler — and the product's level-alert.ts does the same, so
+  // the two stay comparable.
+  const E = arr.findIndex((x) => x.d === judgeDay);
+  if (E < 0) continue;
+  const closed = arr.slice(0, E + 1);
   let scale = null;
   // 优先用射线起点之后那段
   for (const s of c.segments ?? []) {
     const ray = (s.lines ?? []).find((x) => x.kind === 'r');
     if (!ray) continue;
-    const start = arr.findIndex((x) => x.t >= Number(ray.p1.t));
-    const endIdx = arr.findIndex((x) => x.d === s.region?.[1]);
-    if (start >= 0 && endIdx > start) { scale = volScale(arr.slice(0, endIdx + 1), start); break; }
+    const start = closed.findIndex((x) => x.t >= Number(ray.p1.t));
+    if (start >= 0) {
+      scale = volScale(closed, start);
+      break;
+    }
   }
-  if (scale == null) scale = volScale(arr);
+  if (scale == null) scale = volScale(closed);
 
   for (const s of c.segments ?? []) {
     for (const l of s.lines ?? []) {
@@ -99,15 +112,16 @@ for (const c of labels) {
 }
 
 // ---- 判定
+// 距离与尺子必须用【同一个时点】：都用判定日（最后一根已收盘）。
+// 混用（距离用盘中价、尺子用收盘数据）会让同一个数在两边对不上，
+// 而且盘中价会随时变——同一个"倍数"今天和明天不是一个意思。
 const rows = [];
 for (const it of items) {
   const E = it.arr.findIndex((x) => x.d === judgeDay);
-  const Ep = it.arr.findIndex((x) => x.d === priceDay);
   if (E < 0) continue;
-  const useIdx = Ep >= 0 ? Ep : E;
-  const line = it.line.kind === 'r' ? rayAt(it.line, it.arr[useIdx].t) : it.line.price;
-  const price = it.arr[useIdx].c;
-  const prev = it.arr[useIdx - 1]?.c ?? price;
+  const line = it.line.kind === 'r' ? rayAt(it.line, it.arr[E].t) : it.line.price;
+  const price = it.arr[E].c;
+  const prev = it.arr[E - 1]?.c ?? price;
   const dist = ((price - line) / line) * 100;
   const mult = Math.abs(dist) / it.scale;
   rows.push({
