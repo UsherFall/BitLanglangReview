@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-21-key-high-pullback/prd.md", "reason": "验收标准 AC1-AC8 与硬约束：不动粗筛、无新阈值、不复活失败判据、两通道不混"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "契约一致性核查：方法枚举/错误矩阵/测试清单是否与新实现同步、死段落是否删净"}
+{"file": ".trellis/spec/domain/index.md", "reason": "分层核查：domain 无 IO、server 无渲染逻辑"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 行为验证要求：npm test 及相关测试文件的核对方式"}
+{"file": "CONTEXT.md", "reason": "术语一致性核查：新名字（主升浪候选/标线监控）全库无漂移、旧名字不再出现在 UI"}

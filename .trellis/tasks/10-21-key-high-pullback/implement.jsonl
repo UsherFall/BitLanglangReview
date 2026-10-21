@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选品扫描主契约：方法枚举/请求响应/两段式流程/错误矩阵/测试清单——本任务要改的核心契约，并顺带删除 10/20 删收敛时留下的死段落"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "/api/* 路由约定——给 /api/scan 增加 method=watch 分支前必读"}
+{"file": ".trellis/spec/domain/index.md", "reason": "domain 分层铁律：纯函数无 IO——watch 响应类型放 domain，复用 level-alert 不得引入 fetch/SQLite"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "UI 层规范索引——CoinScanPanel 方法下拉与 CoinScanResults 结果表改动的层约定"}
+{"file": "CONTEXT.md", "reason": "项目术语表——「距你标的线」词条改名，新增「主升浪候选」「标线监控」词条"}
+{"file": ".trellis/tasks/archive/2026-10/10-20-level-alert-in-scan/prd.md", "reason": "距线警报上游任务：尺子/三档/跨所换算/样本下限等已验证口径的本源，监控视图必须逐条复用"}
+{"file": ".trellis/tasks/10-21-key-high-pullback/prd.md", "reason": "本任务 PRD：定案（范围 B + 名字）、R1-R4、AC1-AC8、粗筛审查结论与环境约束"}
