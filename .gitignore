@@ -23,3 +23,7 @@ data.zip
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite-journal
+
+# Local scratch: npm cache and manual backups.
+.npm-cache/
+backup/
