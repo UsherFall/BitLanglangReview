@@ -337,21 +337,17 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
             粗筛 {result.scanned.length} 个{result.coarse ? ` · 候选 ${result.coarse.candidates} 个` : ''} · 贴近 {alertRows} 个
             {result.coarse ? ` · 日线窗口 ${result.coarse.windowDays} 天` : ''}
             {hiddenRows > 0 ? ` · 显示 ${visibleRows.length} 个` : ''}
-          </p>
-          {hiddenRows > 0 && (
-            <p className="coin-scan-note">
-              <button type="button" className="coin-scan-copy" onClick={() => setShowAllRows(true)}>
+            {hiddenRows > 0 && (
+              <button type="button" className="coin-scan-more" onClick={() => setShowAllRows(true)}>
                 显示更多（还有 {hiddenRows} 个）
               </button>
-            </p>
-          )}
-          {showAllRows && rows.length > COLLAPSED_ROW_COUNT && (
-            <p className="coin-scan-note">
-              <button type="button" className="coin-scan-copy" onClick={() => setShowAllRows(false)}>
+            )}
+            {showAllRows && rows.length > COLLAPSED_ROW_COUNT && (
+              <button type="button" className="coin-scan-more" onClick={() => setShowAllRows(false)}>
                 收起，只看前 {COLLAPSED_ROW_COUNT} 个
               </button>
-            </p>
-          )}
+            )}
+          </p>
           {result.coarse && (
             <p className="coin-scan-note" title="粗筛用最近 23 根日线算「区间振幅」与「净漂移」（盘得够久 / 收住了 / 不在趋势中）；「位」算的是该币在全部历史里的位置，不是 23 天。">
               日线窗口 {result.coarse.windowDays} 天 = 最近 {result.coarse.windowDays} 根日线算「区间 / 净漂移」；「位」= 该币在全部历史里的位置。

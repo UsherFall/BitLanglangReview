@@ -1689,6 +1689,24 @@ label,
   white-space: normal;
 }
 
+/* 「显示更多 / 收起」：跟在表头那行文字后面，必须一眼看到 ——
+   它是「还有多少候选被折叠了」的唯一入口。 */
+.coin-scan-more {
+  margin-left: 10px;
+  padding: 2px 10px;
+  border: 1px solid #2f81f7;
+  border-radius: 6px;
+  background: #16324f;
+  color: #cfe8ff;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.coin-scan-more:hover {
+  background: #1d4a78;
+}
+
 .coin-scan-table-wrap {
   overflow: auto;
   min-height: 0;
