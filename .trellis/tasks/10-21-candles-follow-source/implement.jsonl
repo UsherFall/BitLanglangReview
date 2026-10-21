@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "各源 K 线约定、缓存命名空间、翻页语义（/candles 与 /history-candles 的 endTime 差异）、切日网格"}
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "选品两阶段取数；posRange 的 90 根约束（Bitget 1D 上限）"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "图表组件规范、CandleGrid 与 CandleSourceId 的映射、画线抽屉"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "新增文件（okxInstrumentToBitgetSymbol 放哪、chart-drawing 的边界）"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "drawing 的 instrument 命名与存储契约"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "源切换跨 server/ui 三层的影响面检查"}
+{"file": ".trellis/tasks/archive/2026-10/10-21-scan-level-fix-and-top20/design.md", "reason": "距线的 canonical 名匹配与比例因子（画线抽屉换源后的兜底）"}

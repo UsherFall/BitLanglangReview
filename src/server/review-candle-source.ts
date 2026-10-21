@@ -1,5 +1,5 @@
 import type { Candlestick } from '../domain/candlestick';
-import { resolveCandleChain } from '../domain/instrument-symbol';
+import { okxInstrumentToBitgetSymbol, resolveCandleChain } from '../domain/instrument-symbol';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { CandleSource } from './market-data';
 
@@ -72,6 +72,59 @@ export async function fetchReviewCandles(request: ReviewCandleRequest): Promise<
 }
 
 /**
+ * Fetches the candlesticks of a Bitget-sourced chart (10/21).
+ *
+ * The instrument may be given in EITHER vocabulary:
+ * - a Bitget symbol (`PEPEUSDT`) - used as-is;
+ * - an OKX-style instrument (`PEPE-USDT-SWAP`) - renamed to `PEPEUSDT`.
+ *
+ * The rename is a pure one: Bitget and OKX price the same base at the same
+ * face value (measured 2026-10-21: OKX `PEPE-USDT-SWAP` = 0.000004561, Bitget
+ * `PEPEUSDT` = 0.0000045647). That is what lets a Bitget POSITION chart
+ * against Bitget candles: the position's entry price and the candles share a
+ * price basis without any scaling.
+ *
+ * `allowPaging` is ON: Bitget's `/candles` caps one request at 90 bars and the
+ * charts ask for 150 - without paging a 1D chart would stop at 90 bars and
+ * "scroll back" would run dry. (The coin scan keeps its own paging OFF,
+ * because turning it on there would change the candidate set - see
+ * `market-data.md`.)
+ */
+export async function getBitgetCandles(input: {
+  candleSource: CandleSource;
+  instrument: string;
+  timeframe: ReviewTimeframe;
+  entryTime: string;
+  mode: string;
+  anchor: number;
+}): Promise<Candlestick[]> {
+  const symbol = bitgetSymbolOf(input.instrument);
+  if (!symbol) throw new Error(`\u8be5\u884c\u60c5\u6e90\u4e0d\u652f\u6301\u8fd9\u4e2a\u6807\u7684: ${input.instrument}`);
+  return getCandlesForMode({
+    candleSource: input.candleSource,
+    instrument: symbol,
+    timeframe: input.timeframe,
+    entryTime: input.entryTime,
+    mode: input.mode,
+    anchor: input.anchor,
+    allowPaging: true,
+  });
+}
+
+/**
+ * The Bitget symbol of an instrument given in either vocabulary.
+ *
+ * A Bitget symbol passes through unchanged; an OKX-style one is renamed. The
+ * Bitget symbol form is recognised by the absence of a `-USDT-SWAP` suffix.
+ */
+function bitgetSymbolOf(instrument: string): string | null {
+  const renamed = okxInstrumentToBitgetSymbol(instrument);
+  if (renamed) return renamed;
+  // Not an OKX-style instrument: accept it as a native Bitget symbol.
+  return /^[A-Z0-9]{2,}USDT$/.test(instrument) ? instrument : null;
+}
+
+/**
  * Fetches candlesticks for a chart that is bound to Binance alone, with no OKX
  * fallback: the instrument must already be a native Binance symbol.
  *
@@ -106,17 +159,23 @@ export async function getCandlesForMode(input: {
   entryTime: string;
   mode: string;
   anchor: number;
+  /**
+   * Keep requesting older/newer pages until the window is full (10/21). The
+   * Bitget charts need it: one request caps at 90 bars and the charts ask for
+   * 150.
+   */
+  allowPaging?: boolean;
 }) {
   if (input.mode === 'earlier') {
-    return input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'earlier', limit: 150 });
+    return input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'earlier', limit: 150, allowPaging: input.allowPaging });
   }
   if (input.mode === 'later') {
-    return input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'later', limit: 150 });
+    return input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: input.anchor, direction: 'later', limit: 150, allowPaging: input.allowPaging });
   }
 
   const entry = Date.parse(input.entryTime);
-  const earlier = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry, direction: 'earlier', limit: 150 });
-  const later = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry - 1, direction: 'later', limit: 150 });
+  const earlier = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry, direction: 'earlier', limit: 150, allowPaging: input.allowPaging });
+  const later = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry - 1, direction: 'later', limit: 150, allowPaging: input.allowPaging });
   return mergeCandles([...earlier, ...later]);
 }
 

@@ -90,6 +90,9 @@ export class BitgetCandleSource implements CandleSource {
     if (request.allowPaging && request.direction === 'earlier') {
       return this.fetchEarlierPaged(request, cached);
     }
+    if (request.allowPaging && request.direction === 'later') {
+      return this.fetchLaterPaged(request, cached);
+    }
 
     const step = timeframeMs(request.timeframe);
     const url = new URL(`${BITGET_BASE_URL}${BITGET_CANDLES_PATH}`);
@@ -201,6 +204,90 @@ export class BitgetCandleSource implements CandleSource {
     const candles = (Array.isArray(payload?.data) ? payload.data : [])
       .map((row) => toCandlestick(key, request.timeframe, row))
       .filter((candle) => candle.timestamp + step <= request.anchor)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    this.store.save(candles);
+    return candles.length;
+  }
+
+  /**
+   * Paged `later` read (10/21) — the mirror of `fetchEarlierPaged`.
+   *
+   * Why it exists: the charts ask for 150 bars, and Bitget's single request
+   * caps at 90 — on `later` that is a hard wall, because the window is
+   * [anchor+1, anchor+span] and the span is clamped to Bitget's 90-day range
+   * limit. Without paging, scrolling FORWARD in a 1D chart stops after 90
+   * bars (and much sooner on 1W/1M, whose span exceeds 90 days outright).
+   *
+   * The walk is the mirror of the `earlier` one: the first page covers
+   * [anchor+1, anchor+span]; every further page starts at the newest bar held
+   * and moves FORWARD. `/history-candles` is the deep-history endpoint, but
+   * for a FORWARD walk the plain `/candles` endpoint is the right one — it
+   * serves the newest bars in the requested window, and `startTime`/`endTime`
+   * bound it.
+   */
+  private async fetchLaterPaged(request: CandleRequest, cached: Candlestick[]): Promise<Candlestick[]> {
+    const perPage = Math.min(BITGET_PAGE_BARS, request.limit);
+    const step = timeframeMs(request.timeframe);
+    // The first page covers EXACTLY one page-worth of bars right after the
+    // anchor: [anchor+1, anchor+1+step*perPage]. A wider window would let the
+    // endpoint answer with the NEWEST bars inside it, leaving a hole right
+    // after the anchor — and `contiguousCandles` would then cut the whole read
+    // back to nothing. A window of exactly one page has the same set under
+    // either reading.
+    const pageSpan = step * perPage;
+    await this.requestLaterPage(request, BITGET_CANDLES_PATH, request.anchor + 1, request.anchor + 1 + pageSpan, perPage);
+    // Then walk forward until the window is full or the exchange runs out.
+    // `maxPages` is a runaway stop, not a budget: a healthy read needs
+    // ceil(limit / perPage) pages and every iteration advances the cursor.
+    const maxPages = Math.ceil(request.limit / perPage) + 2;
+    for (let page = 0; page < maxPages; page += 1) {
+      const have = this.listCached(request);
+      if (have.length >= request.limit) break;
+      const newest = have.at(-1)?.timestamp;
+      if (newest === undefined) break;
+      // The cursor is the newest bar held: the next page starts right after
+      // it. The overlap is harmless — the store upserts on the primary key.
+      const added = await this.requestLaterPage(
+        request,
+        BITGET_CANDLES_PATH,
+        newest + 1,
+        newest + 1 + pageSpan,
+        perPage,
+      );
+      if (added === 0 || this.listCached(request).length <= have.length) break;
+    }
+    return this.listCached(request);
+  }
+
+  /**
+   * One `later` request against `path`, covering [startTime, endTime].
+   * Bars are saved (primary-key upsert) and the count this page contributed is
+   * returned, which is how the paging loop detects "the exchange has no more".
+   */
+  private async requestLaterPage(
+    request: CandleRequest,
+    path: string,
+    startTime: number,
+    endTime: number,
+    limit: number,
+  ): Promise<number> {
+    const url = new URL(`${BITGET_BASE_URL}${path}`);
+    url.searchParams.set('productType', BITGET_PRODUCT_TYPE);
+    url.searchParams.set('symbol', request.instrument);
+    url.searchParams.set('granularity', request.timeframe);
+    url.searchParams.set('limit', String(limit));
+    url.searchParams.set('startTime', String(startTime));
+    url.searchParams.set('endTime', String(endTime));
+
+    const payload = (await this.fetchJson(url.toString())) as BitgetCandlesResponse;
+    if (payload?.code !== undefined && payload.code !== '00000') {
+      throw new Error(`Bitget 行情错误 code=${String(payload.code)}${payload.msg ? `: ${String(payload.msg)}` : ''}`);
+    }
+    const step = timeframeMs(request.timeframe);
+    const key = storeKey(request.instrument);
+    const candles = (Array.isArray(payload?.data) ? payload.data : [])
+      .map((row) => toCandlestick(key, request.timeframe, row))
+      .filter((candle) => candle.timestamp > request.anchor)
       .sort((a, b) => a.timestamp - b.timestamp);
     this.store.save(candles);
     return candles.length;

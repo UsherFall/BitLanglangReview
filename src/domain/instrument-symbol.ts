@@ -53,6 +53,29 @@ export function shortInstrument(instrument: string): string {
 }
 
 /**
+ * The Bitget USDT-FUTURES symbol of an OKX-style instrument (10/21).
+ *
+ * `PEPE-USDT-SWAP` -> `PEPEUSDT`. Bitget and OKX use the SAME face value
+ * (measured 2026-10-21: OKX `PEPE-USDT-SWAP` = 0.000004561, Bitget `PEPEUSDT`
+ * = 0.0000045647), so this is a pure RENAME - no price scaling. That is the
+ * point: a Bitget position charts against Bitget candles without any
+ * conversion.
+ *
+ * Returns `null` for anything that is not a USDT-margined perpetual, so the
+ * caller can say "this venue cannot carry that instrument" instead of asking
+ * the exchange for a symbol that does not exist.
+ *
+ * The reverse is NOT true - Bitget lists coins OKX does not (`LUNCUSDT` has no
+ * OKX counterpart), so a Bitget symbol is not always expressible as an OKX
+ * instrument.
+ */
+export function okxInstrumentToBitgetSymbol(instrument: string): string | null {
+  const base = okxBaseAsset(instrument);
+  if (!base) return null;
+  return `${base}USDT`;
+}
+
+/**
  * OKX-style base asset -> the Binance USDT-M symbol of the SAME asset, for the
  * cases where Binance's plain `base+USDT` is missing or no longer tradable.
  *

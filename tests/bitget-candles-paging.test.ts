@@ -34,11 +34,23 @@ function fakeBitget(all: number[]) {
   return vi.fn(async (url: string) => {
     const parsed = new URL(url);
     const endTime = Number(parsed.searchParams.get('endTime'));
+    const startTime = parsed.searchParams.get('startTime');
     const limit = Number(parsed.searchParams.get('limit'));
-    const eligible = parsed.pathname.endsWith('/history-candles')
+    let eligible = parsed.pathname.endsWith('/history-candles')
       ? all.filter((timestamp) => timestamp + STEP <= endTime)
       : all.filter((timestamp) => timestamp <= endTime);
-    const rows = eligible.slice(-Math.min(limit, PAGE_CAP));
+    // A `later` read bounds the window from BELOW as well (the endpoint would
+    // otherwise return the newest bars in [startTime, endTime] — a block far
+    // past the anchor).
+    if (startTime !== null) {
+      const from = Number(startTime);
+      eligible = eligible.filter((timestamp) => timestamp >= from);
+    }
+    // A bounded window returns the OLDEST bars inside it (the endpoint's
+    // window semantics); an unbounded one returns the newest.
+    const rows = startTime !== null
+      ? eligible.slice(0, Math.min(limit, PAGE_CAP))
+      : eligible.slice(-Math.min(limit, PAGE_CAP));
     return candlesResponse(rows.map((timestamp) => bitgetRow(timestamp, '1', '1')));
   });
 }
@@ -133,13 +145,35 @@ describe('BitgetCandleSource paging', () => {
     expect(candles.length).toBeLessThanOrEqual(90);
   });
 
-  it('ignores allowPaging for a `later` read', async () => {
+  it('pages FORWARD until `limit` bars are available (10/21)', async () => {
+    const store = new CandlestickStore(':memory:');
+    // 400 bars AFTER the anchor — enough to need more than one 90-bar page.
+    const forward = Array.from({ length: 400 }, (_, index) => ANCHOR + STEP * (index + 1)).sort((a, b) => a - b);
+    const fetchJson = fakeBitget(forward);
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'BTCUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'later', limit: 200, allowPaging: true,
+    });
+
+    // The 90-bar page cap means one request cannot satisfy a 200-bar window.
+    expect(candles.length).toBeGreaterThan(90);
+    expect(fetchJson.mock.calls.length).toBeGreaterThan(1);
+    // The first page starts right after the anchor and every later page starts
+    // after the newest bar held (no gaps, no re-reads of the same window).
+    const first = new URL(fetchJson.mock.calls[0][0] as string);
+    expect(first.searchParams.get('startTime')).toBe(String(ANCHOR + 1));
+    const second = new URL(fetchJson.mock.calls[1][0] as string);
+    expect(Number(second.searchParams.get('startTime'))).toBeGreaterThan(ANCHOR);
+  });
+
+  it('keeps the single-request behaviour for a `later` read when allowPaging is absent', async () => {
     const store = new CandlestickStore(':memory:');
     const fetchJson = fakeBitget(series(400));
     const source = new BitgetCandleSource(store, fetchJson);
 
     await source.getCandlesticks({
-      instrument: 'BTCUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'later', limit: 200, allowPaging: true,
+      instrument: 'BTCUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'later', limit: 200,
     });
 
     expect(fetchJson).toHaveBeenCalledTimes(1);

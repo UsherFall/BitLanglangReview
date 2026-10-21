@@ -36,7 +36,7 @@ import { MarketHeatService } from './market-heat-service';
 import { OkxInstrumentService } from './okx-instrument-service';
 import { OkxTickerSource } from './okx-tickers';
 import { ReviewStore } from './review-store';
-import { fetchBinanceOnlyCandles, fetchReviewCandles, getCandlesForMode } from './review-candle-source';
+import { fetchBinanceOnlyCandles, fetchReviewCandles, getBitgetCandles, getCandlesForMode } from './review-candle-source';
 import { loadTradesFromWorkbook } from './trade-import';
 import { binanceRateGate, bitgetMarketRateGate, type RateGate } from './http';
 import type { CandleSource, TickerSource } from './market-data';
@@ -235,7 +235,16 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
               })
             : source === 'binance-only'
               ? await fetchBinanceOnlyCandles({ binance: binanceCandleSource, instrument, timeframe, entryTime, mode, anchor })
-              : await getCandlesForMode({ candleSource: candleService, instrument, timeframe, entryTime, mode, anchor });
+              : source === 'bitget'
+                ? await getBitgetCandles({
+                    candleSource: bitgetCandleSource,
+                    instrument,
+                    timeframe,
+                    entryTime,
+                    mode,
+                    anchor,
+                  })
+                : await getCandlesForMode({ candleSource: candleService, instrument, timeframe, entryTime, mode, anchor });
           send(res, 200, { candles });
         } catch (error) {
           send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load candlesticks' });
