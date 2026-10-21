@@ -23,10 +23,13 @@ function series(count: number): number[] {
  * A faithful stand-in for the endpoint's measured behaviour:
  *  - never more than 90 rows whatever `limit` says (measured on 1D: `limit=200`
  *    still returns 90), which is why one request cannot satisfy a long `limit`;
- *  - the two paths DISAGREE about `endTime`: `/candles` returns the bar
- *    containing it, `/history-candles` only bars that had already CLOSED by it
- *    (measured 2026-10-15). Emulating that difference is the whole point — the
- *    mismatch is what silently produced a one-bar hole between page 1 and 2.
+ *  - the two endpoints read the window on DIFFERENT bar times (measured 10/21):
+ *    `/candles` on OPEN times, `/history-candles` on CLOSE times — the latter
+ *    is why the earlier walk's cursor must be `oldest` and not `oldest - 1`;
+ *  - `startTime` is an EXCLUSIVE lower bound on that bar time, and a bounded
+ *    window answers with the NEWEST `limit` rows inside it (measured 10/21:
+ *    a startTime equal to a bar's open excludes that bar — modelling it as
+ *    inclusive+oldest let the first-bar hole bug slip through this suite).
  */
 const PAGE_CAP = 90;
 
@@ -36,21 +39,14 @@ function fakeBitget(all: number[]) {
     const endTime = Number(parsed.searchParams.get('endTime'));
     const startTime = parsed.searchParams.get('startTime');
     const limit = Number(parsed.searchParams.get('limit'));
-    let eligible = parsed.pathname.endsWith('/history-candles')
-      ? all.filter((timestamp) => timestamp + STEP <= endTime)
-      : all.filter((timestamp) => timestamp <= endTime);
-    // A `later` read bounds the window from BELOW as well (the endpoint would
-    // otherwise return the newest bars in [startTime, endTime] — a block far
-    // past the anchor).
-    if (startTime !== null) {
-      const from = Number(startTime);
-      eligible = eligible.filter((timestamp) => timestamp >= from);
-    }
-    // A bounded window returns the OLDEST bars inside it (the endpoint's
-    // window semantics); an unbounded one returns the newest.
-    const rows = startTime !== null
-      ? eligible.slice(0, Math.min(limit, PAGE_CAP))
-      : eligible.slice(-Math.min(limit, PAGE_CAP));
+    const isHistory = parsed.pathname.endsWith('/history-candles');
+    // `/candles` reads the window on open times, `/history-candles` on close times.
+    const eligible = all.filter((timestamp) => {
+      const bound = isHistory ? timestamp + STEP : timestamp;
+      return (startTime === null || bound > Number(startTime)) && bound <= endTime;
+    });
+    // A bounded window returns the NEWEST rows inside it; an unbounded one too.
+    const rows = eligible.slice(-Math.min(limit, PAGE_CAP));
     return candlesResponse(rows.map((timestamp) => bitgetRow(timestamp, '1', '1')));
   });
 }
@@ -162,7 +158,8 @@ describe('BitgetCandleSource paging', () => {
     // The first page starts right after the anchor and every later page starts
     // after the newest bar held (no gaps, no re-reads of the same window).
     const first = new URL(fetchJson.mock.calls[0][0] as string);
-    expect(first.searchParams.get('startTime')).toBe(String(ANCHOR + 1));
+    expect(first.searchParams.get('startTime')).toBe(String(ANCHOR));
+    expect(first.searchParams.get('endTime')).toBe(String(ANCHOR + 90 * STEP));
     const second = new URL(fetchJson.mock.calls[1][0] as string);
     expect(Number(second.searchParams.get('startTime'))).toBeGreaterThan(ANCHOR);
   });

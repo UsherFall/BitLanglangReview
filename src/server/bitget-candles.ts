@@ -27,6 +27,13 @@ const BITGET_CANDLES_PATH = '/api/v2/mix/market/candles';
  * per request. Used for the OLD pages of a paged read; the newest page stays on
  * `/candles` so the bars a paged caller sees first are byte-identical to what the
  * single-request path (and therefore the coin scan) fetches.
+ *
+ * Measured 10/21: the two endpoints read the request window on DIFFERENT bar
+ * times. `/candles` returns the newest `limit` bars whose OPEN falls in
+ * (startTime, endTime] (startTime is an exclusive bound); `/history-candles`
+ * applies the same shape to CLOSE times — with only `endTime` it returns the
+ * newest `limit` bars that had already closed by it (close ≤ endTime, equality
+ * included). Cursor arithmetic must respect which reading a page uses.
  */
 const BITGET_HISTORY_CANDLES_PATH = '/api/v2/mix/market/history-candles';
 const BITGET_PRODUCT_TYPE = 'USDT-FUTURES';
@@ -148,7 +155,20 @@ export class BitgetCandleSource implements CandleSource {
     const perPage = Math.min(BITGET_PAGE_BARS, request.limit);
     const newestIsUsable = !request.refresh && cached.length > 0 && isCacheFresh(request, cached) && coversAnchorBar(request, cached);
     if (!newestIsUsable) {
-      await this.requestEarlierPage(request, BITGET_CANDLES_PATH, request.anchor - 1, perPage);
+      const added = await this.requestEarlierPage(request, BITGET_CANDLES_PATH, request.anchor - 1, perPage);
+      if (added === 0) {
+        // `/candles` keeps only a rolling window per granularity (measured
+        // 10/21: 1m~1H a few weeks, 4H months, 1D ~3.7 years). An anchor that
+        // predates it answers empty, which used to strand the walk: no cached
+        // bar means no `oldest` cursor, the loop below never runs, and
+        // `/history-candles` — which serves every age measured (5m at 13
+        // months, 1D to ~2019) — was never asked. Seed from it instead: with
+        // `endTime = anchor` it returns exactly the bars that had already
+        // CLOSED by the anchor (it reads the window on close times, `/candles`
+        // on open times — see the TRAP note in the walk below), which is the
+        // completed-bars set the filter below keeps.
+        await this.requestEarlierPage(request, BITGET_HISTORY_CANDLES_PATH, request.anchor, perPage);
+      }
     }
     // Walk back until the contiguous run reaches `limit` or the exchange runs out.
     // `maxPages` is a runaway stop, not a budget: a healthy read needs
@@ -228,14 +248,28 @@ export class BitgetCandleSource implements CandleSource {
   private async fetchLaterPaged(request: CandleRequest, cached: Candlestick[]): Promise<Candlestick[]> {
     const perPage = Math.min(BITGET_PAGE_BARS, request.limit);
     const step = timeframeMs(request.timeframe);
-    // The first page covers EXACTLY one page-worth of bars right after the
-    // anchor: [anchor+1, anchor+1+step*perPage]. A wider window would let the
-    // endpoint answer with the NEWEST bars inside it, leaving a hole right
-    // after the anchor — and `contiguousCandles` would then cut the whole read
-    // back to nothing. A window of exactly one page has the same set under
-    // either reading.
-    const pageSpan = step * perPage;
-    await this.requestLaterPage(request, BITGET_CANDLES_PATH, request.anchor + 1, request.anchor + 1 + pageSpan, perPage);
+    // `/candles` answers with the newest `limit` bars whose OPEN falls inside
+    // (startTime, endTime], and `startTime` is an EXCLUSIVE bound (measured
+    // 10/21: a startTime equal to a bar's open excludes that bar). The first
+    // page therefore spans EXACTLY (anchor, anchor + step * perPage]: that
+    // window holds exactly perPage grid bars, the first one right after the
+    // anchor. The previous `anchor+1 … anchor+1+span` window excluded the first
+    // bar whenever `anchor+1` landed on a grid point (an entry exactly on a bar
+    // boundary) or let the 90-row cap drop it, and `contiguousCandles` then cut
+    // the whole page to nothing — every 5m/4H later read after a boundary entry
+    // returned []. 1D only survived because its 16:00Z opens sit 8h off the
+    // anchor's natural grid. The span is clamped to Bitget's 90-day request cap
+    // so coarse timeframes (1W/1M) page in chunks instead of erroring; the
+    // window then holds fewer bars per page, which the walk below pages through.
+    const pageSpan = Math.min(step * perPage, BITGET_MAX_RANGE_MS);
+    await this.requestLaterPage(request, BITGET_CANDLES_PATH, request.anchor, request.anchor + pageSpan, perPage);
+    // `/candles`' rolling window does not reach old anchors — an empty (or
+    // non-adjacent) first page leaves `listCached` empty and would strand the
+    // walk exactly like the earlier direction. Seed from `/history-candles`,
+    // which serves every age measured.
+    if (this.listCached(request).length === 0) {
+      await this.requestHistoryLaterPage(request, request.anchor, perPage);
+    }
     // Then walk forward until the window is full or the exchange runs out.
     // `maxPages` is a runaway stop, not a budget: a healthy read needs
     // ceil(limit / perPage) pages and every iteration advances the cursor.
@@ -247,27 +281,33 @@ export class BitgetCandleSource implements CandleSource {
       if (newest === undefined) break;
       // The cursor is the newest bar held: the next page starts right after
       // it. The overlap is harmless — the store upserts on the primary key.
-      const added = await this.requestLaterPage(
-        request,
-        BITGET_CANDLES_PATH,
-        newest + 1,
-        newest + 1 + pageSpan,
-        perPage,
-      );
-      if (added === 0 || this.listCached(request).length <= have.length) break;
+      const added = await this.requestLaterPage(request, BITGET_CANDLES_PATH, newest + 1, newest + 1 + pageSpan, perPage);
+      if (added === 0 || this.listCached(request).length <= have.length) {
+        // The page sits before `/candles`' rolling window (an empty answer, or
+        // a straddling window whose bars sit past a hole the contiguity gate
+        // refuses to cross). `/history-candles` serves every age measured, so
+        // page the same stretch from it; if it has nothing either, the
+        // exchange is genuinely out of bars and the walk stops.
+        const historyAdded = await this.requestHistoryLaterPage(request, newest, perPage);
+        if (historyAdded === 0 || this.listCached(request).length <= have.length) break;
+        continue;
+      }
     }
     return this.listCached(request);
   }
 
   /**
    * One `later` request against `path`, covering [startTime, endTime].
+   * `startTime` is Bitget's EXCLUSIVE lower bound on the open time; `null`
+   * omits it, which `/history-candles` pages rely on (an endTime-only request
+   * is also exempt from the 90-day startTime~endTime span cap).
    * Bars are saved (primary-key upsert) and the count this page contributed is
    * returned, which is how the paging loop detects "the exchange has no more".
    */
   private async requestLaterPage(
     request: CandleRequest,
     path: string,
-    startTime: number,
+    startTime: number | null,
     endTime: number,
     limit: number,
   ): Promise<number> {
@@ -276,7 +316,7 @@ export class BitgetCandleSource implements CandleSource {
     url.searchParams.set('symbol', request.instrument);
     url.searchParams.set('granularity', request.timeframe);
     url.searchParams.set('limit', String(limit));
-    url.searchParams.set('startTime', String(startTime));
+    if (startTime !== null) url.searchParams.set('startTime', String(startTime));
     url.searchParams.set('endTime', String(endTime));
 
     const payload = (await this.fetchJson(url.toString())) as BitgetCandlesResponse;
@@ -291,6 +331,25 @@ export class BitgetCandleSource implements CandleSource {
       .sort((a, b) => a.timestamp - b.timestamp);
     this.store.save(candles);
     return candles.length;
+  }
+
+  /**
+   * One FORWARD page from `/history-candles` (10/21): an endTime-only request
+   * landing the `limit` bars right after the cursor.
+   *
+   * That endpoint reads its window on CLOSE times — the mirror of the earlier
+   * walk's TRAP (`/candles` reads open times) — and answers with the newest
+   * `limit` bars that had already closed by `endTime`. `endTime = cursor +
+   * (limit + 1) * step` therefore selects exactly the bars opening in
+   * (cursor, cursor + limit * step], for a cursor on OR off the grid: the
+   * newest close it can admit is the last target bar's own close, and the
+   * bar at the cursor itself is the (limit+1)-th back, dropped by the row cap.
+   * Omitting `startTime` keeps the request outside the 90-day span cap, which
+   * the (limit+1)-step span would otherwise exceed on 1D and coarser.
+   */
+  private async requestHistoryLaterPage(request: CandleRequest, cursor: number, limit: number): Promise<number> {
+    const step = timeframeMs(request.timeframe);
+    return this.requestLaterPage(request, BITGET_HISTORY_CANDLES_PATH, null, cursor + (limit + 1) * step, limit);
   }
 
   private listCached(request: CandleRequest): Candlestick[] {

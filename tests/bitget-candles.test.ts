@@ -16,6 +16,16 @@ function candlesResponse(rows: string[][]): { code: string; msg: string; data: s
 const STEP = 5 * 60_000;
 const ANCHOR = 1653381600000; // 2022-05-24T10:40:00.000Z, a 5m boundary.
 
+/** Ascending run of `count` bars opening at `start`, `start+step`, … */
+function barRun(start: number, count: number, step = STEP): string[][] {
+  return Array.from({ length: count }, (_, index) => bitgetRow(start + index * step, String(29350 + index), '10'));
+}
+
+/** Ascending run of `count` bars that had all CLOSED by `end` — the `/history-candles` window reading. */
+function closedBarRun(end: number, count: number, step = STEP): string[][] {
+  return barRun(end - count * step, count, step);
+}
+
 describe('BitgetCandleSource', () => {
   it('maps row fields, requests earlier via endTime, and reuses the cache', async () => {
     const store = new CandlestickStore(':memory:');
@@ -236,5 +246,117 @@ describe('BitgetCandleSource', () => {
     await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'earlier', limit: 2 });
 
     expect(fetchJson).toHaveBeenCalledTimes(1);
+  });
+
+  // `/candles` keeps only a rolling window per granularity. When the anchor
+  // predates it the first page answers empty; the walk used to give up with no
+  // cursor and never ask `/history-candles` — old trades' intraday charts were
+  // blank, and 1D scroll-back died at the window edge (~2023 on 1D).
+  it('seeds the earlier walk from history-candles when /candles has nothing for an old anchor', async () => {
+    const store = new CandlestickStore(':memory:');
+    const fetchJson = vi.fn(async (url: string) =>
+      url.includes('history-candles')
+        ? candlesResponse(closedBarRun(ANCHOR, 90))
+        : candlesResponse([]),
+    );
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'earlier', limit: 90, allowPaging: true });
+
+    expect(candles).toHaveLength(90);
+    // The newest bar is the one closing exactly at the anchor (closed-bar equality is inclusive).
+    expect(candles.at(-1)!.timestamp).toBe(ANCHOR - STEP);
+    expect(candles[0].timestamp).toBe(ANCHOR - 90 * STEP);
+    // First ask /candles, then seed history at endTime = anchor (its close-time reading = the completed bars).
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    const [candlesUrl, historyUrl] = fetchJson.mock.calls.map((call) => call[0] as string);
+    expect(candlesUrl).toContain('/candles');
+    expect(candlesUrl).toContain(`endTime=${ANCHOR - 1}`);
+    expect(historyUrl).toContain('history-candles');
+    expect(historyUrl).toContain(`endTime=${ANCHOR}`);
+    expect(historyUrl).not.toContain('startTime');
+  });
+
+  // Bitget's startTime is an EXCLUSIVE bound on the open time. The old first
+  // page (anchor+1, anchor+1+span] excluded the very first bar after the
+  // anchor whenever anchor+1 landed on a grid point (an entry exactly on a bar
+  // boundary), and the contiguity gate cut the whole later half to [].
+  it('starts the paged later window at the anchor so the first bar after it survives', async () => {
+    const store = new CandlestickStore(':memory:');
+    const anchor = ANCHOR - 1; // 1 ms below a 5m boundary — the broken case.
+    // The endpoint's answer for (anchor, anchor+90*STEP]: the grid bars ANCHOR .. ANCHOR+89*STEP.
+    const fetchJson = vi.fn(async (_url: string) => candlesResponse(barRun(ANCHOR, 90)));
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '5m', anchor, direction: 'later', limit: 90, allowPaging: true });
+
+    expect(candles).toHaveLength(90);
+    // The bar the old anchor+1 window excluded — first grid bar after the anchor.
+    expect(candles[0].timestamp).toBe(ANCHOR);
+    expect(candles.at(-1)!.timestamp).toBe(ANCHOR + 89 * STEP);
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    const url = fetchJson.mock.calls[0][0] as string;
+    expect(url).toContain(`startTime=${anchor}`);
+    expect(url).toContain(`endTime=${anchor + 90 * STEP}`);
+  });
+
+  it('seeds the paged later walk from history-candles when /candles cannot serve the anchor', async () => {
+    const store = new CandlestickStore(':memory:');
+    const anchor = ANCHOR - 1;
+    const fetchJson = vi.fn(async (url: string) =>
+      url.includes('history-candles')
+        ? candlesResponse(barRun(ANCHOR, 90))
+        : candlesResponse([]),
+    );
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '5m', anchor, direction: 'later', limit: 90, allowPaging: true });
+
+    expect(candles).toHaveLength(90);
+    expect(candles[0].timestamp).toBe(ANCHOR);
+    // The history forward page is endTime-only: cursor + (perPage+1) steps lands the 90 bars after the anchor.
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    const historyUrl = fetchJson.mock.calls[1][0] as string;
+    expect(historyUrl).toContain('history-candles');
+    expect(historyUrl).toContain(`endTime=${anchor + 91 * STEP}`);
+    expect(historyUrl).not.toContain('startTime');
+  });
+
+  it('continues the paged later walk from history-candles when /candles runs dry mid-walk', async () => {
+    const store = new CandlestickStore(':memory:');
+    const fetchJson = vi.fn(async (url: string) => {
+      if (url.includes('history-candles')) {
+        const endTime = Number(new URL(url).searchParams.get('endTime'));
+        return candlesResponse(closedBarRun(endTime, 90));
+      }
+      // /candles serves only the first page — its rolling window ends there.
+      const startTime = Number(new URL(url).searchParams.get('startTime'));
+      return startTime <= ANCHOR ? candlesResponse(barRun(ANCHOR + STEP, 90)) : candlesResponse([]);
+    });
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '5m', anchor: ANCHOR, direction: 'later', limit: 150, allowPaging: true });
+
+    expect(candles).toHaveLength(150);
+    // The two pages splice into one contiguous run.
+    for (let index = 1; index < candles.length; index += 1) {
+      expect(candles[index].timestamp - candles[index - 1].timestamp).toBe(STEP);
+    }
+    const historyUrl = fetchJson.mock.calls.map((call) => call[0] as string).find((url) => url.includes('history-candles'));
+    expect(historyUrl).toBeDefined();
+    expect(historyUrl).not.toContain('startTime');
+  });
+
+  it('clamps the paged later window to Bitget\'s 90-day span on coarse timeframes', async () => {
+    const store = new CandlestickStore(':memory:');
+    const fetchJson = vi.fn(async (_url: string) => candlesResponse([]));
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '1W', anchor: ANCHOR, direction: 'later', limit: 150, allowPaging: true });
+
+    // 90 weekly bars would span 630 days — past Bitget's 90-day request cap.
+    const url = fetchJson.mock.calls[0][0] as string;
+    expect(url).toContain(`startTime=${ANCHOR}`);
+    expect(url).toContain(`endTime=${ANCHOR + 90 * 24 * 60 * 60_000}`);
   });
 });
