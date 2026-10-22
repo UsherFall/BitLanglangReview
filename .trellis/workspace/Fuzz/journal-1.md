@@ -50,3 +50,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: 修复 Bitget later K线未收盘bar进入缓存
+<!-- trellis-session: v=2 fp=d275b6a4f819de48 -->
+
+**Date**: 2026-10-22
+**Task**: 修复 Bitget later K线未收盘bar进入缓存
+**Branch**: `master`
+
+### Summary
+
+个人交割单复盘的 Bitget later 取数缺已收盘过滤：initial 半窗拉入场后 150 根 bar（1D 约 150 天），把当前未收盘日线写入 review.sqlite 并永久冻结（7 个合约实锤）。requestLaterPage 与单请求 later 分支补 isClosedBar（对齐 OKX/Binance 09/20 起的方向无关不变量）；一次性清理 bitget: 命名空间（marker 守卫，真库已执行）。新增 4 用例，593 测试全绿，spec 补 10/22 记录。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f565490` | fix(bitget): later K线丢弃未收盘bar + 一次性清理已污染缓存 |
+
+### Status
+
+[OK] **Completed**
