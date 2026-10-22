@@ -149,9 +149,16 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     return Array.isArray(input) ? input : (input.current ?? []);
   }
 
-  // Load the instrument's drawings. Levels are per (instrument, timeframe), so
-  // a timeframe switch reloads the set (each timeframe is measured with its
-  // OWN volatility scale).
+  // Load the instrument's drawings. VISIBILITY is instrument-level (10/22
+  // regression fix, restoring the pre-10/21 behaviour that
+  // `quality-guidelines.md` documents): a level drawn on one timeframe shows
+  // on every timeframe of the same instrument, so the fetch does NOT filter
+  // by `timeframe`. The `timeframe` a drawing carries is the 距线 scan's
+  // MEASUREMENT granularity (a 5m line is measured on 5m candles), stamped at
+  // draw time by `saveDrawing` — it decides nothing about which chart shows
+  // the line. `timeframe` is therefore not a dependency either: switching
+  // timeframes keeps the same set (and keeps the selection/draft intact — a
+  // still-visible line may stay selected across the switch).
   useEffect(() => {
     setSelectedDrawingId('');
     setDraftPoint(null);
@@ -161,8 +168,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
       return;
     }
     let cancelled = false;
-    const params = new URLSearchParams({ instrument, timeframe });
-    fetch(`/api/drawings?${params}`)
+    fetch(`/api/drawings?${new URLSearchParams({ instrument })}`)
       .then((response) => response.json())
       .then(({ drawings: next }: { drawings?: ChartDrawing[] }) => {
         if (!cancelled) setDrawings(next ?? []);
@@ -173,7 +179,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     return () => {
       cancelled = true;
     };
-  }, [instrument, timeframe, enabled]);
+  }, [instrument, enabled]);
 
   /**
    * The close of the last COMPLETED bar — the price basis of a new line.

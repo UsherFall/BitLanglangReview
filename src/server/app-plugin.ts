@@ -271,9 +271,13 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           if (!instrument) {
             return send(res, 400, { error: 'instrument is required' });
           }
-          // The timeframe filter is optional: a chart wants the levels of ITS
-          // own timeframe (each level is measured with its own volatility
-          // scale), while the 选品 scan asks for every timeframe at once.
+          // The timeframe filter is optional and now unused by the UI (10/22):
+          // chart visibility is instrument-level — a level drawn on one
+          // timeframe shows on every timeframe, so the charts ask for the
+          // instrument's whole set. The filter stays for targeted queries
+          // (and `listDrawingsByTimeframe` is the 距线 scan's server-side
+          // path); a drawing's own `timeframe` field remains the scan's
+          // MEASUREMENT granularity, not a visibility rule.
           const timeframe = url.searchParams.get('timeframe');
           const drawings = timeframe
             ? drawingStore.listDrawings({ instrument, timeframe })

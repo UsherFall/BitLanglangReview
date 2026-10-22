@@ -416,7 +416,7 @@ describe('OtherCoinChart · 画线（10/21）', () => {
     expect(document.querySelector('.drawing-overlay')).not.toBeNull();
   });
 
-  it('载入该币该周期已有的线（GET 带 instrument 与 timeframe）', async () => {
+  it('载入该币全部周期的线（GET 只带 instrument，不带 timeframe）', async () => {
     const drawingRequests: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       const parsed = new URL(`http://localhost${url}`);
@@ -445,6 +445,8 @@ describe('OtherCoinChart · 画线（10/21）', () => {
     );
 
     await waitFor(() => expect(drawingRequests.length).toBeGreaterThan(0));
-    expect(drawingRequests[0]).toBe('BTCUSDT:1D');
+    // 10/22: 画线可见性是 instrument 级（quality-guidelines.md）——加载不带
+    // `timeframe` 过滤；该字段只作为距线扫描的测量粒度标签随保存写入。
+    expect(drawingRequests[0]).toBe('BTCUSDT:null');
   });
 });

@@ -178,6 +178,42 @@ describe('App drawings', () => {
     expect(line).toHaveAttribute('x1', '0');
     expect(Number(line.getAttribute('x2'))).toBeGreaterThan(1000);
   });
+
+  // 10/22 regression: a level drawn on one timeframe must stay visible on
+  // EVERY timeframe of the same instrument (`quality-guidelines.md`). The
+  // 10/21 距线 rework accidentally filtered the chart load by timeframe — this
+  // suite never caught it because the fetch mock ignores query params. So the
+  // guard here is on the REQUEST (no `timeframe` param) as well as the render.
+  it('loads the instrument\u2019s whole drawing set — no timeframe filter — and keeps it across a timeframe switch', async () => {
+    const fiveMinute = { ...makeDrawing(), id: 'd-5m', timeframe: '5m', points: [{ time: 1716256800, price: 100 }] };
+    const fourHour = {
+      ...makeDrawing(), id: 'd-4h', timeframe: '4H', kind: 'ray',
+      points: [{ time: 1716256800, price: 100 }, { time: 1716257100, price: 100 }],
+    };
+    const fetchMock = makeFetch([fiveMinute, fourHour]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    // Both timeframes' lines render together on the 5m chart.
+    await waitFor(() => expect(document.querySelectorAll('line.drawing-shape')).toHaveLength(2));
+
+    // The load request is instrument-level: no `timeframe` query param.
+    const loadUrl = fetchMock.mock.calls
+      .map(([url, init]) => ({ url: String(url), init }))
+      .find(({ url, init }) => url.startsWith('/api/drawings') && init === undefined);
+    expect(loadUrl).toBeDefined();
+    expect(loadUrl!.url).not.toContain('timeframe=');
+
+    // Switching timeframes does not reload the set (it is the same set —
+    // `timeframe` left the effect deps) and does not drop a single line.
+    const getDrawingsCalls = () => fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/drawings') && init === undefined).length;
+    const before = getDrawingsCalls();
+    fireEvent.click(screen.getByRole('button', { name: '4H' }));
+    await waitFor(() => expect(document.querySelector('.chart-status')).toBe(null));
+    expect(getDrawingsCalls()).toBe(before);
+    expect(document.querySelectorAll('line.drawing-shape')).toHaveLength(2);
+  });
 });
 
 async function drawingLine(): Promise<SVGLineElement> {
