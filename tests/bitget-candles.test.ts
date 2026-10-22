@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BITGET_KEY_PREFIX, BitgetCandleSource } from '../src/server/bitget-candles';
+import { BITGET_KEY_PREFIX, BitgetCandleSource, purgeBitgetCandleCacheOnce } from '../src/server/bitget-candles';
 import { CandlestickStore } from '../src/server/candlestick-store';
 import { reviewTimeframes } from '../src/domain/trade';
 
@@ -126,6 +126,34 @@ describe('BitgetCandleSource', () => {
     expect(
       store.listBefore({ instrument: `${BITGET_KEY_PREFIX}BTCUSDT`, timeframe: '5m', before: ANCHOR + STEP, limit: 10 }).length,
     ).toBe(2);
+  });
+
+  // 10/22: `later` windows reach the present too — a review's initial load
+  // pulls 150 bars AFTER the entry (on 1D that is ~150 days), so every recent
+  // trade charts up to the current bar. The closed-bar filter is therefore
+  // direction-agnostic; before the fix the half-formed bar was cached and then
+  // frozen mid-series (a walk anchored AT it excludes it, and the cache-hit
+  // gates never refetch it).
+  it('drops the still-forming bar on a `later` read before it can reach the cache', async () => {
+    const store = new CandlestickStore(':memory:');
+    const now = Date.now();
+    const forming = Math.floor(now / STEP) * STEP; // the bar currently forming
+    const first = forming - 3 * STEP;
+    const second = forming - 2 * STEP;
+    const fetchJson = vi.fn(async (_url: string) =>
+      candlesResponse([bitgetRow(first, '29350', '12'), bitgetRow(second, '29480', '20'), bitgetRow(forming, '29500', '30')]),
+    );
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'BTCUSDT', timeframe: '5m', anchor: first - STEP, direction: 'later', limit: 3,
+    });
+
+    expect(candles.map((candle) => candle.timestamp)).toEqual([first, second]);
+    // And the forming bar never reached the store.
+    expect(
+      store.listAfter({ instrument: `${BITGET_KEY_PREFIX}BTCUSDT`, timeframe: '5m', after: first - STEP, limit: 10 }).map((candle) => candle.timestamp),
+    ).toEqual([first, second]);
   });
 
   it('requests later via startTime and clamps endTime to Bitget\'s 90-day span', async () => {
@@ -438,5 +466,44 @@ describe('BitgetCandleSource', () => {
     const url = fetchJson.mock.calls[0][0] as string;
     expect(url).toContain(`startTime=${ANCHOR}`);
     expect(url).toContain(`endTime=${ANCHOR + 90 * 24 * 60 * 60_000}`);
+  });
+});
+
+describe('purgeBitgetCandleCacheOnce', () => {
+  const candle = (instrument: string, timestamp: number) => ({
+    instrument, timeframe: '5m' as const, timestamp, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10,
+  });
+  const ts = 1653381000000;
+  const listed = (store: CandlestickStore, instrument: string) =>
+    store.listBefore({ instrument, timeframe: '5m', before: ts + STEP, limit: 10 }).length;
+
+  it('deletes the bitget namespace and leaves every other namespace intact', () => {
+    const store = new CandlestickStore(':memory:');
+    store.save([
+      candle(`${BITGET_KEY_PREFIX}BTCUSDT`, ts),
+      candle(`${BITGET_KEY_PREFIX}ETHUSDT`, ts),
+      candle('BTC-USDT-SWAP', ts),   // OKX — same exchange, no prefix
+      candle('BTCUSDT', ts),          // Binance — SAME symbol vocabulary as Bitget
+    ]);
+
+    expect(purgeBitgetCandleCacheOnce(store)).toBe(2);
+    expect(listed(store, `${BITGET_KEY_PREFIX}BTCUSDT`)).toBe(0);
+    expect(listed(store, `${BITGET_KEY_PREFIX}ETHUSDT`)).toBe(0);
+    // The unprefixed Binance row must survive: the prefix is the whole point of
+    // the namespacing rule (`market-data.md`, cache-key rule 09/07).
+    expect(listed(store, 'BTC-USDT-SWAP')).toBe(1);
+    expect(listed(store, 'BTCUSDT')).toBe(1);
+  });
+
+  it('runs once per database — the marker makes later boots keep fresh rows', () => {
+    const store = new CandlestickStore(':memory:');
+    store.save([candle(`${BITGET_KEY_PREFIX}BTCUSDT`, ts)]);
+
+    expect(purgeBitgetCandleCacheOnce(store)).toBe(1);
+
+    // Fresh rows written after the purge must NOT be deleted by the next boot.
+    store.save([candle(`${BITGET_KEY_PREFIX}BTCUSDT`, ts + 1)]);
+    expect(purgeBitgetCandleCacheOnce(store)).toBe(0);
+    expect(listed(store, `${BITGET_KEY_PREFIX}BTCUSDT`)).toBe(1);
   });
 });

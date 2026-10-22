@@ -20,6 +20,11 @@ export class CandlestickStore {
         volume real not null,
         primary key (instrument, timeframe, timestamp)
       );
+
+      create table if not exists candle_meta (
+        key text primary key,
+        value text not null
+      );
     `);
   }
 
@@ -64,6 +69,31 @@ export class CandlestickStore {
       for (const candle of items) statement.run(candle);
     });
     transaction(candles);
+  }
+
+  /**
+   * Deletes every candle row whose `instrument` starts with `prefix` and
+   * returns how many were removed. Used by one-time migrations that have to
+   * clear a source's namespace without touching the rows of other sources —
+   * e.g. purging `bitget:` rows frozen half-formed by the pre-10/22 `later`
+   * fetch (they are indistinguishable from closed rows once written, so the
+   * only guaranteed cleanup is deleting the whole namespace). The prefix is a
+   * caller constant; `LIKE` special characters in it are not escaped.
+   */
+  deleteByInstrumentPrefix(prefix: string): number {
+    return this.db.prepare('delete from candles where instrument like ?').run(`${prefix}%`).changes;
+  }
+
+  /** One-time-migration marker: absent means the migration has not run yet. */
+  getMeta(key: string): string | null {
+    const row = this.db.prepare('select value from candle_meta where key = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.db
+      .prepare('insert into candle_meta (key, value) values (?, ?) on conflict(key) do update set value = excluded.value')
+      .run(key, value);
   }
 
   close(): void {

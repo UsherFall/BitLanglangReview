@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BitgetCandleSource } from '../src/server/bitget-candles';
+import { BITGET_KEY_PREFIX, BitgetCandleSource } from '../src/server/bitget-candles';
 import { CandlestickStore } from '../src/server/candlestick-store';
 
 // Bitget mix candle row: [timestamp(ms), open, high, low, close, baseVolume, quoteVolume]
@@ -195,5 +195,37 @@ describe('BitgetCandleSource paging', () => {
     // Only the missing older 90 were fetched; the newest page was already good.
     expect(fetchJson).toHaveBeenCalledTimes(2);
     expect(new URL(fetchJson.mock.calls[1][0] as string).pathname).toBe('/api/v2/mix/market/history-candles');
+  });
+
+  // 10/22: a `later` walk that reaches the present receives the still-forming
+  // bar in its pages (the review `initial` load pulls 150 bars AFTER the entry
+  // — on 1D that is ~150 days, so every recent trade charts up to the current
+  // bar). The forming bar must be dropped BEFORE the cache: saved once, it
+  // freezes mid-series forever — a walk anchored AT it excludes it
+  // (`timestamp > anchor` is false for the row itself) and the cache-hit gates
+  // never refetch it.
+  it('drops the still-forming bar when the paged later walk reaches the present', async () => {
+    const store = new CandlestickStore(':memory:');
+    const forming = Math.floor(Date.now() / STEP) * STEP; // the bar currently forming
+    const anchor = forming - 5 * STEP;
+    const fetchJson = fakeBitget([forming - 4 * STEP, forming - 3 * STEP, forming - 2 * STEP, forming - STEP, forming]);
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'BTCUSDT', timeframe: '5m', anchor, direction: 'later', limit: 10, allowPaging: true,
+    });
+
+    // Only CLOSED bars come back — the chart ends at the newest closed bar,
+    // same as the OKX/Binance charts of the same product.
+    const closed = [forming - 4 * STEP, forming - 3 * STEP, forming - 2 * STEP, forming - STEP];
+    expect(candles.map((candle) => candle.timestamp)).toEqual(closed);
+    // The forming bar never reached the store.
+    expect(
+      store.listAfter({ instrument: `${BITGET_KEY_PREFIX}BTCUSDT`, timeframe: '5m', after: anchor, limit: 10 }).map((candle) => candle.timestamp),
+    ).toEqual(closed);
+    // The walk terminates through the existing "exchange has no more" path:
+    // the first page, then a /candles page holding ONLY the forming bar
+    // (added=0), then the /history-candles fallback which has nothing new.
+    expect(fetchJson).toHaveBeenCalledTimes(3);
   });
 });

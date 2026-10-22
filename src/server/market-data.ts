@@ -46,9 +46,11 @@ export type CandleRequest = {
   /** Bypass the cache-freshness gate and always fetch from the market source. */
   refresh?: boolean;
   /**
-   * Opt-in: keep requesting OLDER pages until `limit` bars are available (or the
-   * exchange runs out), instead of accepting whatever one request can return.
-   * Only `direction: 'earlier'`; ignored otherwise.
+   * Opt-in: keep requesting pages (older or newer, matching `direction`) until
+   * `limit` bars are available or the exchange runs out, instead of accepting
+   * whatever one request can return. Both directions (10/21); the Bitget
+   * chart reads use it because one request caps at 90 bars while the charts
+   * ask for 150.
    *
    * Absent/false keeps the single-request behaviour every existing caller relies
    * on. That default matters: the coin scan asks for `scanWindowFor()` = 100 bars

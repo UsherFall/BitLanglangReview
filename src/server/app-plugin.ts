@@ -14,7 +14,7 @@ import {
   type ScanScope,
 } from '../domain/scan-scope';
 import { BinanceCandleSource } from './binance-candles';
-import { BitgetCandleSource } from './bitget-candles';
+import { BitgetCandleSource, purgeBitgetCandleCacheOnce } from './bitget-candles';
 import { bitgetInstrumentMetadata } from './bitget-instrument-metadata';
 import { BitgetTickerSource } from './bitget-tickers';
 import { resolveDataPath } from './data-root';
@@ -57,6 +57,11 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const trades = loadTradesFromWorkbook(workbookPath);
       const reviewStore = new ReviewStore(resolveDataPath('review.sqlite'));
       const candleStore = new CandlestickStore(resolveDataPath('review.sqlite'));
+      // One-time (10/22): the pre-fix Bitget `later` fetch cached the still-forming
+      // bar, whose half-formed OHLC then froze mid-series (see
+      // `purgeBitgetCandleCacheOnce`). Guarded by a store marker, so this runs
+      // once per database, not once per boot.
+      purgeBitgetCandleCacheOnce(candleStore);
       // Review-chart candlesticks: FreeReplay and the workbook TradeReview keep
       // the OKX source by default; the personal review mode (Bitget-sourced
       // trades) requests source=binance — Bitget's own public candles only keep

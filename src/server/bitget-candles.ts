@@ -79,7 +79,18 @@ export const BITGET_KEY_PREFIX = 'bitget:';
  *
  * The endpoint returns the still-forming bar, and rows carry no completion
  * flag, so a bar is admitted only once it has CLOSED — judged by its close
- * time (`barCloseTime`), never by the anchor.
+ * time (`barCloseTime`), never by the anchor. That filter is direction-
+ * AGNOSTIC (10/22): the `later` paths used to admit the forming bar, and BOTH
+ * windows reach the present — a review's `initial` load pulls 150 bars after
+ * the entry, which on 1D spans ~150 days, so every trade of the last five
+ * months charted the current (half-formed) daily bar. A forming row must never
+ * reach the cache: the store upserts on the primary key, but a `later` walk
+ * anchored AT that row excludes it (`timestamp > anchor` is false for the row
+ * itself), and the cache-hit gates serve it without refetching (`later` is
+ * always "fresh", and a historical `earlier` anchor is too) — so one partial
+ * bar froze mid-series forever, permanently disagreeing with the exchange
+ * (measured 10/22 in the user's own `review.sqlite`: the newest cached 1D row
+ * of 7 instruments sat inside the still-running daily bar).
  *
  * `earlier` keeps the bars strictly before the anchor INCLUDING the bar that
  * CONTAINS the anchor (`open < anchor`) — the same rule OKX and Binance
@@ -147,7 +158,9 @@ export class BitgetCandleSource implements CandleSource {
           // (open < anchor), and only bars that have already closed.
           return candle.timestamp < request.anchor && isClosedBar(candle.timestamp, request.timeframe);
         }
-        return candle.timestamp > request.anchor;
+        // Direction-agnostic closed-bar invariant (see the class comment): a
+        // `later` window reaching the present receives the in-progress bar too.
+        return candle.timestamp > request.anchor && isClosedBar(candle.timestamp, request.timeframe);
       })
       .sort((a, b) => a.timestamp - b.timestamp);
     this.store.save(candles);
@@ -341,11 +354,17 @@ export class BitgetCandleSource implements CandleSource {
     if (payload?.code !== undefined && payload.code !== '00000') {
       throw new Error(`Bitget 行情错误 code=${String(payload.code)}${payload.msg ? `: ${String(payload.msg)}` : ''}`);
     }
-    const step = timeframeMs(request.timeframe);
     const key = storeKey(request.instrument);
     const candles = (Array.isArray(payload?.data) ? payload.data : [])
       .map((row) => toCandlestick(key, request.timeframe, row))
-      .filter((candle) => candle.timestamp > request.anchor)
+      // Direction-agnostic closed-bar invariant — see the class comment. This
+      // is the egress of EVERY `later` network fetch (paged `/candles` pages
+      // and `/history-candles` seeds alike), so the still-forming bar is kept
+      // out of the cache no matter which path reaches the present. A page that
+      // returns nothing but the forming bar counts as added=0, which the walk
+      // already treats as "the exchange has no more" — correct, since no more
+      // CLOSED bars exist yet.
+      .filter((candle) => candle.timestamp > request.anchor && isClosedBar(candle.timestamp, request.timeframe))
       .sort((a, b) => a.timestamp - b.timestamp);
     this.store.save(candles);
     return candles.length;
@@ -384,6 +403,34 @@ export class BitgetCandleSource implements CandleSource {
 /** Storage key for a native Bitget symbol (see `BITGET_KEY_PREFIX`). */
 function storeKey(instrument: string): string {
   return `${BITGET_KEY_PREFIX}${instrument}`;
+}
+
+/** Marker that the one-time `bitget:` namespace purge (10/22) already ran. */
+const FORMING_BAR_PURGE_META_KEY = 'bitget-forming-bar-purge-10-22';
+
+/**
+ * One-time cleanup (10/22) of rows the pre-fix `later` fetch wrote while their
+ * bar was still forming.
+ *
+ * A polluted row is INDISTINGUISHABLE from a closed one once written (the store
+ * keeps no write-time marker), and a half-formed `1M` bar can look closed up to
+ * 31 days back, so no timestamp window can target them precisely. The only
+ * guaranteed cleanup is deleting the WHOLE `bitget:` namespace — it is a cache
+ * (the exchange stays the source of truth) and was only days old at 10/22, so
+ * the cost is a few re-fetched pages on the next review. Guarded by a
+ * `candle_meta` marker so it runs once per database, never per boot.
+ *
+ * Measured before the purge (10/22, `data/review.sqlite`): the newest cached
+ * 1D row of 7 instruments sat inside the still-running daily bar, plus 361
+ * near-now rows that cannot be proven clean. The OKX/Binance namespaces are
+ * NOT purged: their closed-bar filters have been direction-agnostic since the
+ * 09/20 fix, whose cleanup was handled then (see `market-data.md`).
+ */
+export function purgeBitgetCandleCacheOnce(store: CandlestickStore): number {
+  if (store.getMeta(FORMING_BAR_PURGE_META_KEY) !== null) return 0;
+  const removed = store.deleteByInstrumentPrefix(BITGET_KEY_PREFIX);
+  store.setMeta(FORMING_BAR_PURGE_META_KEY, 'done');
+  return removed;
 }
 
 /**
