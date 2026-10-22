@@ -78,9 +78,20 @@ export const BITGET_KEY_PREFIX = 'bitget:';
  * the passthrough against the endpoint's legal set.
  *
  * The endpoint returns the still-forming bar, and rows carry no completion
- * flag, so `earlier` keeps only completed bars (`timestamp + step <= anchor`)
- * before they can reach the cache — the same time-based rule the coin scan
- * applies downstream, and the retired Bitget source before this one.
+ * flag, so a bar is admitted only once it has CLOSED — judged by its close
+ * time (`barCloseTime`), never by the anchor.
+ *
+ * `earlier` keeps the bars strictly before the anchor INCLUDING the bar that
+ * CONTAINS the anchor (`open < anchor`) — the same rule OKX and Binance
+ * follow, and the one the review charts need: the entry's own bar is the bar
+ * the entry marker sits on. A bar is CLOSED when its close time has passed
+ * (`isClosedBar`), which is a question about the bar itself, NOT about the
+ * anchor: a review's anchor is a trade entry in the past, so the bar
+ * containing it closed long ago. Judging closure by the anchor instead
+ * (`open + step <= anchor`) dropped exactly that bar and left a one-bar hole
+ * at the entry — measured 10/22 on the user's own Bitget positions: the
+ * window jumped from the bar before the entry to the bar after it, so the
+ * entry marker had no candle under it and the series looked broken.
  */
 export class BitgetCandleSource implements CandleSource {
   constructor(
@@ -132,8 +143,9 @@ export class BitgetCandleSource implements CandleSource {
       .map((row) => toCandlestick(key, request.timeframe, row))
       .filter((candle) => {
         if (request.direction === 'earlier') {
-          // Completed bars only: the still-forming bar has openTime + step > anchor.
-          return candle.timestamp + step <= request.anchor;
+          // Bars strictly before the anchor, including the bar CONTAINING it
+          // (open < anchor), and only bars that have already closed.
+          return candle.timestamp < request.anchor && isClosedBar(candle.timestamp, request.timeframe);
         }
         return candle.timestamp > request.anchor;
       })
@@ -162,12 +174,18 @@ export class BitgetCandleSource implements CandleSource {
         // predates it answers empty, which used to strand the walk: no cached
         // bar means no `oldest` cursor, the loop below never runs, and
         // `/history-candles` — which serves every age measured (5m at 13
-        // months, 1D to ~2019) — was never asked. Seed from it instead: with
-        // `endTime = anchor` it returns exactly the bars that had already
-        // CLOSED by the anchor (it reads the window on close times, `/candles`
-        // on open times — see the TRAP note in the walk below), which is the
-        // completed-bars set the filter below keeps.
-        await this.requestEarlierPage(request, BITGET_HISTORY_CANDLES_PATH, request.anchor, perPage);
+        // months, 1D to ~2019) — was never asked. Seed from it instead.
+        //
+        // The seed's `endTime` must be `anchor + step`, NOT `anchor`: this
+        // endpoint reads the window on CLOSE times (`/candles` reads open
+        // times — see the TRAP note in the walk below), so `endTime = anchor`
+        // admits only bars that had already closed by the anchor and leaves out
+        // the bar CONTAINING the anchor — the very bar the entry marker needs.
+        // `anchor + step` is the containing bar's own close, so it is admitted
+        // (measured 10/22: APRUSDT 5m, entry 13:57:03Z — the seed at
+        // `endTime=anchor` returned bars ending at 13:50 and the 13:55 bar
+        // was missing, leaving a 10-minute hole under the entry marker).
+        await this.requestEarlierPage(request, BITGET_HISTORY_CANDLES_PATH, request.anchor + timeframeMs(request.timeframe), perPage);
       }
     }
     // Walk back until the contiguous run reaches `limit` or the exchange runs out.
@@ -223,7 +241,7 @@ export class BitgetCandleSource implements CandleSource {
     const key = storeKey(request.instrument);
     const candles = (Array.isArray(payload?.data) ? payload.data : [])
       .map((row) => toCandlestick(key, request.timeframe, row))
-      .filter((candle) => candle.timestamp + step <= request.anchor)
+      .filter((candle) => candle.timestamp < request.anchor && isClosedBar(candle.timestamp, request.timeframe))
       .sort((a, b) => a.timestamp - b.timestamp);
     this.store.save(candles);
     return candles.length;
@@ -414,6 +432,39 @@ function contiguousCandles(candles: Candlestick[], anchor: number, timeframe: Re
   }
 
   return direction === 'earlier' ? kept.reverse() : kept;
+}
+
+/**
+ * Close time of the bar that opens at `timestamp`, in ms.
+ *
+ * The nominal step is right for every timeframe except `1M`: a calendar month
+ * is 28–31 days, so `timestamp + 30d` is off by a day twice a year and would
+ * judge a bar closed while it still runs (or not yet closed after it ended).
+ * Bitget's month bar opens on the 1st at 00:00 Beijing (= the 16:00Z of the
+ * previous day), so its close is the NEXT 1st at 00:00 Beijing.
+ *
+ * The weekly bar is exactly 7 days (Bitget opens weeks on Monday 00:00
+ * Beijing) and the daily bar exactly 24 hours, so the nominal step holds for
+ * them.
+ */
+function barCloseTime(timestamp: number, timeframe: ReviewTimeframe): number {
+  if (timeframe !== '1M') return timestamp + timeframeMs(timeframe);
+  // Beijing wall clock, read through the UTC getters.
+  const beijing = new Date(timestamp + 8 * 60 * 60_000);
+  const close = Date.UTC(beijing.getUTCFullYear(), beijing.getUTCMonth() + 1, 1) - 8 * 60 * 60_000;
+  return close;
+}
+
+/**
+ * Whether the bar opening at `timestamp` has already closed.
+ *
+ * The judgement is about the BAR, never about the request's anchor: a review's
+ * anchor is a trade entry in the past, and the bar containing that entry
+ * closed long ago. Judging closure against the anchor instead dropped that
+ * very bar and left a one-bar hole at the entry (measured 10/22).
+ */
+function isClosedBar(timestamp: number, timeframe: ReviewTimeframe): boolean {
+  return barCloseTime(timestamp, timeframe) <= Date.now();
 }
 
 /**

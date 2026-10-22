@@ -267,14 +267,94 @@ describe('BitgetCandleSource', () => {
     // The newest bar is the one closing exactly at the anchor (closed-bar equality is inclusive).
     expect(candles.at(-1)!.timestamp).toBe(ANCHOR - STEP);
     expect(candles[0].timestamp).toBe(ANCHOR - 90 * STEP);
-    // First ask /candles, then seed history at endTime = anchor (its close-time reading = the completed bars).
+    // First ask /candles, then seed history at endTime = anchor + step.
+    // The history endpoint reads the window on CLOSE times, so the seed must
+    // reach the containing bar's own close to admit the bar that CONTAINS the
+    // anchor (10/22) — `endTime = anchor` left that bar out.
     expect(fetchJson).toHaveBeenCalledTimes(2);
     const [candlesUrl, historyUrl] = fetchJson.mock.calls.map((call) => call[0] as string);
     expect(candlesUrl).toContain('/candles');
     expect(candlesUrl).toContain(`endTime=${ANCHOR - 1}`);
     expect(historyUrl).toContain('history-candles');
-    expect(historyUrl).toContain(`endTime=${ANCHOR}`);
+    expect(historyUrl).toContain(`endTime=${ANCHOR + STEP}`);
     expect(historyUrl).not.toContain('startTime');
+  });
+
+  // 10/22 regression: an entry that is NOT on a bar boundary used to leave a
+  // one-bar hole right under the entry marker — the window jumped from the bar
+  // before the entry to the bar after it, so the entry had no candle of its own
+  // and the series looked broken ("开单标注之后的 K 线和开单位置的 K 线连不上").
+  //
+  // Two rules produce that hole, and both are asserted here:
+  //  1. `earlier` must keep the bar CONTAINING the anchor (`open < anchor`),
+  //     like OKX and Binance do — judging closure against the ANCHOR
+  //     (`open + step <= anchor`) dropped exactly that bar;
+  //  2. the `/history-candles` seed must reach that bar's own close
+  //     (`endTime = anchor + step`), because that endpoint reads the window on
+  //     CLOSE times.
+  it('keeps the bar containing an off-boundary entry, with no hole under the marker', async () => {
+    const store = new CandlestickStore(':memory:');
+    // An entry 3m54s into a bar — the shape that produced the hole.
+    const anchor = ANCHOR + 3 * 60_000 + 54_000;
+    const containing = ANCHOR; // the bar the entry sits in
+    // A faithful stand-in: `/candles` reads the window on OPEN times,
+    // `/history-candles` on CLOSE times, and `startTime` is exclusive.
+    const fetchJson = vi.fn(async (url: string) => {
+      const parsed = new URL(url);
+      const endTime = Number(parsed.searchParams.get('endTime'));
+      const startTime = parsed.searchParams.get('startTime');
+      const isHistory = parsed.pathname.endsWith('/history-candles');
+      const all = barRun(containing - 120 * STEP, 240).map((row) => Number(row[0]));
+      const eligible = all.filter((timestamp) => {
+        const bound = isHistory ? timestamp + STEP : timestamp;
+        return (startTime === null || bound > Number(startTime)) && bound <= endTime;
+      });
+      return candlesResponse(eligible.slice(-90).map((timestamp) => bitgetRow(timestamp, '1', '1')));
+    });
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'BTCUSDT', timeframe: '5m', anchor, direction: 'earlier', limit: 90, allowPaging: true,
+    });
+
+    // The bar the entry sits in is present …
+    expect(candles.map((candle) => candle.timestamp)).toContain(containing);
+    // … and the run is contiguous: no hole, no doubled step.
+    for (let index = 1; index < candles.length; index += 1) {
+      expect(candles[index].timestamp - candles[index - 1].timestamp).toBe(STEP);
+    }
+  });
+
+  // The `earlier` filter must judge closure by the BAR, not by the anchor: a
+  // review's anchor is a trade entry in the past, so the bar containing it
+  // closed long ago — but the old rule (`open + step <= anchor`) dropped it
+  // anyway, because the entry sits BEFORE the bar's close.
+  it('keeps a closed bar whose close is after the anchor', async () => {
+    const store = new CandlestickStore(':memory:');
+    const anchor = ANCHOR + 60_000; // 1 minute into the bar opening at ANCHOR
+    const fetchJson = vi.fn(async () => candlesResponse([bitgetRow(ANCHOR, '29500', '30')]));
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({ instrument: 'BTCUSDT', timeframe: '5m', anchor, direction: 'earlier', limit: 3 });
+
+    expect(candles.map((candle) => candle.timestamp)).toEqual([ANCHOR]);
+  });
+
+  // The still-forming bar must still be kept out of the cache: the judgement
+  // moved from the anchor to the bar's own close, but the bar's close is what
+  // decides it now.
+  it('still drops the still-forming bar before it can reach the cache', async () => {
+    const store = new CandlestickStore(':memory:');
+    const now = Date.now();
+    const forming = Math.floor(now / STEP) * STEP; // opens now → still forming
+    const fetchJson = vi.fn(async () => candlesResponse([bitgetRow(forming, '29500', '30')]));
+    const source = new BitgetCandleSource(store, fetchJson);
+
+    const candles = await source.getCandlesticks({
+      instrument: 'BTCUSDT', timeframe: '5m', anchor: forming + STEP, direction: 'earlier', limit: 3,
+    });
+
+    expect(candles).toEqual([]);
   });
 
   // Bitget's startTime is an EXCLUSIVE bound on the open time. The old first
