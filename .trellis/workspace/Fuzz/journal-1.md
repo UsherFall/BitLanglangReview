@@ -72,3 +72,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: 画线跨周期可见性回归修复 + 标线监控端到端验证
+<!-- trellis-session: v=2 fp=5e78a1c51a3d4535 -->
+
+**Date**: 2026-10-22
+**Task**: 画线跨周期可见性回归修复 + 标线监控端到端验证
+**Branch**: `master`
+
+### Summary
+
+选品画线 10/21 距线改造误把图表加载按周期过滤，恢复 instrument 级可见（useChartDrawings 单点：GET 去 timeframe、effect 去依赖），距线扫描测量粒度不变；spec 矛盾（component vs quality guidelines）已消除。另对运行中服务实测 scanWatch：用户当日所画 BNB/HYPE/DOT/PEPE/SYN 5 币全部进入监控名单且均 alert，跨所价位基准换算生效，CORE/EPIC 因 Bitget 无该合约进 missingInstruments。594 测试全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5952104` | fix(drawing): 恢复画线跨周期可见，距线测量粒度不变 |
+
+### Status
+
+[OK] **Completed**

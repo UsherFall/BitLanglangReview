@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
+- **Total Sessions**: 4
 - **Last Active**: 2026-10-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~74 | Active |
+| `journal-1.md` | ~96 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-10-22 | 画线跨周期可见性回归修复 + 标线监控端到端验证 | `5952104` | `master` |
 | 3 | 2026-10-22 | 修复 Bitget later K线未收盘bar进入缓存 | `f565490` | `master` |
 | 2 | 2026-10-21 | 选品正名「主升浪候选」+ 新增「标线监控」视图 | `d0541d7`, `2b8570b` | `master` |
 | 1 | 2026-10-21 | 修复 Bitget K线翻页两处死角（老锚点空图 / later 首根丢失） | `f2aa379` | `master` |
