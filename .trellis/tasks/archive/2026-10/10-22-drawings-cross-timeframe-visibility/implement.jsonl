@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "画线 instrument 级跨周期可见的权威规范表述，修复须回归它"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "useChartDrawings hook 契约与 10/21 per-timeframe 表述——本任务要改的就是这条与它的矛盾"}
