@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "验证过滤写入前生效、翻页终止路径与 spec 记录一致"}

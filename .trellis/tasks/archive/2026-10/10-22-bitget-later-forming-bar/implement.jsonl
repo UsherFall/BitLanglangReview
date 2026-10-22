@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/server/market-data.md", "reason": "closed-bar 不变量与 Bitget 端点/翻页契约是本次修复的权威规范：later 也要写入前丢弃未收盘 bar"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "Candlestick Store 缓存契约与 data/review.sqlite 命名空间规则，一次性清理须遵守"}
