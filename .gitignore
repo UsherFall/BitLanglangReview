@@ -14,6 +14,11 @@ coverage/
 # Throwaway research probes / fetched-candle caches (also excluded from vite watch).
 .scratch/
 
+# Trellis task research raw data (regenerable: candle dumps, rendered previews).
+# Keep scripts + findings.md in git; keep bulk data out.
+.trellis/tasks/**/research/pool/
+.trellis/tasks/**/research/out/
+
 # Convergence labeling workbench outputs (snapshots, candidate lists, pages, labels).
 tools/labeling/out/
 
