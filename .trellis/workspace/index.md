@@ -27,7 +27,9 @@ workspace/
 
 | Developer | Last Active | Sessions | Active File |
 |-----------|-------------|----------|-------------|
-| (none yet) | - | - | - |
+| Fuzz | 2026-10-22 | 4 | `journal-1.md` |
+| UsherFall | 2026-10-18 | 30 | `journal-1.md` |
+| fupan | 2026-10-12 | 21 | `journal-1.md` |
 
 ---
 
