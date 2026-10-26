@@ -1332,3 +1332,18 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - 无；新研究数据默认进 research/pool|out 或 .scratch
+
+## 2026-10-26 · 选品画线板隔离（10-26-scan-drawing-boards）
+
+**问题**：选品抽屉重开看不到之前画的线；距线列数字读起来像「算法扫出来的」。
+
+**根因**：画线按画图图表的 instrument 名存储（复盘图 OKX 名 / 抽屉跟扫描源名），图表可见性是**精确名匹配**，而扫描距线是 **canonical 匹配** —— 两个池在视觉上因命名「意外隔离」，但测量端合并了，数字与线对不上号。
+
+**决策**（用户对齐）：
+- 复盘线与扫描线**分板**（board = scan/review），扫描只看抽屉线 —— 不是统一池。
+- 「算法不定线」分工（10/21）再确认成立；算法参考线留作未来任务。
+- 「已画」徽标放币列名称旁（hover 报线数+周期）；休市测不出的画线行靠徽标与「没画过」的 — 区分。
+
+**实现**：`ChartDrawing.board` 必填 + 全链路打标（抽屉 scan / 复盘·回溯 review）；store 迁移沿用整表重建模式，R4 启发式归板（`trade_id IS NULL AND created_at >= '2026-10-21' AND native 命名` → scan，对真实库精确命中 JUPUSDT/ASTERUSDT）；`listDrawings` 板内 canonical；`ScanRow.drawnLineCount/drawnTimeframes`；`CoinScanResults` 币列徽标。
+
+**验证**：vitest 604 全绿 + tsc 无错；真实库副本迁移验证（scan 板恰好两条抽屉线）；dev server 冒烟（GET/POST 缺 board → 400；scan 板取到抽屉线；review 板 canonical 命中复盘线）。子代理 spawn 在 WSL 下 ENOENT（pi 是 Windows 侧安装），本任务改为 inline 实现。迁移前备份：`data/review.sqlite.bak-1026`（确认无误后可删）。
