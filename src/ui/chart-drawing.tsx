@@ -2,7 +2,7 @@ import { Eraser, Magnet, Minus, MoveUpRight } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import type { Candlestick } from '../domain/candlestick';
-import type { ChartDrawing, ChartDrawingKind, ChartPoint, SaveChartDrawingInput } from '../domain/drawing';
+import type { ChartDrawing, ChartDrawingKind, ChartPoint, DrawingBoard, SaveChartDrawingInput } from '../domain/drawing';
 import type { ReviewTimeframe } from '../domain/trade';
 import { nextMagnetMode, snapDrawingPoint, type MagnetMode } from './drawing-snap';
 import { timeframeTimeForPoint } from './chart-time';
@@ -59,6 +59,14 @@ export const MAGNET_MODE_HINTS: Record<MagnetMode, string> = { off: '磁吸：�
 export type ChartDrawingsOptions = {
   /** The instrument the drawings belong to (the chart's own symbol). */
   instrument: string;
+  /**
+   * The board this chart draws on / loads from (10/26): `'scan'` for the 选品
+   * level drawer, `'review'` for the trade-review and free-replay charts.
+   * Visibility and the 距线 scan's measurement are board-scoped — a chart
+   * never loads the other board's lines. Stamping is the CHART's job: the
+   * hook refuses to guess which workflow it sits in.
+   */
+  board: DrawingBoard;
   /** The timeframe the drawings belong to. Levels are per (instrument, timeframe). */
   timeframe: ReviewTimeframe;
   /** The trade the drawings belong to; `null` for a free-standing chart. */
@@ -124,7 +132,7 @@ export type ChartDrawings = {
  * drawings, the active tool, the drag state and the persistence.
  */
 export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
-  const { instrument, timeframe, tradeId = null, chartApiRef, seriesRef, candles } = options;
+  const { instrument, board, timeframe, tradeId = null, chartApiRef, seriesRef, candles } = options;
   const enabled = options.enabled ?? true;
   const overlayRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DrawingDrag | null>(null);
@@ -149,16 +157,19 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     return Array.isArray(input) ? input : (input.current ?? []);
   }
 
-  // Load the instrument's drawings. VISIBILITY is instrument-level (10/22
-  // regression fix, restoring the pre-10/21 behaviour that
-  // `quality-guidelines.md` documents): a level drawn on one timeframe shows
-  // on every timeframe of the same instrument, so the fetch does NOT filter
-  // by `timeframe`. The `timeframe` a drawing carries is the 距线 scan's
-  // MEASUREMENT granularity (a 5m line is measured on 5m candles), stamped at
-  // draw time by `saveDrawing` — it decides nothing about which chart shows
-  // the line. `timeframe` is therefore not a dependency either: switching
-  // timeframes keeps the same set (and keeps the selection/draft intact — a
-  // still-visible line may stay selected across the switch).
+  // Load the instrument's drawings. VISIBILITY is instrument-level WITHIN THE
+  // BOARD (10/22 regression fix restored the cross-timeframe rule; 10/26 added
+  // the board scope): a level drawn on one timeframe shows on every timeframe
+  // of the same instrument, so the fetch does NOT filter by `timeframe` — but
+  // it DOES filter by `board`, or the review charts' levels would leak into
+  // the 选品 drawer (and, through the scan's canonical matching, into the 距线
+  // column as numbers whose lines nobody could see). The `timeframe` a
+  // drawing carries is the 距线 scan's MEASUREMENT granularity (a 5m line is
+  // measured on 5m candles), stamped at draw time by `saveDrawing` — it
+  // decides nothing about which chart shows the line. `timeframe` is
+  // therefore not a dependency either: switching timeframes keeps the same
+  // set (and keeps the selection/draft intact — a still-visible line may
+  // stay selected across the switch).
   useEffect(() => {
     setSelectedDrawingId('');
     setDraftPoint(null);
@@ -168,7 +179,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
       return;
     }
     let cancelled = false;
-    fetch(`/api/drawings?${new URLSearchParams({ instrument })}`)
+    fetch(`/api/drawings?${new URLSearchParams({ instrument, board })}`)
       .then((response) => response.json())
       .then(({ drawings: next }: { drawings?: ChartDrawing[] }) => {
         if (!cancelled) setDrawings(next ?? []);
@@ -179,7 +190,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     return () => {
       cancelled = true;
     };
-  }, [instrument, enabled]);
+  }, [instrument, board, enabled]);
 
   /**
    * The close of the last COMPLETED bar — the price basis of a new line.
@@ -230,7 +241,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     const point = pointFromMouse(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
     if (!point) return;
     if (drawingTool === 'horizontal') {
-      void saveDrawing({ tradeId, instrument, timeframe, kind: 'horizontal', points: [point], ...referenceBar() });
+      void saveDrawing({ tradeId, instrument, board, timeframe, kind: 'horizontal', points: [point], ...referenceBar() });
       return;
     }
     if (!draftPoint) {
@@ -238,7 +249,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
       setDraftEndPoint(point);
       return;
     }
-    void saveDrawing({ tradeId, instrument, timeframe, kind: drawingTool, points: [draftPoint, point], ...referenceBar() });
+    void saveDrawing({ tradeId, instrument, board, timeframe, kind: drawingTool, points: [draftPoint, point], ...referenceBar() });
     setDraftPoint(null);
     setDraftEndPoint(null);
   }
@@ -370,7 +381,7 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint
   return (
     <>
       {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} onPointerDown={onPointerDown} />)}
-      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', timeframe, kind: draftKind ?? 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
+      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', board: 'review', timeframe, kind: draftKind ?? 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
     </>
   );
 }

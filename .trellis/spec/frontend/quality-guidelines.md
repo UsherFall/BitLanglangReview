@@ -17,7 +17,7 @@ When changing trade review charts, verify:
 
 - Entry and exit markers are placed on the containing candlestick for the active Review Timeframe.
 - On-demand loading can expand both earlier and later without changing the Chart Navigation Anchor.
-- Drawings remain instrument-level and appear across trades/timeframes for the same Instrument.
+- Drawings remain instrument-level **within their board** (10/26: `scan` = 选品抽屉, `review` = 复盘/回溯) and appear across trades/timeframes for the same Instrument on that board; the two boards never show each other's lines, and only the `scan` board feeds the 距线 column.
 
 When changing Free Replay, verify:
 

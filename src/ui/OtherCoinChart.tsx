@@ -5,6 +5,7 @@ import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { canonicalInstrument } from '../domain/instrument-symbol';
+import type { DrawingBoard } from '../domain/drawing';
 import { useChartDrawings } from './chart-drawing';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { formatChartPrice } from './chart-price';
@@ -22,7 +23,7 @@ type InstrumentResponse = {
 
 type LoadDirection = 'earlier' | 'later';
 
-export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', initialInstrument, drawable = false, onClose }: {
+export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', initialInstrument, drawable = false, board = 'review', onClose }: {
   entryTime: string;
   timeframe: ReviewTimeframe;
   /**
@@ -59,6 +60,13 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
    * must not grow a second, separate set of levels.
    */
   drawable?: boolean;
+  /**
+   * The drawing board this panel loads/saves on (10/26). The 选品 level
+   * drawer passes `'scan'` so its levels feed the 距线 scan; every other
+   * usage is a review-side comparison and stays on the default `'review'`
+   * (irrelevant while `drawable` is false — a read-only panel loads nothing).
+   */
+  board?: DrawingBoard;
   onClose: () => void;
 }) {
   const isReplay = cursorTime != null;
@@ -151,6 +159,7 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
    */
   const drawings = useChartDrawings({
     instrument,
+    board,
     timeframe,
     tradeId: null,
     chartApiRef,

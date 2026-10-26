@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "距线测量路径（loadLinesByTimeframe / measureLevelAlert / closestRatio）、shrink 与 watch 行入选口径的权威约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "useChartDrawings hook 契约与画线可见性规则（10/22 回归修复记录）——本次要改的核心"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "/api/drawings API 约定（要加 board 参数）"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "ChartDrawing 领域模型与 instrument-level 语义（要加 board 字段）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "画线跨交易/周期可见的质量红线（要改写为板级可见）"}

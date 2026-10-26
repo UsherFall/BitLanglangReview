@@ -249,6 +249,7 @@ describe('CoinScanService (coarse screen → 距线)', () => {
     const store = new DrawingStore(':memory:');
     store.saveDrawing({
       tradeId: null,
+      board: 'scan',
       instrument: BTC,
       timeframe: '5m',
       kind: 'horizontal',
@@ -407,6 +408,7 @@ describe('CoinScanService (coarse screen → 距线)', () => {
     const store = new DrawingStore(':memory:');
     store.saveDrawing({
       tradeId: null,
+      board: 'scan',
       instrument: BTC,
       timeframe: '4H',
       kind: 'horizontal',
@@ -698,6 +700,7 @@ describe('CoinScanService · 距线的匹配与价位换算（10/21）', () => {
     const store = new DrawingStore(':memory:');
     store.saveDrawing({
       tradeId: null,
+      board: 'scan',
       instrument: 'BTC-USDT-SWAP',
       timeframe: '5m',
       kind: 'horizontal',
@@ -727,6 +730,7 @@ describe('CoinScanService · 距线的匹配与价位换算（10/21）', () => {
     const anchor = 1_700_000_000_000;
     store.saveDrawing({
       tradeId: null,
+      board: 'scan',
       instrument: BTC,
       timeframe: '1D',
       kind: 'horizontal',
@@ -752,6 +756,7 @@ describe('CoinScanService · 距线的匹配与价位换算（10/21）', () => {
     const store = new DrawingStore(':memory:');
     store.saveDrawing({
       tradeId: null,
+      board: 'scan',
       instrument: BTC,
       timeframe: '1D',
       kind: 'horizontal',
@@ -772,12 +777,91 @@ describe('CoinScanService · 距线的匹配与价位换算（10/21）', () => {
   });
 });
 
+describe('CoinScanService · 画线板隔离（10/26）', () => {
+  it('复盘板的线不进距线测量：行仍在（粗筛通过），距线为 null，drawn 字段为 0', async () => {
+    // 板隔离前：复盘图画的线被扫描合并测量，距线列凭空有数、抽屉里却看不见线，
+    // 读起来像「算法扫出来的」。现在扫描只认 scan 板。
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: 'trade-1',
+      board: 'review',
+      instrument: BTC,
+      timeframe: '5m',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({ [BTC]: { '5m': 'strong', '1D': 'strong' } });
+    const result = await new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    ).scanShrink(params);
+
+    const btc = result.scanned.find((row) => row.instrument === BTC);
+    expect(btc).toBeDefined();
+    expect(btc?.levelAlerts['5m']).toBeNull();
+    expect(btc?.levelAlerts['1D']).toBeNull();
+    expect(btc?.drawnLineCount).toBe(0);
+    expect(btc?.drawnTimeframes).toEqual([]);
+    store.close();
+  });
+
+  it('scan 板的线被测量，行带 drawn 字段（徽标数据源，与测量成败无关）', async () => {
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: null,
+      board: 'scan',
+      instrument: BTC,
+      timeframe: '5m',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({ [BTC]: { '5m': 'strong', '1D': 'strong' } });
+    const result = await new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    ).scanShrink(params);
+
+    const btc = result.scanned.find((row) => row.instrument === BTC);
+    expect(btc?.levelAlerts['5m']?.distancePct).toBeCloseTo(0, 6);
+    expect(btc?.drawnLineCount).toBe(1);
+    expect(btc?.drawnTimeframes).toEqual(['5m']);
+    store.close();
+  });
+
+  it('标线监控的名单也只认 scan 板：复盘板的线不进 watch', async () => {
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: 'trade-1',
+      board: 'review',
+      instrument: BTC,
+      timeframe: '1D',
+      kind: 'horizontal',
+      points: [{ time: 1, price: 100 }],
+    });
+    const source = poolSource({ [BTC]: { '1D': 'flat' } });
+    const watch = await new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    ).scanWatch({ method: 'watch' });
+
+    expect(watch.scanned).toEqual([]);
+    expect(watch.missingInstruments ?? []).toEqual([]);
+    store.close();
+  });
+});
+
 describe('CoinScanService · 标线监控 (scanWatch, 10/21)', () => {
   /** A fresh in-memory store carrying one horizontal line per given instrument. */
   function storeWithLines(entries: ReadonlyArray<{ instrument: string; timeframe: ReviewTimeframe; price: number }>): DrawingStore {
     const store = new DrawingStore(':memory:');
     for (const { instrument, timeframe, price } of entries) {
-      store.saveDrawing({ tradeId: null, instrument, timeframe, kind: 'horizontal', points: [{ time: 1, price }] });
+      store.saveDrawing({ tradeId: null, board: 'scan', instrument, timeframe, kind: 'horizontal', points: [{ time: 1, price }] });
     }
     return store;
   }

@@ -12,7 +12,7 @@ Common paths in this app:
 - Review Editor draft -> `POST /api/reviews` -> `ReviewStore.saveReview` -> `TradeReview` -> local queue update -> Review Progress.
 - Chart navigation -> visible range threshold -> `/api/candles` -> `CandlestickService` -> `CandlestickStore` -> merged candles -> chart `setData` -> navigation anchor restoration.
 - Free Replay start input -> exact `progressTime` -> no-future display cursor -> `/api/candles` -> hidden future candles -> reveal/rewind progress helpers.
-- Drawing overlay pointer event -> `SaveChartDrawingInput` -> `/api/drawings` -> `DrawingStore` -> instrument-level redraw.
+- Drawing overlay pointer event -> `SaveChartDrawingInput` (with `board`) -> `/api/drawings` (board required) -> `DrawingStore` -> board-scoped, canonical-instrument redraw. Boards: `scan` (选品抽屉, feeds 距线) vs `review` (复盘/回溯图) — 10/26.
 
 ## Boundary Questions
 
@@ -22,7 +22,7 @@ Ask these before editing:
 - Is the data persisted in SQLite, temporary browser state, or the read-only Source Workbook?
 - Is the timestamp in milliseconds, seconds, Shanghai ISO string, or a local input string?
 - Does the change affect both Trade Review and Free Replay?
-- Should the behavior be instrument-level, trade-level, timeframe-level, or session-only?
+- Should the behavior be instrument-level, trade-level, timeframe-level, or session-only? And for drawings: which BOARD does it belong to (`scan` vs `review`)?
 - Which focused test already describes the rule?
 
 ## Time And Candlestick Rules

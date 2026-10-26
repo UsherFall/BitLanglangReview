@@ -29,6 +29,8 @@ function scanRow(instrument = 'AAAUSDT'): ScanRow {
     quoteVolume24h: 2e9,
     levelAlerts,
     alertTimeframes: [scanTimeframes[0]],
+    drawnLineCount: 1,
+    drawnTimeframes: [scanTimeframes[0]],
     // Row inclusion IS the 1D coarse screen, so every row carries its measures and
     // this scan's pool-relative cuts.
     coarse: { pass: true, rangePct: 0.459, netPct: 0.0948, posRange: 0.5, rangePctThreshold: 0.41, netPctThreshold: 0.06 },
@@ -83,7 +85,8 @@ function renderResults(overrides: Partial<CoinScanResultsProps> = {}) {
 function renderedInstruments(container: HTMLElement): string[] {
   return Array.from(
     container.querySelectorAll('.coin-scan-table tbody > tr:not(.coin-scan-detail-row) > td:first-child'),
-  ).map((cell) => cell.textContent ?? '');
+    // The first text node is the symbol; the 「已画」 badge (10/26) is a sibling span.
+  ).map((cell) => cell.childNodes[0]?.textContent ?? '');
 }
 
 describe('CoinScanResults', () => {
@@ -168,6 +171,23 @@ describe('CoinScanResults', () => {
     expect(cell?.textContent).toContain('5m');
     expect(cell?.textContent).toContain('+1.20%');
     expect(cell?.textContent).toContain('贴近');
+  });
+
+  it('画过线的行在币列带「已画」徽标，hover 报线数与周期（10/26）', () => {
+    const { container } = renderResults();
+
+    const badge = container.querySelector('.coin-scan-drawn');
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe('已画');
+    expect(badge?.getAttribute('title')).toBe('已手画 1 条线（5m）');
+  });
+
+  it('没画线的行不带徽标 —— 「—」就是「没画过」', () => {
+    const row: ScanRow = { ...scanRow('BBBUSDT'), drawnLineCount: 0, drawnTimeframes: [] };
+    const result = { ...scanResponse(), scanned: [row] };
+    const { container } = renderResults({ result });
+
+    expect(container.querySelector('.coin-scan-drawn')).toBeNull();
   });
 
   it('offers a 画线 button that asks for that instrument', () => {

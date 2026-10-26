@@ -894,6 +894,8 @@ export function App() {
                     candleSource={scanSource}
                     initialInstrument={drawTarget}
                     drawable
+                    // 扫描板的线：只有这里画的线进「距线」测量（10/26 板隔离）。
+                    board="scan"
                     onClose={() => setDrawTarget(null)}
                   />
                 </div>
@@ -1218,6 +1220,8 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
   // chart and the 选品 level drawer.
   const drawings = useChartDrawings({
     instrument: replay.instrument,
+    // 回溯复盘是复盘工作流 —— 它的线不进扫描的距线测量（10/26 板隔离）。
+    board: 'review',
     timeframe,
     tradeId: null,
     chartApiRef,
@@ -1549,6 +1553,8 @@ function TradeChart({ trade, timeframe, candleSource, tradesEndpoint }: { trade:
   // other reasons), so the hook is handed the ref.
   const drawings = useChartDrawings({
     instrument: trade.instrument,
+    // 交割单复盘是复盘工作流 —— 它的线不进扫描的距线测量（10/26 板隔离）。
+    board: 'review',
     timeframe,
     tradeId: trade.id,
     chartApiRef,

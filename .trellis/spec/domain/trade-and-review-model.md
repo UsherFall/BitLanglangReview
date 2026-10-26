@@ -78,7 +78,7 @@ reviewStore.saveReview({ tradeId, tags, note, starred: currentReview?.starred ??
 
 `src/domain/candlestick.ts` keeps market candles as millisecond timestamps with OHLCV fields and a `ReviewTimeframe`. Chart code converts to seconds only at the `lightweight-charts` boundary.
 
-`src/domain/drawing.ts` defines instrument-level Chart Drawings. Drawings have `horizontal`, `ray`, or `segment` kind and price/time points. A drawing may be created while reviewing a trade, but it is displayed by Instrument across trades and Review Timeframes.
+`src/domain/drawing.ts` defines instrument-level Chart Drawings. Drawings have `horizontal`, `ray`, or `segment` kind and price/time points. Every drawing carries a **`board`** (`'scan' | 'review'`, 10/26): the 选品 level drawer stamps `scan`, the review/replay charts stamp `review`. A drawing is displayed by Instrument (canonical-matched) across trades and Review Timeframes **within its board only** — the boards never show each other's lines, and the 选品 scan measures only the `scan` board (see `server/coin-scan.md`). The store migration defaults legacy rows to `'review'` and re-homes the post-10/21 native-symbol no-trade rows (the level drawer's output) to `'scan'`.
 
 The toolbar offers `horizontal` and `ray` only. `ray` is the two-point tool: `points[0]` is the endpoint, `points[1]` the direction point, and the drawn line runs from the endpoint past the direction point to the viewport edge. `segment` is no longer creatable — it stays in the union purely so drawings saved before the swap keep rendering as finite two-point lines.
 

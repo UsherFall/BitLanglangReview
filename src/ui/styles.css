@@ -1764,6 +1764,21 @@ label,
   color: #8b949e;
 }
 
+/* 「已画」徽标(10/26):币列名称旁,标记这一行有 scan 板手画线 —— 距线列数字的出处。
+   小字号浅色描边胶囊,不抢距线列的视觉优先级。 */
+.coin-scan-drawn {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid #38bdf8;
+  border-radius: 8px;
+  color: #38bdf8;
+  font-size: 10px;
+  line-height: 1.6;
+  vertical-align: 1px;
+  cursor: default;
+}
+
 /* 距线列:每个周期一行(周期 / 距线% / 状态)。 */
 .coin-scan-level {
   display: flex;

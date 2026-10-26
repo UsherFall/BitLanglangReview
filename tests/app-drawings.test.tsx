@@ -38,7 +38,7 @@ vi.mock('lightweight-charts', () => ({
   createSeriesMarkers: () => ({ setMarkers: vi.fn() }),
 }));
 
-type PostedDrawing = { kind: string; points: { time: number; price: number }[] };
+type PostedDrawing = { kind: string; board: string; points: { time: number; price: number }[] };
 
 const posted: PostedDrawing[] = [];
 
@@ -119,6 +119,8 @@ describe('App drawings', () => {
     await waitFor(() => expect(posted).toHaveLength(1));
     const drawing = posted[0];
     expect(drawing.kind).toBe('ray');
+    // 复盘图画的线打 review 板（10/26 板隔离）——扫描的距线不会测到它。
+    expect(drawing.board).toBe('review');
     expect(drawing.points).toHaveLength(2);
     // Snapped bar times once more: the first click sits in the 10:00 bar
     // (`points[0]`, the endpoint) and the second in the 10:05 bar
@@ -198,12 +200,14 @@ describe('App drawings', () => {
     // Both timeframes' lines render together on the 5m chart.
     await waitFor(() => expect(document.querySelectorAll('line.drawing-shape')).toHaveLength(2));
 
-    // The load request is instrument-level: no `timeframe` query param.
+    // The load request is instrument-level WITHIN THE BOARD: no `timeframe`
+    // query param, and the review chart's `board=review` scope (10/26).
     const loadUrl = fetchMock.mock.calls
       .map(([url, init]) => ({ url: String(url), init }))
       .find(({ url, init }) => url.startsWith('/api/drawings') && init === undefined);
     expect(loadUrl).toBeDefined();
     expect(loadUrl!.url).not.toContain('timeframe=');
+    expect(loadUrl!.url).toContain('board=review');
 
     // Switching timeframes does not reload the set (it is the same set —
     // `timeframe` left the effect deps) and does not drop a single line.
@@ -277,6 +281,7 @@ function makeDrawing() {
     id: 'd1',
     tradeId: 't1',
     instrument: 'BTC-USDT-SWAP',
+    board: 'review',
     timeframe: '1D',
     kind: 'horizontal',
     points: [{ time: 1716256800, price: 100 }],

@@ -30,6 +30,7 @@ import { CandlestickService } from './candlestick-service';
 import { CoinScanService } from './coin-scan-service';
 import { CandlestickStore } from './candlestick-store';
 import { DrawingStore } from './drawing-store';
+import { isDrawingBoard } from '../domain/drawing';
 import { freeReplayInstrumentPayload } from './free-replay-instruments';
 import { FreeReplaySessionStore, type SaveFreeReplaySessionInput } from './free-replay-session-store';
 import { MarketHeatService } from './market-heat-service';
@@ -271,6 +272,13 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           if (!instrument) {
             return send(res, 400, { error: 'instrument is required' });
           }
+          // board is required (10/26): a chart loads only its own board's
+          // lines — the scan drawer must never see review levels and vice
+          // versa. Without it the caller's board is ambiguous, so ask again.
+          const board = url.searchParams.get('board');
+          if (!isDrawingBoard(board)) {
+            return send(res, 400, { error: 'board must be one of: scan, review' });
+          }
           // The timeframe filter is optional and now unused by the UI (10/22):
           // chart visibility is instrument-level — a level drawn on one
           // timeframe shows on every timeframe, so the charts ask for the
@@ -280,12 +288,15 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           // MEASUREMENT granularity, not a visibility rule.
           const timeframe = url.searchParams.get('timeframe');
           const drawings = timeframe
-            ? drawingStore.listDrawings({ instrument, timeframe })
-            : drawingStore.listDrawings({ instrument });
+            ? drawingStore.listDrawings({ instrument, board, timeframe })
+            : drawingStore.listDrawings({ instrument, board });
           return send(res, 200, { drawings });
         }
         if (req.method === 'POST') {
           const parsed = JSON.parse(await readBody(req) || '{}');
+          if (!isDrawingBoard(parsed?.board)) {
+            return send(res, 400, { error: 'board must be one of: scan, review' });
+          }
           return send(res, 200, drawingStore.saveDrawing(parsed));
         }
         if (req.method === 'DELETE') {

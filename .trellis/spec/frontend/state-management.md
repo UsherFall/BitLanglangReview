@@ -24,7 +24,7 @@ Server data is fetched through these routes from `src/server/app-plugin.ts`:
 - `/api/bitget/config` (`GET`/`POST`/`DELETE`) manages the locally stored read-only key; `POST /api/bitget/sync` fetches closed position history. Both live behind `BitgetControlBar` in the Bitget module.
 - `/api/reviews` saves a `TradeReview` and answers `{ review, tags, tagCounts }`, scoped to the `module` sent in the request body. `App.handleReviewSaved` replaces its tag list/counts from that payload (tag counts are module-scoped and recomputed server-side, so a tag that just lost its last trade disappears); `ReviewEditor` and `App.toggleStarred` must both send `module`.
 - `/api/candles` returns cached/fetched candlesticks for initial, earlier, or later modes.
-- `/api/drawings` lists, saves, and deletes instrument-level chart drawings.
+- `/api/drawings` lists, saves, and deletes chart drawings, scoped by **board** (10/26): GET/POST require `board` = `scan` (选品抽屉) | `review` (复盘/回溯图), missing/illegal → 400. Listing matches the instrument CANONICALLY inside the board; the 距线 scan measures the `scan` board only.
 - `/api/free-replay/instruments` returns OKX SWAP instruments.
 - `/api/free-replay/sessions` lists saved Free Replay sessions; PUT upserts one on `(instrument, startTime)`, DELETE removes one.
 

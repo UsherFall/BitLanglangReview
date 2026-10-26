@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/server/coin-scan.md", "reason": "核对距线只测 scan 板、shrink/watch parity、行字段契约"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核对 hook 契约与板级可见性规则落实"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对画线跨层数据流（overlay → API → store → 重绘）每一层都带 board"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核对可见性质量红线（板级）无回归"}

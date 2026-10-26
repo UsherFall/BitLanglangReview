@@ -291,6 +291,7 @@ export class CoinScanService {
         quoteVolume24h: ticker.quoteVolume24h,
         levelAlerts,
         alertTimeframes,
+        ...drawnLineSummary(linesByTimeframe, ticker.instrument),
         coarse: {
           pass: true,
           rangePct: measure.rangePct,
@@ -446,6 +447,7 @@ export class CoinScanService {
         quoteVolume24h: ticker.quoteVolume24h,
         levelAlerts,
         alertTimeframes: scanTimeframes.filter((timeframe) => levelAlerts[timeframe]?.state === 'alert'),
+        ...drawnLineSummary(linesByTimeframe, ticker.instrument),
         // No `coarse`: the watch view has no screen verdict — the row criterion
         // is "the user drew a line", not "the daily box passed", so there is
         // nothing to echo. The results table renders the structure column as `—`.
@@ -570,7 +572,11 @@ export class CoinScanService {
     const linesByTimeframe = new Map<ReviewTimeframe, Map<string, LevelLine[]>>();
     if (!this.drawingStore) return linesByTimeframe;
     for (const timeframe of scanTimeframes) {
-      const drawings = this.drawingStore.listDrawingsByTimeframe(timeframe);
+      // 'scan' board only (10/26): the 距线 measures the lines drawn in the
+      // 选品 level drawer. Review / free-replay lines are a separate board
+      // and must not leak into the reading — they did before the split, and
+      // an invisible line's distance read as algorithm-made.
+      const drawings = this.drawingStore.listDrawingsByTimeframe(timeframe, 'scan');
       if (!drawings.length) continue;
       const byInstrument = new Map<string, LevelLine[]>();
       for (const drawing of drawings) {
@@ -655,6 +661,30 @@ function measureLevelAlert(
   for (const note of notes) scaleNotes.add(`${instrument} ${timeframe}: ${note}`);
   const at = candles.at(-1)?.timestamp ?? anchor;
   return levelAlert(candles, scaled, at, scaleStartIndex(candles, scaled));
+}
+
+/**
+ * A row's scan-board drawn-line summary (10/26) — the 距线 column's
+ * provenance, read by the results table's 「已画」 badge. It is derived from
+ * the drawn-line set ITSELF, not from the alerts: a marked row whose
+ * measurement came back null (closed market, failed fetch) still reports its
+ * lines, so "drawn but currently unmeasurable" stays distinguishable from
+ * "never marked".
+ */
+function drawnLineSummary(
+  linesByTimeframe: Map<ReviewTimeframe, Map<string, LevelLine[]>>,
+  instrument: string,
+): { drawnLineCount: number; drawnTimeframes: ReviewTimeframe[] } {
+  const canonical = canonicalInstrument(instrument);
+  let drawnLineCount = 0;
+  const drawnTimeframes: ReviewTimeframe[] = [];
+  for (const timeframe of scanTimeframes) {
+    const lines = linesByTimeframe.get(timeframe)?.get(canonical);
+    if (!lines?.length) continue;
+    drawnLineCount += lines.length;
+    drawnTimeframes.push(timeframe);
+  }
+  return { drawnLineCount, drawnTimeframes };
 }
 
 /**

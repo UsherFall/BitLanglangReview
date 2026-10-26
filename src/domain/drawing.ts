@@ -8,6 +8,27 @@ import type { ReviewTimeframe } from './trade';
  */
 export type ChartDrawingKind = 'horizontal' | 'segment' | 'ray';
 
+/**
+ * The board a drawing belongs to (10/26): which workflow drew it.
+ *
+ * - `'scan'`   — the 选品 level drawer; the 距线 scan measures ONLY these.
+ * - `'review'` — the trade-review and free-replay charts.
+ *
+ * Visibility and measurement are board-scoped: a chart loads only its own
+ * board's lines (canonical-instrument matched WITHIN the board), so a review
+ * level never leaks into the scan's 距线 column and vice versa. The board is
+ * orthogonal to the instrument's naming — a line keeps the native symbol of
+ * the chart it was drawn on; `canonicalInstrument` bridges names inside one
+ * board (a scan-source switch must not hide the coin's drawer lines).
+ */
+export type DrawingBoard = 'scan' | 'review';
+
+export const DRAWING_BOARDS: DrawingBoard[] = ['scan', 'review'];
+
+export function isDrawingBoard(value: unknown): value is DrawingBoard {
+  return value === 'scan' || value === 'review';
+}
+
 export type ChartPoint = {
   time: number;
   price: number;
@@ -19,6 +40,8 @@ export type ChartDrawing = {
   instrument: string;
   timeframe: ReviewTimeframe;
   kind: ChartDrawingKind;
+  /** See `DrawingBoard`. Stamped by the chart at save time; never edited. */
+  board: DrawingBoard;
   /**
    * The points of a drawing carry **seconds** (`time`), not milliseconds:
    * `pointFromClient` reads the x coordinate with lightweight-charts'

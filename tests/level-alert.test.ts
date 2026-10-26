@@ -158,6 +158,7 @@ describe('linesFromDrawings', () => {
     {
       id: '1',
       tradeId: null,
+      board: 'scan',
       instrument: 'BTCUSDT',
       timeframe: '1D',
       kind: 'horizontal',
@@ -168,6 +169,7 @@ describe('linesFromDrawings', () => {
     {
       id: '2',
       tradeId: null,
+      board: 'scan',
       instrument: 'BTCUSDT',
       timeframe: '1D',
       kind: 'ray',
@@ -181,6 +183,7 @@ describe('linesFromDrawings', () => {
     {
       id: '3',
       tradeId: null,
+      board: 'scan',
       instrument: 'BTCUSDT',
       timeframe: '5m',
       kind: 'horizontal',
@@ -191,6 +194,7 @@ describe('linesFromDrawings', () => {
     {
       id: '4',
       tradeId: null,
+      board: 'scan',
       instrument: 'ETHUSDT',
       timeframe: '1D',
       kind: 'horizontal',
@@ -249,6 +253,7 @@ describe('时间单位：秒 / 毫秒混用（10/21）', () => {
       {
         id: 'ray',
         tradeId: null,
+        board: 'scan',
         instrument: 'BTCUSDT',
         timeframe: '1D',
         kind: 'ray',
@@ -278,6 +283,7 @@ describe('时间单位：秒 / 毫秒混用（10/21）', () => {
         {
           id: 'r',
           tradeId: null,
+          board: 'scan',
           instrument: 'BTCUSDT',
           timeframe: '1D',
           kind: 'ray',
@@ -301,6 +307,7 @@ describe('时间单位：秒 / 毫秒混用（10/21）', () => {
         {
           id: 'r',
           tradeId: null,
+          board: 'scan',
           instrument: 'BTCUSDT',
           timeframe: '1D',
           kind: 'ray',

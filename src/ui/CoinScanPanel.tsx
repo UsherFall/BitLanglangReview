@@ -451,7 +451,19 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               return (
                 <Fragment key={row.instrument}>
                   <tr className={isDemoted ? 'demoted' : 'qualified'}>
-                    <td>{shortInstrument(row.instrument)}</td>
+                    <td>
+                      {shortInstrument(row.instrument)}
+                      {/* 「已画」徽标（10/26）:距线列的数字一定来自你手画的线,
+                          徽标让它一眼可辨 —— 包括画过但休市测不出(距线「—」)的行。 */}
+                      {row.drawnLineCount > 0 && (
+                        <span
+                          className="coin-scan-drawn"
+                          title={`已手画 ${row.drawnLineCount} 条线（${row.drawnTimeframes.join('、')}）`}
+                        >
+                          已画
+                        </span>
+                      )}
+                    </td>
                     <td>{formatPrice(row.lastPrice)}</td>
                     <td className={row.change24h >= 0 ? 'profit' : 'loss'}>{row.change24h >= 0 ? '+' : ''}{row.change24h.toFixed(2)}%</td>
                     <td>{formatVolume(row.quoteVolume24h)}</td>

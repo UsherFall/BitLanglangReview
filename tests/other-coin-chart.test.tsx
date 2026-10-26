@@ -424,7 +424,7 @@ describe('OtherCoinChart · 画线（10/21）', () => {
         return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
       }
       if (parsed.pathname === '/api/drawings') {
-        drawingRequests.push(`${parsed.searchParams.get('instrument')}:${parsed.searchParams.get('timeframe')}`);
+        drawingRequests.push(`${parsed.searchParams.get('instrument')}:${parsed.searchParams.get('timeframe')}:${parsed.searchParams.get('board')}`);
         return new Response(JSON.stringify({ drawings: [] }));
       }
       if (parsed.pathname === '/api/candles') {
@@ -447,6 +447,40 @@ describe('OtherCoinChart · 画线（10/21）', () => {
     await waitFor(() => expect(drawingRequests.length).toBeGreaterThan(0));
     // 10/22: 画线可见性是 instrument 级（quality-guidelines.md）——加载不带
     // `timeframe` 过滤；该字段只作为距线扫描的测量粒度标签随保存写入。
-    expect(drawingRequests[0]).toBe('BTCUSDT:null');
+    // 10/26: 加载带 `board` —— 未传 board 的面板默认复盘板。
+    expect(drawingRequests[0]).toBe('BTCUSDT:null:review');
+  });
+
+  it('选品抽屉（board=scan）拉取扫描板的线 —— 只有它们进距线测量', async () => {
+    const drawingRequests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const parsed = new URL(`http://localhost${url}`);
+      if (parsed.pathname === '/api/free-replay/instruments') {
+        return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      }
+      if (parsed.pathname === '/api/drawings') {
+        drawingRequests.push(parsed.searchParams.get('board') ?? 'missing');
+        return new Response(JSON.stringify({ drawings: [] }));
+      }
+      if (parsed.pathname === '/api/candles') {
+        return new Response(JSON.stringify({ candles: makeSeries('2024-05-21T09:50:00+08:00', 5, 5) }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(
+      <OtherCoinChart
+        entryTime="2024-05-21T10:00:00.000Z"
+        timeframe="1D"
+        candleSource="binance"
+        initialInstrument="BTCUSDT"
+        drawable
+        board="scan"
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(drawingRequests.length).toBeGreaterThan(0));
+    expect(drawingRequests.every((board) => board === 'scan')).toBe(true);
   });
 });

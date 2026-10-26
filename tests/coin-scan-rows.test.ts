@@ -10,6 +10,8 @@ function row(instrument: string): ScanRow {
     quoteVolume24h: 0,
     levelAlerts: {} as ScanRow['levelAlerts'],
     alertTimeframes: [],
+    drawnLineCount: 0,
+    drawnTimeframes: [],
   };
 }
 

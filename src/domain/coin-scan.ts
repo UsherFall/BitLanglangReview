@@ -330,6 +330,16 @@ export type ScanRow = {
    */
   alertTimeframes: ReviewTimeframe[];
   /**
+   * The scan-board hand-drawn lines behind this row (10/26): how many, and on
+   * which timeframes. This is the 距线 column's provenance — the 「已画」 badge
+   * reads it, so it is filled from the drawn-line set itself, INDEPENDENT of
+   * measurement success: a marked row whose alerts are all `null` (closed
+   * market) still reports its lines, which is what tells "drawn but currently
+   * unmeasurable" apart from "never marked".
+   */
+  drawnLineCount: number;
+  drawnTimeframes: ReviewTimeframe[];
+  /**
    * The 1D coarse screen's verdict and measures. Always set by the service;
    * optional so a pre-10/13 payload still type-checks.
    */
