@@ -1294,3 +1294,41 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Next Steps
 
 - 让用户在真实候选上按收敛度排序扫一遍，确认前几张是否真的更像；再决定是否进扫描排序
+
+
+## Session 31: Trellis 仓库卫生治理：研究数据出 git、孤儿任务补档、根目录与 data 清理
+<!-- trellis-session: v=2 fp=321804a4a7459235 -->
+
+**Date**: 2026-10-26
+**Task**: Trellis 仓库卫生治理：研究数据出 git、孤儿任务补档、根目录与 data 清理
+**Branch**: `master`
+
+### Summary
+
+研究数据(478文件)移出 git 索引并加 gitignore 防复发；孤儿任务 10-18 补档归档；清根目录临时文件/平台残留/data 冗余约 33MB；修 workspace 主索引；提交 .pi/
+
+### Main Changes
+
+- .gitignore 加 research/pool|out 规则；10-18-box-brace-squeeze 补 task.json/prd 后归档；删 _tmp_session*/*.local.bak/.backup-2026-09/review (1).sqlite/review.bak/陈旧日志；annotations-34.json 挪 .scratch；.pi 提交；workspace/index.md 开发者表补全；spec/index.md 记两条经验
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0300a89` | chore(trellis): 归档任务研究原始数据移出 git 索引 |
+| `34098e4` | chore: Trellis 仓库卫生清理 |
+| `99d61e9` | chore(trellis): 落实 research/pool 与 research/out 移出 git 索引（478 文件，磁盘保留） |
+| `da72cf5` | docs(spec): 研究数据卫生约定与 git pathspec 提交陷阱 |
+| `54be873` | chore(task): archive 10-18-box-brace-squeeze |
+
+### Testing
+
+- [OK] 验收 8 条全过：ls-files 无 research 数据、task list 正常、git status 干净
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无；新研究数据默认进 research/pool|out 或 .scratch

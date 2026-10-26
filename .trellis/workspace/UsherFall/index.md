@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
-- **Last Active**: 2026-10-18
+- **Total Sessions**: 31
+- **Last Active**: 2026-10-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1296 | Active |
+| `journal-1.md` | ~1334 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 31 | 2026-10-26 | Trellis 仓库卫生治理：研究数据出 git、孤儿任务补档、根目录与 data 清理 | `0300a89`, `34098e4`, `99d61e9`, `da72cf5`, `54be873` | `master` |
 | 30 | 2026-10-18 | 只关注收敛: s20 成立、score 反向的根因 | `b64b756` | `master` |
 | 29 | 2026-10-18 | 标注页: 显示 90日位置/前戏幅度 + 排序; 285 条标签分析 | `863ed15` | `master` |
 | 28 | 2026-10-18 | 标注页加固：localStorage 不可用不再静默中断 | `ff8aa96` | `master` |
