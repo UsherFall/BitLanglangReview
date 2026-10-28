@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend 层入口，改画线/复盘图表前的必读索引"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useChartDrawings 是共享 hook，改动需符合 hook 规范"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "画线跨周期可见规格（L20）与测试清单约束"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "FreeReplayChart 视口/光标状态 wiring 规范"}
+{"file": ".trellis/tasks/10-28-replay-drawing-viewport/research/root-cause-notes.md", "reason": "已核实的根因链与 lightweight-charts 行为，实现直接引用"}
