@@ -5,7 +5,7 @@ import type { Candlestick } from '../domain/candlestick';
 import type { ChartDrawing, ChartDrawingKind, ChartPoint, DrawingBoard, SaveChartDrawingInput } from '../domain/drawing';
 import type { ReviewTimeframe } from '../domain/trade';
 import { nextMagnetMode, snapDrawingPoint, type MagnetMode } from './drawing-snap';
-import { timeframeTimeForPoint } from './chart-time';
+import { timeframeMs, timeframeTimeForPoint } from './chart-time';
 
 /**
  * The drawing layer of a chart: the tool row, the SVG overlay, the drag
@@ -233,6 +233,11 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     setDraftEndPoint(null);
   }
 
+  /**
+   * One shot per activation (10/28): completing a line EXITS the tool. The
+   * user drew one level and is done — the old "click the toolbar again to
+   * close" step was friction, so the tool does not stay armed after a save.
+   */
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
     if (!drawingTool) {
       setSelectedDrawingId('');
@@ -242,6 +247,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     if (!point) return;
     if (drawingTool === 'horizontal') {
       void saveDrawing({ tradeId, instrument, board, timeframe, kind: 'horizontal', points: [point], ...referenceBar() });
+      setDrawingTool(null);
       return;
     }
     if (!draftPoint) {
@@ -252,6 +258,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     void saveDrawing({ tradeId, instrument, board, timeframe, kind: drawingTool, points: [draftPoint, point], ...referenceBar() });
     setDraftPoint(null);
     setDraftEndPoint(null);
+    setDrawingTool(null);
   }
 
   function handleDrawingPointerDown(event: React.PointerEvent<SVGElement>, drawing: ChartDrawing, target: DrawingDragTarget) {
@@ -400,7 +407,7 @@ function DrawingShape({ drawing, selected, chart, series, timeframe, candles, on
       </g>
     );
   }
-  const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series));
+  const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series, timeframe, candles));
   if (points.some((point) => !point)) return null;
   // A ray keeps its two handles on the real points (`'start'` = endpoint,
   // `'end'` = direction point) and only the drawn line runs past `'end'`.
@@ -490,8 +497,74 @@ export function moveDrawing(drawing: ChartDrawing, target: DrawingDragTarget, st
   return { ...drawing, points };
 }
 
-function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'Candlestick'>): { x: number; y: number } | null {
-  const x = chart.timeScale().timeToCoordinate(point.time as UTCTimestamp);
+/** The chart + timeframe + loaded candles a point time is resolved against. */
+export type TimeCoordinateContext = {
+  chart: IChartApi;
+  timeframe: ReviewTimeframe;
+  candles: Candlestick[];
+};
+
+/**
+ * The x coordinate of a point time, extrapolated when the time is NOT in the
+ * loaded data.
+ *
+ * Why it exists (10/28): a line drawn on a big timeframe must stay visible on
+ * a small one, but the small chart's initial window is only ±150 bars around
+ * the anchor — a 4H ray's anchor time is usually outside it, and
+ * `timeScale().timeToCoordinate` returns null for any time that is not in the
+ * data's index, which used to hide the WHOLE line (`points.some(!point)`).
+ * Extrapolating from the boundary candle keeps the line on screen
+ * immediately; once the user pans left and the history backfill covers the
+ * anchor, the direct `timeToCoordinate` path takes over again and the
+ * coordinate becomes exact.
+ */
+export function coordinateForTime(time: number, context: TimeCoordinateContext): number | null {
+  const { chart, timeframe, candles } = context;
+  const timeScale = chart.timeScale();
+  const direct = timeScale.timeToCoordinate(time as UTCTimestamp);
+  if (direct != null) return direct;
+  // No candles yet: nothing to anchor an extrapolation to. The overlay
+  // re-renders once candles arrive, so hiding here is only transient.
+  if (!candles.length) return null;
+  const times = [...candles]
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .map((candle) => Math.floor(candle.timestamp / 1000));
+  const target = Math.floor(time);
+  const step = timeframeMs(timeframe) / 1000;
+  const barSpacing = timeScale.options().barSpacing;
+  if (!Number.isFinite(barSpacing) || barSpacing <= 0) return null;
+
+  // Outside the loaded window: extrapolate from the boundary candle by GRID
+  // SLOTS (delta time / step). A missing candle still occupies a slot in the
+  // time scale, so slots × barSpacing is the pixel distance even across gaps.
+  if (target < times[0]) {
+    const boundary = timeScale.timeToCoordinate(times[0] as UTCTimestamp);
+    return boundary == null ? null : boundary - ((times[0] - target) / step) * barSpacing;
+  }
+  if (target > times[times.length - 1]) {
+    const boundary = timeScale.timeToCoordinate(times[times.length - 1] as UTCTimestamp);
+    return boundary == null ? null : boundary + ((target - times[times.length - 1]) / step) * barSpacing;
+  }
+
+  // Between two loaded candles but not in the index (a data gap): interpolate
+  // between the neighbours — exact for any gap structure, unlike the grid-slot
+  // arithmetic outside the window.
+  for (let index = 0; index < times.length - 1; index += 1) {
+    const previous = times[index];
+    const next = times[index + 1];
+    if (target > previous && target < next) {
+      const xPrevious = timeScale.timeToCoordinate(previous as UTCTimestamp);
+      const xNext = timeScale.timeToCoordinate(next as UTCTimestamp);
+      if (xPrevious == null || xNext == null) return null;
+      return xPrevious + ((target - previous) / (next - previous)) * (xNext - xPrevious);
+    }
+  }
+  return null;
+}
+
+function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'Candlestick'>, timeframe: ReviewTimeframe, candles: Candlestick[]): { x: number; y: number } | null {
   const y = series.priceToCoordinate(point.price);
-  return x == null || y == null ? null : { x, y };
+  if (y == null) return null;
+  const x = coordinateForTime(point.time, { chart, timeframe, candles });
+  return x == null ? null : { x, y };
 }

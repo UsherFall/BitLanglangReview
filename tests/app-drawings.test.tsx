@@ -29,7 +29,10 @@ vi.mock('lightweight-charts', () => ({
       setVisibleRange: vi.fn(),
       subscribeVisibleLogicalRangeChange: vi.fn(),
       subscribeVisibleTimeRangeChange: vi.fn(),
-      timeToCoordinate: vi.fn((time: number) => time - 1716256800),
+      // The real timeScale returns null for any time outside the loaded
+      // candles (10:00 and 10:05). Out-of-range inputs now drive the
+      // extrapolation path the cross-timeframe drawing tests exercise.
+      timeToCoordinate: vi.fn((time: number) => (time >= 1716256800 && time <= 1716257100 ? time - 1716256800 : null)),
       timeToIndex: vi.fn(() => 150),
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleTimeRangeChange: vi.fn(),
@@ -65,6 +68,57 @@ describe('App drawings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '1D' }));
     await waitFor(() => expect(line).toHaveAttribute('stroke-width', '2'));
+  });
+
+  it('exits the horizontal tool after one click instead of staying armed', async () => {
+    render(<App />);
+
+    await drawingLine();
+    const toolbarButtons = document.querySelectorAll('.drawing-toolbar button');
+    const overlay = document.querySelector('svg.drawing-overlay')!;
+
+    fireEvent.click(toolbarButtons[0]);
+    expect(toolbarButtons[0]).toHaveClass('selected');
+    fireEvent.click(overlay, { clientX: 10, clientY: 10 });
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].kind).toBe('horizontal');
+    // The tool disarms itself once the line is saved (10/28): no second click
+    // on the toolbar needed to close drawing mode.
+    expect(toolbarButtons[0]).not.toHaveClass('selected');
+    // The saved line itself stays selected (drag handles ready).
+    expect(deleteButton()).toBeEnabled();
+  });
+
+  // 10/28 regression: a ray drawn on a big timeframe keeps an anchor OUTSIDE
+  // the smaller chart's loaded candles (5m initial window is only ±150 bars).
+  // `timeToCoordinate` returns null there, which used to hide the whole line
+  // (`points.some(!point)` → return null). The overlay must extrapolate the x
+  // from the boundary candle instead of dropping the shape.
+  it('renders a ray whose anchor is before the loaded candles by extrapolating from the first bar', async () => {
+    const anchor = 1716256800 - 3600; // 10:00 minus 1h = 12 five-minute bars left
+    vi.stubGlobal('fetch', makeFetch([
+      {
+        ...makeDrawing(),
+        id: 'd-early-ray',
+        kind: 'ray',
+        timeframe: '4H',
+        points: [{ time: anchor, price: 100 }, { time: anchor + 300, price: 101 }],
+      },
+    ]));
+
+    render(<App />);
+
+    const line = await waitFor(() => {
+      const shape = document.querySelector('line.drawing-shape') as SVGLineElement;
+      expect(shape).toBeInTheDocument();
+      return shape;
+    });
+    // 12 slots × 6px barSpacing left of the first candle (x=0): x1 = -72. The
+    // direction point sits one bar right of the anchor, so the ray extends
+    // rightwards across the viewport.
+    expect(line).toHaveAttribute('x1', '-72');
+    expect(Number(line.getAttribute('x2'))).toBeGreaterThan(1000);
   });
 
   it('previews a ray from the endpoint through the current pointer before the second click', async () => {
@@ -110,13 +164,17 @@ describe('App drawings', () => {
     render(<App />);
 
     await drawingLine();
-    fireEvent.click(document.querySelectorAll('.drawing-toolbar button')[1]);
+    const toolbarButtons = document.querySelectorAll('.drawing-toolbar button');
+    fireEvent.click(toolbarButtons[1]);
 
     const overlay = document.querySelector('svg.drawing-overlay')!;
     fireEvent.click(overlay, { clientX: 10, clientY: 10 });
     fireEvent.click(overlay, { clientX: 330, clientY: 20 });
 
     await waitFor(() => expect(posted).toHaveLength(1));
+    // One shot per activation (10/28): finishing the ray exits the tool — the
+    // toolbar button must disarm itself without a second click.
+    expect(toolbarButtons[1]).not.toHaveClass('selected');
     const drawing = posted[0];
     expect(drawing.kind).toBe('ray');
     // 复盘图画的线打 review 板（10/26 板隔离）——扫描的距线不会测到它。
