@@ -1362,7 +1362,17 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     void loadEarlierFreeReplayCandles();
   }, [loadedCandles, renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe]);
 
-  // Cursor follow effect: scroll viewport to keep cursor 10 steps from right edge.
+  // Cursor follow effect: keep the reveal cursor VISIBLE — nothing more.
+  //
+  // The cursor used to be re-anchored 10 steps from the right edge on EVERY
+  // step, which yanked a viewport the user had panned or zoomed (10/28
+  // complaint: 点下一根/上一根时画面被来回拉). Now the viewport moves only when
+  // the cursor leaves a comfort zone of 10 steps at either edge, and then by
+  // the minimum amount: forward keeps the old invariant (cursor 10 steps from
+  // the right edge), backward mirrors it on the left. `series.setData` never
+  // moves the viewport here — `chartDataWithWhitespace` keeps a constant
+  // 200-bar pad at both ends, so the time scale's base index does not change
+  // between steps.
   useEffect(() => {
     const chart = chartApiRef.current;
     if (!chart) return;
@@ -1374,12 +1384,19 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, on
     const visible = currentFreeReplayVisibleRange(chart);
     if (!visible) return;
     const step = timeframeMs(timeframe) / 1000;
+    const pad = step * 10;
+    const cursor = replay.cursorTime;
+    // Comfort zone: the cursor is well inside the view — leave the viewport
+    // (position AND zoom) exactly as the user left it.
+    if (cursor + pad <= visible.to && cursor - pad >= visible.from) return;
     const span = visible.to - visible.from;
+    const followsForward = cursor + pad > visible.to;
     suppressAutoLoadRef.current = true;
-    chart.timeScale().setVisibleRange({
-      from: (replay.cursorTime - span + step * 10) as UTCTimestamp,
-      to: (replay.cursorTime + step * 10) as UTCTimestamp,
-    });
+    chart.timeScale().setVisibleRange(
+      followsForward
+        ? { from: (cursor - span + pad) as UTCTimestamp, to: (cursor + pad) as UTCTimestamp }
+        : { from: (cursor - pad) as UTCTimestamp, to: (cursor - pad + span) as UTCTimestamp },
+    );
     window.setTimeout(() => {
       suppressAutoLoadRef.current = false;
     }, 0);

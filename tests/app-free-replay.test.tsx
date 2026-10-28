@@ -208,6 +208,102 @@ describe('App Free Replay', () => {
     }));
   });
 
+  it('leaves the viewport untouched while the cursor stays inside the view', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+            makeCandle('2024-05-21T10:05:00+08:00'),
+            makeCandle('2024-05-21T10:10:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
+
+    // A viewport the user positioned themselves (pinned/zoomed however they
+    // like), with the cursor well inside it: the session starts at 09:55 and
+    // one reveal reaches 10:00.
+    const initialCursor = Date.parse('2024-05-21T09:55:00+08:00') / 1000;
+    chartMocks.getVisibleRange.mockReturnValue({ from: initialCursor - 4000, to: initialCursor + 6000 });
+    chartMocks.setVisibleRange.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '上一根 K 线' }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    // 10/28: stepping next/previous inside the comfort zone must not re-anchor
+    // the viewport at all — no yanking of a view the user positioned.
+    expect(chartMocks.setVisibleRange).not.toHaveBeenCalled();
+  });
+
+  it('re-anchors with left-edge padding when the cursor falls out the left side of the view', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00'),
+            makeCandle('2024-05-21T10:00:00+08:00'),
+            makeCandle('2024-05-21T10:05:00+08:00'),
+            makeCandle('2024-05-21T10:10:00+08:00'),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeInTheDocument());
+
+    // The viewport sits to the RIGHT of the cursor (the user rewound or panned
+    // ahead): the reveal cursor has fallen out the LEFT edge.
+    const nextCursor = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
+    const from = nextCursor + 1;
+    const to = nextCursor + 13200;
+    chartMocks.getVisibleRange.mockReturnValue({ from, to });
+    chartMocks.setVisibleRange.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+
+    // Mirror of the right-edge invariant: the cursor lands 10 steps from the
+    // LEFT edge, span preserved.
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: nextCursor - 3000,
+      to: nextCursor - 3000 + (to - from),
+    }));
+  });
+
   it('starts Free Replay with the cursor visible and right-side padding', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
@@ -780,6 +876,91 @@ describe('App Free Replay', () => {
       expect(bodies.at(-1)?.cursorTime).toBe(restoredCursor);
       expect(bodies.at(-1)?.timeframe).toBe('15m');
     });
+  });
+
+  // 10/28 现场：Binance 不可达（旧会话源 = binance-only），后续 K 线 502。点
+  // 下一根不前进是预期的（没数据）；但恢复出来的持仓必须仍在面板上，且自动
+  // 保存不得丢掉 position —— 仓位丢失只能来自状态重置，不能来自加载失败。
+  it('keeps the restored position on the panel and in the auto-save when later candle loads fail', async () => {
+    const seeded = [makeSeededSession({
+      paperTrading: {
+        active: true,
+        startedAtCursorTime: Date.parse('2024-05-21T10:05:00+08:00') / 1000,
+        nextId: 39,
+        pendingEntry: null,
+        pendingExit: null,
+        pendingStopLoss: null,
+        position: {
+          id: 'position-37',
+          direction: 'long',
+          originPrice: 27097,
+          originTime: Date.parse('2024-05-21T09:25:00+08:00'),
+          entryPrice: 27097,
+          entryTime: Date.parse('2024-05-21T09:25:00+08:00'),
+          quantity: 0.369,
+          margin: 500,
+          notional: 10000,
+          leverage: 20,
+          legs: [{
+            id: 'leg-37',
+            entryPrice: 27097,
+            entryTime: Date.parse('2024-05-21T09:25:00+08:00'),
+            quantity: 0.369,
+            margin: 500,
+            notional: 10000,
+            leverage: 20,
+            stopPrice: 27011,
+          }],
+        },
+        trades: [],
+      } as unknown as ReturnType<typeof makeSeededSession>['paperTrading'],
+    })];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: seeded }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'initial') {
+          return new Response(JSON.stringify({
+            candles: [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+            ],
+          }));
+        }
+        return new Response(JSON.stringify({ error: 'Binance request failed: fetch failed' }), { status: 502 });
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT/ }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
+
+    // The position card renders from the restored state, independent of candle
+    // availability.
+    expect(screen.getByText('持仓')).toBeInTheDocument();
+    expect(screen.getByText('均价 27097')).toBeInTheDocument();
+
+    // Stepping hits the end of loaded candles: the reveal cannot advance (no
+    // data), the later-candle fetch 502s — the app must survive it all.
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(screen.getByText('持仓')).toBeInTheDocument();
+    expect(screen.getByText('均价 27097')).toBeInTheDocument();
+    const bodies = sessionPutBodies();
+    const lastPosition = bodies.at(-1) && (bodies.at(-1) as { paperTrading?: { position?: unknown } }).paperTrading?.position;
+    expect(lastPosition).not.toBeNull();
   });
 
   it('resumes an existing session when starting the same instrument and start time', async () => {
