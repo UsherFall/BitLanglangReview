@@ -94,3 +94,27 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: 复盘图表画线与步进体验修复
+<!-- trellis-session: v=2 fp=4c80e202fc8c5391 -->
+
+**Date**: 2026-10-28
+**Task**: 复盘图表画线与步进体验修复
+**Branch**: `master`
+
+### Summary
+
+回溯复盘三项修复：大周期射线切小周期消失（timeToCoordinate 对未加载数据返回 null，改为 coordinateForTime 边界K线网格外推/缺口内插）；画完一根自动退出画线工具；步进不再回拉画面（cursor follow 改舒适区判定，±10 根内不动、越界最小平移）。附带排查用户现场『下一根加载不出来/仓位不见』：根因为 Binance 断连（旧会话 binance-only 源），仓位安全存于 DB，恢复会话可取回；加网络失败不丢仓位回归测试。spec 更新 component/quality guidelines；任务 10-28-replay-drawing-viewport 已归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f227862` | fix(drawing): 大周期线切小周期仍可见 —— 越界锚点坐标外推 + 画完自动退出工具 |
+| `ccb9e7e` | fix(replay): 步进不再回拉画面 —— 光标离开舒适区才最小平移；补K线加载失败不丢仓位回归测试 |
+| `41c03c7` | docs(spec): 画线越界外推、单发工具、光标跟随舒适区契约 |
+
+### Status
+
+[OK] **Completed**
