@@ -49,22 +49,26 @@ The tool row, the SVG overlay, the drag handling, the magnet and the persistence
 - **The unit trap.** A drawing's points carry **seconds**; a candlestick's `timestamp` is **milliseconds**. The domain layer converts exactly once (`pointTimeMs` in `src/domain/level-alert.ts`); `LevelLine`'s endpoints are `{ ms, price }` so the unit is fixed in the type. Never compare a point's `time` with a candle's `timestamp` directly.
 - **A new level records its price basis.** The hook writes the last completed bar's close and timestamp into `refPrice` / `refTime` — the 选品 scan measures the level on ANOTHER venue's candles and rescales it with that reference (see `server/coin-scan.md`).
 - Levels are **stamped** with the timeframe they were drawn on, but VISIBILITY is instrument-level WITHIN THE BOARD (10/22 regression fix restored the cross-timeframe rule; 10/26 added the board scope): `GET /api/drawings?instrument=…&board=…` — no `timeframe` filter, ALWAYS a `board` filter — so a level drawn on one timeframe shows on every timeframe of the same instrument **on that board**, and never leaks into the other board. The 10/26 split: before it, the scan's canonical matching measured REVIEW lines too, so the 距线 column showed numbers whose lines were invisible in the drawer (they lived on the review charts under OKX names) and read as algorithm-made. The `timeframe` field is the 距线 scan's MEASUREMENT granularity (`listDrawingsByTimeframe(timeframe, board)`, "only the timeframes the user drew on are measured, and only the scan board's"), not a visibility rule — keep the two concerns separate. The optional `timeframe` query param stays for targeted queries. Within a board the instrument match is CANONICAL (`canonicalInstrument`), so a scan-source switch (Bitget ↔ Binance, or OKX-era drawer lines) does not hide the coin's lines.
+- **Out-of-range anchors must EXTRAPOLATE, not hide (10/28).** Cross-timeframe visibility also breaks at RENDER time: `timeScale().timeToCoordinate(t)` returns null for any time that is not in the loaded data's index, and a small timeframe's initial window (±150 bars around the anchor) usually does not cover a big timeframe's anchors — a 4H ray switched to 5m vanished even though it was loaded. The x for such a time comes from `coordinateForTime(time, { chart, timeframe, candles })` in `chart-drawing.tsx`: direct index hit → `timeToCoordinate`; outside the loaded window → boundary candle ± grid slots (`deltaTime / timeframeMs(timeframe)`) × `barSpacing`; inside a data gap → neighbor interpolation. `pointToScreen` must go through it — never bare `timeToCoordinate` — and horizontal lines never need it (price-only, `priceToCoordinate` works for any price). Panning left until the history backfill covers the anchor returns the coordinate to the exact direct path.
+- **One shot per tool activation (10/28).** Completing a drawing saves AND exits the tool (`setDrawingTool(null)` right after `saveDrawing`): one click for `horizontal`, the second click for `ray`. The user asked for no extra "click the toolbar again to close" step. The saved line itself stays selected (handles ready). Draft-discard on tool switch (`selectDrawingTool`) is unchanged and still required.
 
 ### Free Replay Cursor Follow
 
-When the cursor advances in Free Replay, the chart viewport **must scroll to follow** so the user sees the new candle. Keep the current zoom level (visible span) by computing `span = visible.to - visible.from` before calling `setVisibleRange`:
+The viewport must keep the reveal cursor VISIBLE — and do nothing else. 10/28: the follow used to re-anchor on EVERY cursor change, which yanked a viewport the user had panned or zoomed (点下一根/上一根时画面被来回拉). Now stepping next/previous while the cursor stays inside a comfort zone — at least 10 steps from EITHER edge — leaves the viewport (position AND zoom) untouched; crossing the zone scrolls by the minimum amount, preserving the zoom (`span = visible.to - visible.from`):
 
 ```typescript
-// Cursor follow: preserve zoom level, keep cursor 10 steps from right edge
 const step = timeframeMs(timeframe) / 1000;
-const span = visible.to - visible.from;
-chart.timeScale().setVisibleRange({
-  from: (replay.cursorTime - span + step * 10) as UTCTimestamp,
-  to: (replay.cursorTime + step * 10) as UTCTimestamp,
-});
+const pad = step * 10;
+if (cursor + pad <= visible.to && cursor - pad >= visible.from) return; // comfort zone — no scroll
+const followsForward = cursor + pad > visible.to;
+chart.timeScale().setVisibleRange(
+  followsForward
+    ? { from: cursor - span + pad, to: cursor + pad }   // old invariant: cursor 10 steps from the right edge
+    : { from: cursor - pad, to: cursor - pad + span },  // mirror on the left edge (rewind)
+);
 ```
 
-Set `suppressAutoLoadRef.current = true` before `setVisibleRange` and reset it via `setTimeout(0)` to prevent the `visibleLogicalRangeChange` handler from firing during the range update. Use a range-key guard (`instrument:startTime:timeframe`) to skip the first cursor-follow pass for each newly initialized chart range; otherwise a timeframe switch can reuse the previous timeframe's visible span and overwrite the fresh initialization.
+`series.setData` itself never moves this viewport: `chartDataWithWhitespace` pads a CONSTANT 200 bars at both ends, so the time scale's base index is stable between steps — the follow effect is the only code that scrolls on a step. Set `suppressAutoLoadRef.current = true` before `setVisibleRange` and reset it via `setTimeout(0)` to prevent the `visibleLogicalRangeChange` handler from firing during the range update. Use a range-key guard (`instrument:startTime:timeframe`) to skip the first cursor-follow pass for each newly initialized chart range; otherwise a timeframe switch can reuse the previous timeframe's visible span and overwrite the fresh initialization.
 
 When switching Review Timeframes, preserve candle visual density rather than preserving the old time span. Prefer `chart.timeScale().getVisibleLogicalRange()` to derive the actual visible candle count; fall back to `chart.timeScale().options().barSpacing` and chart width only when logical range is unavailable. After the new timeframe data is rendered, use `timeToIndex(..., true)` for the anchor and `setVisibleLogicalRange(...)` for the destination viewport. Free Replay anchors this logical range on `replay.cursorTime` with about 10 future bars of right padding; Trade Review anchors it on the previous visible center time.
 
@@ -180,9 +184,9 @@ Required tests: `tests/app-drawings.test.tsx` 必须覆盖「草稿预览已是�
 
 ### Common Mistake: Cursor advance without viewport scroll
 
-In `FreeReplayChart`, the render effect's `setVisibleRange` only runs on first initialization (guarded by `initializedRangeKeyRef`). After the user zooms or pans, subsequent cursor advances update data via `series.setData()` but leave the viewport unchanged. The cursor state advances correctly, but the user sees no visual change and thinks the button/keyboard doesn't work.
+In `FreeReplayChart`, the render effect's `setVisibleRange` only runs on first initialization (guarded by `initializedRangeKeyRef`). After the user zooms or pans, subsequent cursor advances update data via `series.setData()` but leave the viewport unchanged. The cursor state advances correctly, but if the cursor reaches an edge the user sees no visual change and thinks the button/keyboard doesn't work.
 
-**Fix**: Add a separate `useEffect` watching `replay.cursorTime` that calls `setVisibleRange` on every cursor change (skip first mount). See the "Free Replay Cursor Follow" section above.
+**Fix**: Add a separate `useEffect` watching `replay.cursorTime` that scrolls only when the cursor exits the comfort zone (skip first mount) — see the "Free Replay Cursor Follow" section above. Do NOT swing back to scrolling on every cursor change: that yanks a viewport the user positioned (the 10/28 complaint this rule came from).
 
 ### Common Mistake: Preserving old time span across timeframe switches
 
