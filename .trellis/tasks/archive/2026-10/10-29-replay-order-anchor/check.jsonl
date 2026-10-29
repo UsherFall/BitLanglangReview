@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核查验证标准"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核查回溯复盘只揭示到光标、venue 网格、周期切换回填等既有契约未被破坏"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "核查 orderFocus 没有泄漏进会话存盘协议"}
+{"file": ".trellis/tasks/10-29-replay-order-anchor/prd.md", "reason": "逐条对照验收标准"}
+{"file": ".trellis/tasks/10-29-replay-order-anchor/design.md", "reason": "核查实现与设计一致（去重键、追页防护、清除时机）"}
