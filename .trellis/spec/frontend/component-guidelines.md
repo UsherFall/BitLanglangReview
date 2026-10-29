@@ -150,6 +150,18 @@ Required tests when changing this area:
 - Unit tests for the order state transition in `tests/free-replay-paper-trading.test.ts`.
 - App-level tests in `tests/app-free-replay.test.tsx` for any visible control or workflow change.
 
+### Free Replay Order Focus Anchor (焦点单锚定, 10/29)
+
+The paper trading panel is split into two tabs — 操作 (parameters and open/add/close/stop-loss controls) and 单子 (open position, pending orders, completed trades) — under a always-visible header + stats row. `.paper-trading-panel` is a flex column with `overflow: hidden`; `.paper-tab-body` is the ONLY scroll region (small screens land the panel under the chart at `max-height: 32vh`, so the 单子 tab must reach orders without scrolling past the operation sections).
+
+Clicking a completed trade row anchors the chart viewport on that position round's open (`positionOpenTime`, the same anchor as the「开」marker), using the SAME `entryVisibleRange` ±150-bar window as 交割单复盘 trade selection:
+
+- The focus lives in `App` as `orderFocus: { id, timeMs, token } | null` and reaches `FreeReplayChart` as the `focusRequest` prop. The token increments per click so re-clicking the same row re-anchors after the user panned away.
+- The chart applies a focus ONCE per `rangeKey:token` — afterwards the user pans/zooms freely. A timeframe switch keeps the focus (App must NOT clear it in `switchFreeReplayTimeframe`) and re-anchors on the new rangeKey; the initial cursor-anchor in the render effect is skipped while a focus is active.
+- The focus effect must wait until `loadedCandles[0].timeframe === timeframe` before chasing or anchoring: on the switch commit the loaded candles still belong to the OLD timeframe, and an earlier-page fetch there would merge two timeframes into one array.
+- An entry earlier than the loaded window chases `loadEarlierFreeReplayCandles()` page by page; an empty earlier page sets `earlierExhaustedRef` and the anchor clamps to the earliest loaded edge — never loop.
+- The focus is cleared (back to cursor-follow) on: step next/previous (buttons and ArrowLeft/Right), any market/limit open or close submission, clicking the open-position row, switching/restoring/deleting the session, and leaving Free Replay mode. Clearing moves nothing by itself; the next step's comfort-zone follow brings the cursor back into view. The focus is ephemeral UI state — it is NOT part of the session save payload.
+
 When changing chart drawing overlays, remember that SVG background clicks and drawing shape clicks share the same overlay surface. Shape and handle click handlers must stop propagation when they represent selecting or dragging a drawing; overlay blank-click handlers can then safely clear `selectedDrawingId`. Add or update an app-level regression test that asserts both sides: clicking a drawing selects/keeps it selected, and clicking blank chart overlay clears selection.
 
 ### Drawing Magnet Snap (画线磁吸, 09/20)
