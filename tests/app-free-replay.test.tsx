@@ -1301,6 +1301,237 @@ describe('App Free Replay', () => {
       expect(request.split(':')[0]).toBe('bitget');
     }
   });
+
+  // 10/29 R1：面板分 Tab。默认落在「操作」；已完成交易行只在「单子」Tab。
+  it('splits the paper trading panel into 操作/单子 tabs', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => new Response(JSON.stringify({
+        candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+        ],
+      })),
+    });
+
+    await startReplayAndCloseTrade();
+
+    // 默认「操作」Tab：开仓控件在，已完成交易行不在
+    expect(screen.getByRole('tab', { name: '操作' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: '市价开仓' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /开 05-21 10:00/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+
+    expect(screen.getByRole('button', { name: /开 05-21 10:00/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '市价开仓' })).not.toBeInTheDocument();
+    // 统计行在两个 Tab 都常显
+    expect(screen.getAllByText('+100.00 USDT').length).toBeGreaterThan(0);
+  });
+
+  // 10/29 R2：点已完成交易行 → 视口锚到开仓点（±150 根）；每点击一次定位一次，
+  // 之后用户平移不被拽回；重复点同一行重新定位。
+  it('anchors the viewport on the order entry when clicking a completed trade row', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => new Response(JSON.stringify({
+        candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+        ],
+      })),
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const row = screen.getByRole('button', { name: /开 05-21 10:00/ });
+    chartMocks.setVisibleRange.mockClear();
+
+    fireEvent.click(row);
+
+    const openSec = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 300,
+      to: openSec + 150 * 300,
+    }));
+    expect(chartMocks.setVisibleRange).toHaveBeenCalledTimes(1);
+    expect(row.className).toContain('active');
+
+    // 用户平移（逻辑区间变化）不触发重新锚定
+    const handler = chartMocks.subscribeVisibleLogicalRangeChange.mock.calls.at(-1)?.[0];
+    handler?.({ from: 10, to: 170 });
+    expect(chartMocks.setVisibleRange).toHaveBeenCalledTimes(1);
+
+    // 重复点同一行 → 重新归位
+    fireEvent.click(row);
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledTimes(2));
+  });
+
+  // 10/29 R3：焦点单存活于切周期 —— 新周期下视口重新锚到该单开仓点，
+  // 且初始化不再锚光标（setVisibleLogicalRange 不被调用）。
+  it('keeps the order anchor across timeframe switches', async () => {
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const params = new URL(`http://localhost${url}`).searchParams;
+        const candles = params.get('timeframe') === '15m'
+          ? [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:15:00+08:00', { timeframe: '15m' }),
+            ]
+          : [
+              makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+              makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+              makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+            ];
+        return new Response(JSON.stringify({ candles: params.get('mode') === 'earlier' ? [] : candles }));
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const row = screen.getByRole('button', { name: /开 05-21 10:00/ });
+    fireEvent.click(row);
+
+    const openSec = Date.parse('2024-05-21T10:00:00+08:00') / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 300,
+      to: openSec + 150 * 300,
+    }));
+
+    chartMocks.setVisibleRange.mockClear();
+    chartMocks.setVisibleLogicalRange.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 900,
+      to: openSec + 150 * 900,
+    }));
+    expect(chartMocks.setVisibleLogicalRange).not.toHaveBeenCalled();
+    expect(row.className).toContain('active');
+  });
+
+  // 10/29 解除条款：点单锚定后，步进清除焦点（行高亮消失）。
+  it('clears the order anchor when stepping to the next candle', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => new Response(JSON.stringify({
+        candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+          makeCandle('2024-05-21T10:10:00+08:00', { close: 130 }),
+        ],
+      })),
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const row = screen.getByRole('button', { name: /开 05-21 10:00/ });
+    fireEvent.click(row);
+    expect(row.className).toContain('active');
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+
+    expect(row.className).not.toContain('active');
+  });
+
+  // 10/29 解除条款：点当前持仓行 → 回到光标（清除焦点）。
+  it('returns to the cursor when clicking the open position row', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => new Response(JSON.stringify({
+        candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+          makeCandle('2024-05-21T10:10:00+08:00', { close: 130 }),
+        ],
+      })),
+    });
+
+    await startReplayAndCloseTrade();
+    // 再开一笔持仓（最新未平仓单）
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const tradeRow = screen.getByRole('button', { name: /开 05-21 10:00/ });
+    fireEvent.click(tradeRow);
+    expect(tradeRow.className).toContain('active');
+
+    fireEvent.click(screen.getByRole('button', { name: /持仓中/ }));
+
+    expect(tradeRow.className).not.toContain('active');
+  });
+
+  // 10/29 R2 追页：开仓点早于已加载窗口时自动向前翻页，覆盖后再定位。
+  it('loads earlier candles until the focused order entry is covered', async () => {
+    const openMs = Date.parse('2024-05-21T08:00:00+08:00');
+    const seeded = [makeSeededSession({
+      paperTrading: {
+        active: true,
+        startedAtCursorTime: Date.parse('2024-05-21T08:00:00+08:00') / 1000,
+        nextId: 2,
+        pendingEntry: null,
+        pendingExit: null,
+        position: null,
+        trades: [{
+          id: 'fill-1',
+          positionId: 'position-1',
+          direction: 'long',
+          entryPrice: 95,
+          entryTime: openMs,
+          positionOpenPrice: 95,
+          positionOpenTime: openMs,
+          exitPrice: 100,
+          exitTime: Date.parse('2024-05-21T09:30:00+08:00'),
+          quantity: 1,
+          margin: 95,
+          notional: 95,
+          leverage: 1,
+          pnl: 5,
+          returnRate: 0.0526,
+        }],
+      },
+    })];
+    const candleRequests: string[] = [];
+    stubFreeReplayFetch({
+      sessions: seeded,
+      onCandles: (url) => {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        const candles = mode === 'earlier'
+          ? [
+              makeCandle('2024-05-21T08:00:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T08:15:00+08:00', { timeframe: '15m' }),
+            ]
+          : [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+            ];
+        return new Response(JSON.stringify({ candles }));
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT/ }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const row = screen.getByRole('button', { name: /开 05-21 08:00/ });
+    chartMocks.setVisibleRange.mockClear();
+    fireEvent.click(row);
+
+    // 先追页（mode=earlier），数据落地后锚到开仓点 ±150 根（15m）
+    await waitFor(() => expect(candleRequests.some((url) => url.includes('mode=earlier'))).toBe(true));
+    const openSec = openMs / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 900,
+      to: openSec + 150 * 900,
+    }));
+    expect(row.className).toContain('active');
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {
@@ -1317,7 +1548,7 @@ function makeCandle(time: string, overrides = {}) {
   };
 }
 
-function makeSeededSession(overrides: Partial<Record<'startTime' | 'dataAnchorTime' | 'timeframe', string> & { cursorTime: number }> = {}) {
+function makeSeededSession(overrides: Partial<Record<'startTime' | 'dataAnchorTime' | 'timeframe', string> & { cursorTime: number; paperTrading: unknown }> = {}) {
   const cursorTime = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
   return {
     instrument: 'BTCUSDT',
@@ -1348,4 +1579,36 @@ function sessionPutBodies(): Array<Record<string, unknown>> {
   return fetchMock.mock.calls
     .filter(([, callInit]) => callInit?.method === 'PUT')
     .map(([, callInit]) => JSON.parse(String(callInit?.body)) as Record<string, unknown>);
+}
+
+/** 10/29 新用例的共享 fetch 桩：基线路由 + 调用方给 candles 应答。 */
+function stubFreeReplayFetch(options: { sessions?: unknown[]; onCandles: (url: string) => Response }) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+    if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+    if (url.startsWith('/api/free-replay/sessions')) {
+      if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+      if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+      return new Response(JSON.stringify({ sessions: options.sessions ?? [] }));
+    }
+    if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+    if (url.startsWith('/api/candles')) return options.onCandles(url);
+    return new Response(JSON.stringify({}));
+  }));
+}
+
+/** 10/29 新用例的共享流程：5m 会话 10:00 开始，开一笔 → 下一根 → 平仓。 */
+async function startReplayAndCloseTrade() {
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+  await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+  fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+  fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+  fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+  await waitFor(() => expect(screen.getByRole('tab', { name: /单子/ })).toHaveTextContent('1'));
 }

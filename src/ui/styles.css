@@ -992,13 +992,30 @@ p {
 
 .paper-trading-panel {
   min-width: 0;
-  overflow: auto;
-  display: grid;
-  align-content: start;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 14px;
   border-left: 1px solid #2d333b;
   background: #0b1017;
+}
+
+/* 10/29: 面板分 Tab —— 头部/统计/Tab 条常显，tab body 是唯一滚动区。 */
+.paper-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.paper-tab-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  align-content: start;
 }
 
 .paper-panel-header {
@@ -1016,6 +1033,7 @@ p {
 }
 
 .paper-panel-header button,
+.paper-tabs button,
 .paper-section button,
 .pending-order button,
 .preset-buttons button,
@@ -1029,6 +1047,8 @@ p {
 }
 
 .paper-panel-header button:hover,
+.paper-tabs button:hover,
+.paper-tabs button.selected,
 .paper-section button:hover:not(:disabled),
 .pending-order button:hover,
 .preset-buttons button:hover,
@@ -1090,6 +1110,8 @@ p {
 
 .position-summary,
 .pending-order,
+.paper-position-row,
+.paper-pending-row,
 .paper-trade-row {
   border: 1px solid #303844;
   border-radius: 6px;
@@ -1101,6 +1123,44 @@ p {
   gap: 5px;
   padding: 9px 10px;
   font-size: 13px;
+}
+
+.paper-position-row {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.paper-pending-row {
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #8b949e;
+}
+
+/* 单子行是 button（点击锚定/回光标）：重置 UA 样式并给 hover/active 态。 */
+button.paper-position-row,
+button.paper-trade-row {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+}
+
+button.paper-position-row:hover,
+button.paper-trade-row:hover {
+  border-color: #3b82f6;
+}
+
+button.paper-trade-row.active {
+  border-color: #3b82f6;
+  background: #16233a;
+}
+
+.paper-order-time {
+  color: #8b949e;
+  font-size: 12px;
 }
 
 .pending-order {
@@ -1141,11 +1201,6 @@ p {
 
 .leg-stop-control input {
   min-width: 0;
-}
-
-.paper-trade-list {
-  max-height: 260px;
-  overflow: auto;
 }
 
 .paper-trade-row {
