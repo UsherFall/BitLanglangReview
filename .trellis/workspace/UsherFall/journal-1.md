@@ -1347,3 +1347,16 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 **实现**：`ChartDrawing.board` 必填 + 全链路打标（抽屉 scan / 复盘·回溯 review）；store 迁移沿用整表重建模式，R4 启发式归板（`trade_id IS NULL AND created_at >= '2026-10-21' AND native 命名` → scan，对真实库精确命中 JUPUSDT/ASTERUSDT）；`listDrawings` 板内 canonical；`ScanRow.drawnLineCount/drawnTimeframes`；`CoinScanResults` 币列徽标。
 
 **验证**：vitest 604 全绿 + tsc 无错；真实库副本迁移验证（scan 板恰好两条抽屉线）；dev server 冒烟（GET/POST 缺 board → 400；scan 板取到抽屉线；review 板 canonical 命中复盘线）。子代理 spawn 在 WSL 下 ENOENT（pi 是 Windows 侧安装），本任务改为 inline 实现。迁移前备份：`data/review.sqlite.bak-1026`（确认无误后可删）。
+
+## 2026-10-29 · 回溯复盘焦点单锚定（10-29-replay-order-anchor）
+
+**需求**（UsherFall）：小屏看不到右栏单子；点单子要跳到开仓点（类交割单复盘）；切周期保持锚定该单。
+
+**实现**：
+- 面板分「操作/单子」Tab，头部+统计常显，`.paper-tab-body` 为唯一滚动区（panel 改 flex 列 + overflow:hidden）。
+- `orderFocus { id, timeMs, token }` 临时状态（不进会话存盘）；`FreeReplayChart` 加 `focusRequest` prop，定位 effect 每 `rangeKey:token` 定位一次（token 递增支持再点同一行重新归位；rangeKey 变 → 切周期重锚）。
+- 窗口复用 `entryVisibleRange`（±150 根，与交割单复盘同款）；grid 走 `replayCandleGrid(replay)`。
+- 解除：步进/开平仓提交/点持仓行/切会话/离模式；解除不动视口，下次步进按舒适区规则回光标。
+- 坑：切周期过渡 commit 里 loadedCandles 还是旧周期 —— 追页/定位前必须验 `loadedCandles[0].timeframe === timeframe`（与历史回填同一道闸），否则新周期 earlier 页会合进旧周期数组。追页历史用尽可能 `earlierExhaustedRef` 破死循环。
+
+**验证**：vitest 615 全绿（新增 6 用例）；tsc 零报错（顺带修了 makeSeededSession overrides 类型的既有 886 行报错）。子代理 spawn 仍 ENOENT，inline 实现。CSS 滚动/布局 jsdom 验不了，留 dev server 手动确认。
