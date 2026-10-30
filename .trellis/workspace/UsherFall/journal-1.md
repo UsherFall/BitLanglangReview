@@ -1360,3 +1360,15 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 - 坑：切周期过渡 commit 里 loadedCandles 还是旧周期 —— 追页/定位前必须验 `loadedCandles[0].timeframe === timeframe`（与历史回填同一道闸），否则新周期 earlier 页会合进旧周期数组。追页历史用尽可能 `earlierExhaustedRef` 破死循环。
 
 **验证**：vitest 615 全绿（新增 6 用例）；tsc 零报错（顺带修了 makeSeededSession overrides 类型的既有 886 行报错）。子代理 spawn 仍 ENOENT，inline 实现。CSS 滚动/布局 jsdom 验不了，留 dev server 手动确认。
+
+## 2026-10-29 · 焦点单二修：一窗直跳 + 回光标（无任务，用户批准直改）
+
+**现场**（UsherFall）：点单锚定 → 切周期 → 再点单"不行了"。用真实会话（BTCUSDT 2023-05-17，15m，光标 07-20，20 笔单最早开仓 05-23）定位：旧实现从光标区逐页 earlier 翻到开仓点要几十次串行请求，切周期后窗口重置回光标区，再点又从头追——读作"坏了"。mock 数据 3 根测不出来。
+
+**修法**（对齐交割单复盘）：
+- 点单取数改 `mode=initial&entryTime=开仓点ISO` 一次 ±150 根窗口，合并后直接锚定；每个 focusKey 只取一次，取过仍不覆盖/失败就贴已加载最早边。不追页、不循环。
+- 回到光标落到实处：市价/限价开平仓提交、点持仓行 → 清焦点 + 视口跳回光标（`anchorViewportToCursor`，与初始锚定同函数）。步进仍走 10/28 舒适区。
+- 坑：回光标令牌去重键若含 rangeKey，切周期会重新消费同一令牌、把焦点锚定拽回光标——令牌必须全局只消费一次（用例抓到了）。
+- 顺带修既有 bug：earlier/later 翻页硬编码 `source=bitget`，旧会话（candle_source=null，应为 binance-only）翻页混进 Bitget 价，违反 10/21 会话自带 venue 契约。
+
+**验证**：vitest 617 全绿（+2 用例：一窗取数断言 initial+binance-only+无 earlier；开平仓/持仓行回光标）；tsc 零报错。spec 焦点单小节同步改写。
