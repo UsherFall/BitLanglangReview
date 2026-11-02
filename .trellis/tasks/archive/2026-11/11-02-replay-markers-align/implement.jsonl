@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TradeChart/FreeReplayChart 图表集成契约：marker refs 管理、TradeMarkerPrimitive 圆点锚定规则（candleByChartTime、不 floor 未加载时间）、共享纯函数放 src/ui 帮助文件的要求"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "free replay / chart / drawing 状态归属：本次把标记点集计算上移 App、图表只吃 props 点集，需符合既有状态边界"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 行为验证与测试要求；标记层改造的用例断言方式（jsdom 下 canvas 布局为空的约束）"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "改 FreeReplayChart 的 effects（primitive setPoints 时机、crosshair 订阅/清理）需符合 ref/effect 规范"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Direction（多/空）与 ReviewTimeframe 领域类型定义，MarkerPoint 复用时需要"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "新增 paperTradeChartPoints 等纯函数的类型与 PaperTrade 模型映射（long/short → 多/空）"}
