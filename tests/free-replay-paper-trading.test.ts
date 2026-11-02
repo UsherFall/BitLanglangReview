@@ -18,6 +18,7 @@ import {
   processRevealedCandle,
   startPaperTrading,
   type PaperTrade,
+  type PaperTradingSession,
   type PaperTradingSettings,
 } from '../src/ui/free-replay-paper-trading';
 
@@ -287,17 +288,46 @@ describe('Free Replay Paper Trading', () => {
     const halfClosed = closeMarket(opened, makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }), Date.parse('2024-05-21T10:10:00+08:00') / 1000, 60);
     const addTime = Date.parse('2024-05-21T10:10:00+08:00') / 1000;
     const addSettings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 50, leverage: 1 };
+    // 11/02 权益制：+120 已实现盈亏滚进可用额度（1000+120-400=720），
+    // 加仓保证金 = 720×50% = 360（旧固定本金制为 500）。
     const added = openMarket(halfClosed, makeCandle('2024-05-21T10:15:00+08:00', { close: 150 }), addSettings, addTime);
     expect(added.position?.legs).toHaveLength(2);
-    expect(added.position?.quantity).toBe(6);
-    expect(added.position?.margin).toBe(700);
+    expect(added.position?.quantity).toBeCloseTo(6.4, 9);
+    expect(added.position?.margin).toBeCloseTo(760, 9);
 
     const closed = closeMarket(added, makeCandle('2024-05-21T10:20:00+08:00', { close: 200 }), Date.parse('2024-05-21T10:25:00+08:00') / 1000);
     expect(closed.position).toBeNull();
     const last = closed.trades[closed.trades.length - 1];
-    expect(last).toMatchObject({ quantity: 6, margin: 700, exitPrice: 200, pnl: 500, returnRate: 500 / 700 });
-    expect(last.entryPrice).toBeCloseTo((4 * 100 + 2 * 150) / 6, 6);
+    expect(last).toMatchObject({ quantity: 6.4, margin: 760, exitPrice: 200, pnl: 520, returnRate: 520 / 760 });
+    expect(last.entryPrice).toBeCloseTo((4 * 100 + 2.4 * 150) / 6.4, 6);
     expect(last.entryTime).toBe(firstEntryTime * 1000);
+  });
+
+  it('compounds the available margin with realized profit and shrinks it with realized loss (11/02 权益制)', () => {
+    const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
+    const started = startPaperTrading(initialPaperTradingSession(), 1);
+    const open = (session: PaperTradingSession, price: number, time: number) =>
+      openMarket(session, makeCandle('2024-05-21T10:00:00+08:00', { close: price }), settings, time);
+    const close = (session: PaperTradingSession, price: number, time: number) =>
+      closeMarket(session, makeCandle('2024-05-21T10:05:00+08:00', { close: price }), time);
+
+    // 盈利复利：+50（10 张 × +5）后可用 = 1050，100% 开仓保证金 = 1050、数量 10。
+    const won = close(open(started, 100, 1), 105, 2);
+    expect(availableMargin(won)).toBe(1050);
+    const compounded = open(won, 105, 3);
+    expect(compounded.position?.margin).toBe(1050);
+    expect(compounded.position?.quantity).toBeCloseTo(10, 9);
+
+    // 亏损缩减：-50 后可用 = 950，再 100% 开仓保证金 = 950。
+    const lost = close(open(started, 100, 1), 95, 2);
+    expect(availableMargin(lost)).toBe(950);
+    const reduced = open(lost, 95, 3);
+    expect(reduced.position?.margin).toBe(950);
+
+    // 权益归零后不再开仓。
+    const wiped = close(open(started, 100, 1), 0, 2);
+    expect(availableMargin(wiped)).toBe(0);
+    expect(open(wiped, 50, 3).position).toBeNull();
   });
 
   it('cannot add when no available margin remains', () => {

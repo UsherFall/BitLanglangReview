@@ -36,6 +36,7 @@ import {
   initialPaperTradingSession,
   normalizePaperTradingSession,
   openMarket,
+  PAPER_ACCOUNT_EQUITY,
   paperTradeChartPoints,
   focusedPaperTradePoints,
   paperTradingStats,
@@ -1097,7 +1098,8 @@ function FreeReplayPaperTradingPanel({
       <div className="paper-panel-header">
         <div>
           <h2>模拟交易</h2>
-          <p>本金 1000 USDT</p>
+          {/* 11/02 权益制：开仓额度随已实现盈亏复利，头部直接显示当前权益。 */}
+          <p>本金 1000 USDT · 权益 {(PAPER_ACCOUNT_EQUITY + stats.realizedPnl).toFixed(2)} USDT</p>
         </div>
         <button type="button" aria-label="重置模拟交易" onClick={onReset}>重置</button>
       </div>

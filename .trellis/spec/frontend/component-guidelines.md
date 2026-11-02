@@ -157,6 +157,7 @@ Free Replay paper trading state lives in `src/ui/free-replay-paper-trading.ts`; 
 
 Order execution contracts:
 
+- **Available margin is EQUITY-based (compounding, 11/02)**: `availableMargin = 1000 + realized PnL − used margin`. Realized profit rolls into the next open's sizing, realized loss shrinks it; `100%` position = the whole CURRENT equity, not the fixed 1000 base. Floating PnL of an open position does NOT count (unrealized); closing applies immediately. Existing sessions compound retroactively — realized PnL lives in `session.trades`, no migration. The panel header shows 本金 + 当前权益.
 - Market open/close uses the current Free Replay cursor candlestick close.
 - Entry and exit limit orders trigger only when a newly revealed candlestick contains the limit price: `low <= price <= high`.
 - Stop-loss orders are valid only on the loss side of the open position: long stop loss below entry price, short stop loss above entry price.

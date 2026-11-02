@@ -120,9 +120,17 @@ export function startPaperTrading(session: PaperTradingSession, cursorTime: numb
   };
 }
 
+/**
+ * 可用开仓额度（11/02 权益制/复利）：本金 + 已实现盈亏 − 持仓占用保证金。
+ *
+ * 用户决策：盈利滚进开仓额度、亏损缩减额度 —— 100% 仓位 = 权益的全量，
+ * 而非固定本金 1000 的全量。持仓中的浮动盈亏不计（未实现）；平仓后即刻生效。
+ * 已有会话立即受益：已实现盈亏存在 session.trades 里，派生即得，无需迁移。
+ */
 export function availableMargin(session: PaperTradingSession): number {
   const used = session.position?.legs.reduce((sum, leg) => sum + leg.margin, 0) ?? 0;
-  return Math.max(0, PAPER_ACCOUNT_EQUITY - used);
+  const realized = session.trades.reduce((sum, trade) => sum + trade.pnl, 0);
+  return Math.max(0, PAPER_ACCOUNT_EQUITY + realized - used);
 }
 
 export function openMarket(session: PaperTradingSession, candle: Candlestick, settings: PaperTradingSettings, eventTime: number): PaperTradingSession {
