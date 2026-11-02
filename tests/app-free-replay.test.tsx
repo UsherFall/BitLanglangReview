@@ -10,12 +10,17 @@ const chartMocks = vi.hoisted(() => ({
   getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
   getVisibleRange: vi.fn(),
   priceScaleApplyOptions: vi.fn(),
-  setMarkers: vi.fn(),
   setVisibleLogicalRange: vi.fn(),
   setVisibleRange: vi.fn(),
   subscribeVisibleLogicalRangeChange: vi.fn(),
   timeToIndex: vi.fn(() => 150),
   timeScaleOptions: vi.fn(() => ({ barSpacing: 6 })),
+  /** Trade-marker primitives attached to the candlestick series (11/02:
+   * Free Replay 的开平仓点集断言走 primitive，不再用内置箭头标记）。 */
+  primitives: [] as { currentPoints: () => readonly unknown[] }[],
+  attachPrimitive: vi.fn((primitive: { currentPoints: () => readonly unknown[] }) => {
+    chartMocks.primitives.push(primitive);
+  }),
 }));
 
 vi.mock('lightweight-charts', () => ({
@@ -24,7 +29,7 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), attachPrimitive: vi.fn(), coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
+    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), attachPrimitive: chartMocks.attachPrimitive, coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
     subscribeCrosshairMove: vi.fn(),
@@ -44,8 +49,13 @@ vi.mock('lightweight-charts', () => ({
       unsubscribeVisibleTimeRangeChange: vi.fn(),
     }),
   }),
-  createSeriesMarkers: () => ({ setMarkers: chartMocks.setMarkers }),
 }));
+
+/** Points currently held by the newest mounted chart's marker primitive. */
+function markerPoints(): readonly unknown[] {
+  const primitive = chartMocks.primitives[chartMocks.primitives.length - 1];
+  return primitive ? primitive.currentPoints() : [];
+}
 
 describe('App Free Replay', () => {
   beforeEach(() => {
@@ -57,7 +67,7 @@ describe('App Free Replay', () => {
     chartMocks.getVisibleLogicalRange.mockClear();
     chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 160 });
     chartMocks.priceScaleApplyOptions.mockClear();
-    chartMocks.setMarkers.mockClear();
+    chartMocks.primitives.length = 0;
     chartMocks.setVisibleLogicalRange.mockClear();
     chartMocks.setVisibleRange.mockClear();
     chartMocks.subscribeVisibleLogicalRangeChange.mockClear();
@@ -341,7 +351,7 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
   });
 
-  it('toggles Free Replay paper trade entry and exit markers', async () => {
+  it('toggles Free Replay paper trade open/close points through the marker primitive', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
@@ -375,23 +385,80 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
     fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
-    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ text: expect.stringContaining('100') }),
-      expect.objectContaining({ text: expect.stringContaining('110') }),
-    ])));
 
-    chartMocks.setMarkers.mockClear();
+    // 11/02：开/平点是 TradeMarkerPrimitive 画布圆点（交割单复盘同一套）。
+    // 开仓完成于 10:00 → 锚到 09:55 蜡烛；平仓完成于 10:05 → 锚到 10:00 蜡烛。
+    await waitFor(() => {
+      const points = markerPoints() as Array<{ kind: string; price: number }>;
+      expect(points.some((point) => point.kind === 'open' && point.price === 100)).toBe(true);
+      expect(points.some((point) => point.kind === 'close' && point.price === 110)).toBe(true);
+    });
+
+    // 眼睛隐藏态：无焦点单 → 没有可保留的单子，全隐（交割单复盘语义）。
     fireEvent.click(screen.getByLabelText('隐藏开平仓标记'));
+    await waitFor(() => expect(markerPoints()).toHaveLength(0));
 
-    expect(chartMocks.setMarkers).toHaveBeenCalledWith([]);
-
-    chartMocks.setMarkers.mockClear();
     fireEvent.click(screen.getByLabelText('显示开平仓标记'));
+    await waitFor(() => expect((markerPoints() as unknown[]).length).toBeGreaterThanOrEqual(2));
+  });
 
-    expect(chartMocks.setMarkers).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({ text: expect.stringContaining('100') }),
-      expect.objectContaining({ text: expect.stringContaining('110') }),
-    ]));
+  it('keeps only the focused order points when the markers are hidden', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({
+          candles: [
+            makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+            makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          ],
+        }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    // 两个回合：开/平、再开/再平（都在同一根已揭示蜡烛上）。
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+
+    await waitFor(() => expect((markerPoints() as unknown[]).length).toBe(4));
+
+    // 单子 Tab：点第二回合的成交行 → 焦点单。
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const orderRows = screen.getAllByTitle('跳到开仓点');
+    expect(orderRows).toHaveLength(2);
+    fireEvent.click(orderRows[1]);
+
+    // 眼睛隐藏后只留焦点单：回合二的开仓点（position-4）+ 它自己的平仓点（fill-6）。
+    fireEvent.click(screen.getByLabelText('隐藏开平仓标记'));
+    await waitFor(() => {
+      const points = markerPoints() as Array<{ kind: string; tradeId: string }>;
+      expect(points).toHaveLength(2);
+      expect(new Set(points.map((point) => point.tradeId))).toEqual(new Set(['position-4', 'fill-6']));
+    });
+
+    // 再点恢复全部四点。
+    fireEvent.click(screen.getByLabelText('显示开平仓标记'));
+    await waitFor(() => expect((markerPoints() as unknown[]).length).toBe(4));
   });
 
   it('sets a stop loss and closes automatically when the next revealed candle touches it', async () => {
@@ -509,7 +576,7 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(chartMocks.priceScaleApplyOptions).toHaveBeenCalledWith(expect.objectContaining({ mode: 1, autoScale: true })));
   });
 
-  it('remaps Free Replay paper trade markers after switching timeframe', async () => {
+  it('remaps Free Replay paper trade points after switching timeframe', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
       if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
@@ -550,20 +617,35 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
     fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
 
-    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith([
-      expect.objectContaining({ time: Date.parse('2024-05-21T09:55:00+08:00') / 1000 }),
-      expect.objectContaining({ time: Date.parse('2024-05-21T10:00:00+08:00') / 1000 }),
-    ]));
+    // 5m：开仓完成于 10:00 → 09:55 蜡烛；平仓完成于 10:05 → 10:00 蜡烛。
+    await waitFor(() => {
+      const points = markerPoints() as Array<{ kind: string; time: number }>;
+      expect(points).toHaveLength(2);
+      expect(points.map((point) => point.time)).toEqual([
+        Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+        Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+      ]);
+    });
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
-    await waitFor(() => expect(chartMocks.setMarkers).toHaveBeenCalledWith([
-      expect.objectContaining({ time: Date.parse('2024-05-21T09:45:00+08:00') / 1000 }),
-      expect.objectContaining({ time: Date.parse('2024-05-21T09:45:00+08:00') / 1000 }),
-    ]));
-    const latestMarkersCall = chartMocks.setMarkers.mock.calls.at(-1)?.[0];
-    expect(latestMarkersCall).toHaveLength(2);
+    // 15m：开仓重锚到 09:45 蜡烛；平仓属于 10:00-10:15 蜡烛，而 15m 光标
+    // （progress 10:05）只到 09:45 —— 未揭示，不画。旧实现的“下推一根”恰好
+    // 把平仓也画在 09:45 上，那是 2023.3 BTC 复盘里错位的根源。
+    await waitFor(() => {
+      const points = markerPoints() as Array<{ kind: string; time: number }>;
+      expect(points).toHaveLength(1);
+      expect(points[0]).toMatchObject({ kind: 'open', time: Date.parse('2024-05-21T09:45:00+08:00') / 1000 });
+    });
+
+    // 揭示下一根 15m（10:00 蜡烛收线）后，平仓点出现在它自己的蜡烛上。
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => {
+      const points = markerPoints() as Array<{ kind: string; time: number }>;
+      expect(points).toHaveLength(2);
+      expect(points[1]).toMatchObject({ kind: 'close', time: Date.parse('2024-05-21T10:00:00+08:00') / 1000 });
+    });
   });
 
   it('keeps Free Replay progress across large timeframe switches without revealing unfinished candles', async () => {
@@ -881,6 +963,53 @@ describe('App Free Replay', () => {
   // 10/28 现场：Binance 不可达（旧会话源 = binance-only），后续 K 线 502。点
   // 下一根不前进是预期的（没数据）；但恢复出来的持仓必须仍在面板上，且自动
   // 保存不得丢掉 position —— 仓位丢失只能来自状态重置，不能来自加载失败。
+  // 11/02 现场反馈：从 2023.5 的 BTC 复盘切到 2023.3 后单子 Tab 没跟着换。面板
+  // 列表由 props 驱动本会更新，但需要回归钉住；面板本地状态（Tab/方向/限价
+  // 输入/平仓比例）也不得跨会话残留（key 重挂）。
+  it('follows the paper trading panel when switching between two saved sessions', async () => {
+    const seeded = [
+      makeSeededSession({ paperTrading: seededPaperTrading(100, 'fill-3', 'position-1') }),
+      makeSeededSession({ startTime: '2024-05-20 10:00', dataAnchorTime: '2024-05-20 10:00', paperTrading: seededPaperTrading(200, 'fill-9', 'position-8') }),
+    ];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: seeded }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:55:00+08:00'), makeCandle('2024-05-21T10:00:00+08:00')] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+
+    // 恢复会话 A（2024-05-21，成交价 100）。
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT2024-05-21/ }));
+    await waitFor(() => expect(screen.getByText('回溯复盘 2024-05-21 10:00')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    await waitFor(() => expect(document.querySelectorAll('.paper-trade-row')).toHaveLength(1));
+    expect(document.querySelector('.paper-order-list')?.textContent).toContain('100');
+
+    // 切到会话 B（2024-05-20，成交价 200）：面板按会话身份 key 重挂，本地状态
+    // （Tab 选择）复位到操作 —— 不路跨会话残留。
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT2024-05-20/ }));
+    await waitFor(() => expect(screen.getByText('回溯复盘 2024-05-20 10:00')).toBeInTheDocument());
+    expect(document.querySelector('.paper-tabs .selected')?.textContent).toContain('操作');
+
+    // 再进单子 Tab：列表换成 B 的成交。
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    await waitFor(() => expect(document.querySelector('.paper-order-list')?.textContent).toContain('200'));
+    expect(document.querySelector('.paper-order-list')?.textContent).not.toContain('100');
+  });
+
   it('keeps the restored position on the panel and in the auto-save when later candle loads fail', async () => {
     const seeded = [makeSeededSession({
       paperTrading: {
@@ -1646,6 +1775,37 @@ function makeCandle(time: string, overrides = {}) {
     close: 1.5,
     volume: 10,
     ...overrides,
+  };
+}
+
+/** 一次已平仓成交的完整 paper 会话（11/02 会话切换回归用）。 */
+function seededPaperTrading(entryPrice: number, fillId: string, positionId: string): unknown {
+  const cursorTime = Date.parse('2024-05-21T10:05:00+08:00') / 1000;
+  const openMs = Date.parse('2024-05-21T09:30:00+08:00');
+  return {
+    active: true,
+    startedAtCursorTime: cursorTime,
+    nextId: 10,
+    pendingEntry: null,
+    pendingExit: null,
+    position: null,
+    trades: [{
+      id: fillId,
+      positionId,
+      direction: 'long',
+      entryPrice,
+      entryTime: openMs,
+      positionOpenPrice: entryPrice,
+      positionOpenTime: openMs,
+      exitPrice: entryPrice + 10,
+      exitTime: Date.parse('2024-05-21T09:45:00+08:00'),
+      quantity: 1,
+      margin: 500,
+      notional: 5000,
+      leverage: 10,
+      pnl: 10,
+      returnRate: 0.02,
+    }],
   };
 }
 

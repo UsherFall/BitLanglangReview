@@ -9,13 +9,15 @@ import {
   initialPaperTradingSession,
   normalizePaperTradingSession,
   openMarket,
-  paperTradeMarkers,
+  paperTradeChartPoints,
+  focusedPaperTradePoints,
   paperTradingStats,
   placeEntryLimit,
   placeExitLimit,
   placeStopLoss,
   processRevealedCandle,
   startPaperTrading,
+  type PaperTrade,
   type PaperTradingSettings,
 } from '../src/ui/free-replay-paper-trading';
 
@@ -308,17 +310,126 @@ describe('Free Replay Paper Trading', () => {
     expect(ignored.position?.legs).toHaveLength(1);
   });
 
-  it('creates one entry marker per position and one exit marker per close fill', () => {
+  it('creates one open point per position and one close point per fill, anchored to the candle containing the fill', () => {
     const settings: PaperTradingSettings = { direction: 'short', positionRatioPercent: 100, leverage: 1 };
+    // 成交时间都是「完成时刻」：开仓在 10:05 时刻完成（09:55-10:00 蜡烛？不 ——
+    // 5m 蜡烛 10:00-10:05 在 10:05 收线，市价开仓填在收线瞬间）。
     const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, Date.parse('2024-05-21T10:05:00+08:00') / 1000);
     const half = closeMarket(opened, makeCandle('2024-05-21T10:05:00+08:00', { close: 90 }), Date.parse('2024-05-21T10:10:00+08:00') / 1000, 50);
     const closed = closeMarket(half, makeCandle('2024-05-21T10:10:00+08:00', { close: 85 }), Date.parse('2024-05-21T10:15:00+08:00') / 1000);
+    // 蜡烛覆盖成交瞬间：开仓完成于 10:05 → 包含 10:04:59.999 的是 10:00 蜡烛。
     const candles = [makeCandle('2024-05-21T10:00:00+08:00'), makeCandle('2024-05-21T10:05:00+08:00'), makeCandle('2024-05-21T10:10:00+08:00')];
 
-    const markers = paperTradeMarkers(closed.trades, '5m', candles);
-    expect(markers.filter((marker) => marker.text?.startsWith('开 '))).toHaveLength(1);
-    expect(markers.filter((marker) => marker.text?.startsWith('平 '))).toHaveLength(2);
-    expect(markers[0].text).toBe('开 100');
+    const points = paperTradeChartPoints(closed.trades, Date.parse('2024-05-21T10:15:00+08:00') / 1000, '5m', candles);
+    expect(points).toHaveLength(3);
+    expect(points.filter((point) => point.kind === 'open')).toHaveLength(1);
+    expect(points.filter((point) => point.kind === 'close')).toHaveLength(2);
+    const open = points[0];
+    expect(open).toMatchObject({ kind: 'open', price: 100, direction: '空', timeMs: closed.trades[0].positionOpenTime });
+    expect(open.time).toBe(candles[0].timestamp / 1000);
+    expect(open.tradeId).toBe('position-1');
+    // 开仓点带数量/杠杆明细（悬浮卡片用），平仓点带盈亏。
+    expect(open.detail).toMatchObject({ qty: closed.trades[0].quantity, leverage: 1, profit: null });
+    for (const [index, trade] of closed.trades.entries()) {
+      const close = points.find((point) => point.kind === 'close' && point.tradeId === trade.id);
+      expect(close).toBeDefined();
+      expect(close?.time).toBe(candles[index + 1].timestamp / 1000);
+      expect(close?.detail?.profit).toBe(trade.pnl);
+    }
+  });
+
+  it('anchors a fine-timeframe fill onto the containing coarse candle, not one bar back', () => {
+    // 2023.3 BTC 复盘现场：用户在 15m 上做单（完成时刻 23:35，落在 23:20-23:35
+    // 蜡烛），切回 1H 查看。旧实现把 23:35 按光标映射下推一根 → 22:00 蜡烛；
+    // 正确锚点是包含成交瞬间 23:34:59.999 的 23:00 蜡烛。
+    const trade: PaperTrade = {
+      id: 'fill-6',
+      positionId: 'position-4',
+      direction: 'short',
+      entryPrice: 26995.6,
+      entryTime: Date.parse('2024-05-21T23:20:00+08:00'),
+      positionOpenPrice: 26995.6,
+      positionOpenTime: Date.parse('2024-05-21T23:35:00+08:00'),
+      exitPrice: 27065,
+      exitTime: Date.parse('2024-05-22T00:35:00+08:00'),
+      quantity: 0.37,
+      margin: 500,
+      notional: 10000,
+      leverage: 20,
+      pnl: -25.7,
+      returnRate: -0.05,
+    };
+    const candles = [
+      makeCandle('2024-05-21T22:00:00+08:00', { timeframe: '1H' }),
+      makeCandle('2024-05-21T23:00:00+08:00', { timeframe: '1H' }),
+      makeCandle('2024-05-22T00:00:00+08:00', { timeframe: '1H' }),
+    ];
+
+    const points = paperTradeChartPoints([trade], Date.parse('2024-05-22T01:00:00+08:00') / 1000, '1H', candles);
+
+    const open = points.find((point) => point.kind === 'open');
+    const close = points.find((point) => point.kind === 'close');
+    expect(open?.time).toBe(Date.parse('2024-05-21T23:00:00+08:00') / 1000);
+    expect(close?.time).toBe(Date.parse('2024-05-22T00:00:00+08:00') / 1000);
+  });
+
+  it('drops points whose candle is not loaded and points still in the future', () => {
+    const base: PaperTrade = {
+      id: 'fill-1',
+      positionId: 'position-1',
+      direction: 'long',
+      entryPrice: 100,
+      entryTime: Date.parse('2024-05-21T10:00:00+08:00'),
+      positionOpenPrice: 100,
+      positionOpenTime: Date.parse('2024-05-21T10:03:00+08:00'),
+      exitPrice: 110,
+      exitTime: Date.parse('2024-05-21T10:12:00+08:00'),
+      quantity: 1,
+      margin: 500,
+      notional: 500,
+      leverage: 1,
+      pnl: 10,
+      returnRate: 0.02,
+    };
+    // 只加载 10:00、10:05 两根：开仓（完成于 10:03）落在 10:00 蜡烛内 ✓；
+    // 平仓（完成于 10:12）无已加载蜡烛包含 → 丢弃，滚入视口后自然出现。
+    const candles = [makeCandle('2024-05-21T10:00:00+08:00'), makeCandle('2024-05-21T10:05:00+08:00')];
+
+    const points = paperTradeChartPoints([base], candles[1].timestamp / 1000, '5m', candles);
+    expect(points).toHaveLength(1);
+    expect(points[0].kind).toBe('open');
+    expect(points[0].time).toBe(candles[0].timestamp / 1000);
+
+    // 未来过滤：平仓改在 10:07 完成 → 锚到 10:05 蜡烛；光标只到 10:00 时
+    // 该蜡烛尚未揭示，平仓点不画（开仓点在已揭示的 10:00 蜡烛上，保留）。
+    const revealed: PaperTrade = { ...base, exitTime: Date.parse('2024-05-21T10:07:00+08:00') };
+    expect(paperTradeChartPoints([revealed], candles[1].timestamp / 1000, '5m', candles)).toHaveLength(2);
+    expect(paperTradeChartPoints([revealed], candles[0].timestamp / 1000, '5m', candles)).toHaveLength(1);
+  });
+
+  it('keeps only the focused fill\'s round-open and own close for the eye button', () => {
+    const settings: PaperTradingSettings = { direction: 'long', positionRatioPercent: 100, leverage: 1 };
+    const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, Date.parse('2024-05-21T10:05:00+08:00') / 1000);
+    const half = closeMarket(opened, makeCandle('2024-05-21T10:05:00+08:00', { close: 110 }), Date.parse('2024-05-21T10:10:00+08:00') / 1000, 50);
+    const reopened = openMarket(half, makeCandle('2024-05-21T10:10:00+08:00', { close: 105 }), settings, Date.parse('2024-05-21T10:15:00+08:00') / 1000);
+    const closed = closeMarket(reopened, makeCandle('2024-05-21T10:10:00+08:00', { close: 120 }), Date.parse('2024-05-21T10:15:00+08:00') / 1000);
+    const candles = [makeCandle('2024-05-21T10:00:00+08:00'), makeCandle('2024-05-21T10:05:00+08:00'), makeCandle('2024-05-21T10:10:00+08:00')];
+    const cursorTime = Date.parse('2024-05-21T10:15:00+08:00') / 1000;
+    const points = paperTradeChartPoints(closed.trades, cursorTime, '5m', candles);
+
+    // 无焦点 → 空（眼睛隐藏态没有可保留的单子）。
+    expect(focusedPaperTradePoints(points, closed.trades, null)).toHaveLength(0);
+    // 焦点在第二笔平仓成交：回合开仓点 + 它自己的平仓点，不含第一笔的平仓点。
+    const focused = focusedPaperTradePoints(points, closed.trades, closed.trades[1].id);
+    expect(focused).toHaveLength(2);
+    expect(focused[0]).toMatchObject({ kind: 'open', tradeId: 'position-1' });
+    expect(focused[1]).toMatchObject({ kind: 'close', tradeId: closed.trades[1].id });
+    // 焦点在第一笔：同样是回合开仓 + 第一笔平仓。
+    const first = focusedPaperTradePoints(points, closed.trades, closed.trades[0].id);
+    expect(first).toHaveLength(2);
+    expect(first[1].tradeId).toBe(closed.trades[0].id);
+    // 未知焦点 id → 空。
+    expect(focusedPaperTradePoints(points, closed.trades, 'nope')).toHaveLength(0);
   });
 
   it('normalizes a legacy single-block session and attaches the old stop to its leg', () => {

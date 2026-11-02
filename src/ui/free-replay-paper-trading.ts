@@ -1,7 +1,7 @@
-import type { SeriesMarker, UTCTimestamp } from 'lightweight-charts';
 import type { Candlestick } from '../domain/candlestick';
-import type { ReviewTimeframe } from '../domain/trade';
-import { freeReplayCursorTimeForProgress } from './chart-time';
+import type { Direction, ReviewTimeframe, TradePoint } from '../domain/trade';
+import { containingCandleTimestamp } from './chart-time';
+import type { MarkerPoint } from './trade-markers';
 
 export const PAPER_ACCOUNT_EQUITY = 1000;
 
@@ -249,31 +249,127 @@ export function currentCursorCandle(candles: Candlestick[], cursorTime: number):
   return candles.find((candle) => candle.timestamp === cursorTimestamp) ?? null;
 }
 
-export function paperTradeMarkers(trades: PaperTrade[], timeframe: ReviewTimeframe, candles: Candlestick[]): SeriesMarker<UTCTimestamp>[] {
-  const byPosition = new Map<string, PaperTrade>();
-  const markers: SeriesMarker<UTCTimestamp>[] = [];
+/**
+ * Chart points of every COMPLETED paper fill (11/02) — the 交割单复盘
+ * `tradeChartPoints` pipeline, on the paper data model.
+ *
+ * A paper fill records its event as the COMPLETION instant of the candle the
+ * fill happened on (the cursor candle's close). The point anchors to the
+ * loaded candlestick that CONTAINS that instant (`eventTime - 1` — the moment
+ * the closing candle was still current), which is correct no matter which
+ * timeframe the fill was MADE on versus the one being VIEWED:
+ *
+ * - same timeframe: the containing candle is the cursor candle the fill closed
+ *   on (what the old `freeReplayCursorTimeForProgress` mapping produced);
+ * - fill on a FINER timeframe, viewed on a coarser one: the containing candle
+ *   is the coarse candle the fine fill sits inside. The old mapping floored
+ * the completion onto the coarse grid and stepped back one bar, so a 15m fill
+ * at 23:20-23:35 drew on the 22:00 1H candle — one whole bar early, on a
+ * candle whose price had nothing to do with the fill (the 2023.3 BTC replay
+ * complaint read as "wrong candles / misplaced points");
+ * - fill on a COARSER timeframe, viewed on a finer one: the containing candle
+ *   is the last fine bar inside the coarse candle — its close IS the fill
+ *   price's own close time.
+ *
+ * A fill whose containing candle is not loaded yields no point (same rule as
+ * `tradeChartPoints`: never floor onto the grid, the dot would hang mid-air
+ * between one candle's x and another's price). It appears once scrolled in.
+ *
+ * `cursorTime` (seconds) is the reveal boundary: a fill whose candle is later
+ * than the cursor is still in the future and must not be drawn.
+ *
+ * Identity: an OPEN point is shared by the whole position round, so its
+ * `tradeId` is the round's `positionId` (the round's 开 shows when ANY of its
+ * fills is focused); a CLOSE point's `tradeId` is the fill's own id.
+ */
+export function paperTradeChartPoints(
+  trades: PaperTrade[],
+  cursorTime: number,
+  timeframe: ReviewTimeframe,
+  candles: Candlestick[],
+): MarkerPoint[] {
+  const points: MarkerPoint[] = [];
+  const seenPositionOpens = new Set<string>();
   for (const trade of trades) {
-    const isLong = trade.direction === 'long';
-    if (!byPosition.has(trade.positionId)) {
-      byPosition.set(trade.positionId, trade);
-      markers.push({
-        time: freeReplayCursorTimeForProgress(trade.positionOpenTime / 1000, timeframe),
-        position: isLong ? 'belowBar' : 'aboveBar',
-        color: '#FACC15',
-        shape: isLong ? 'arrowUp' : 'arrowDown',
-        text: `开 ${trade.positionOpenPrice}`,
+    const direction = paperDirection(trade.direction);
+    const openTime = anchorToContainingCandle(trade.positionOpenTime, timeframe, candles);
+    if (openTime !== null && openTime <= cursorTime && !seenPositionOpens.has(trade.positionId)) {
+      seenPositionOpens.add(trade.positionId);
+      points.push({
+        key: `${trade.positionId}#open`,
+        tradeId: trade.positionId,
+        time: openTime,
+        timeMs: trade.positionOpenTime,
+        price: trade.positionOpenPrice,
+        kind: 'open',
+        direction,
+        muted: false,
+        detail: paperPointDetail('open', trade.positionOpenTime, trade.positionOpenPrice, trade),
       });
     }
-    markers.push({
-      time: freeReplayCursorTimeForProgress(trade.exitTime / 1000, timeframe),
-      position: isLong ? 'aboveBar' : 'belowBar',
-      color: '#38BDF8',
-      shape: isLong ? 'arrowDown' : 'arrowUp',
-      text: `平 ${trade.exitPrice}`,
-    });
+    const closeTime = anchorToContainingCandle(trade.exitTime, timeframe, candles);
+    if (closeTime !== null && closeTime <= cursorTime) {
+      points.push({
+        key: `${trade.id}#close`,
+        tradeId: trade.id,
+        time: closeTime,
+        timeMs: trade.exitTime,
+        price: trade.exitPrice,
+        kind: 'close',
+        direction,
+        muted: false,
+        detail: paperPointDetail('close', trade.exitTime, trade.exitPrice, trade),
+      });
+    }
   }
-  markers.sort((a, b) => Number(a.time) - Number(b.time));
-  return markers;
+  return points;
+}
+
+/**
+ * The points of ONE focused fill (11/02): the focus order's own close plus the
+ * OPEN of its position round. This is what the「隐藏开平仓标记」eye button keeps
+ * on screen — the same semantics as 交割单复盘's default view, where only the
+ * currently selected trade's markers show. An unknown/absent focus keeps
+ * nothing.
+ */
+export function focusedPaperTradePoints(points: MarkerPoint[], trades: PaperTrade[], focusedTradeId: string | null): MarkerPoint[] {
+  if (!focusedTradeId) return [];
+  const focused = trades.find((trade) => trade.id === focusedTradeId);
+  if (!focused) return [];
+  return points.filter((point) => point.kind === 'open'
+    ? point.tradeId === focused.positionId
+    : point.tradeId === focused.id);
+}
+
+/** Paper `long`/`short` on the domain's Chinese direction vocabulary. */
+function paperDirection(direction: PaperDirection): Direction {
+  return direction === 'long' ? '多' : '空';
+}
+
+/** Chart time (seconds) of the loaded candlestick containing `eventTimeMs - 1`. */
+function anchorToContainingCandle(eventTimeMs: number, timeframe: ReviewTimeframe, candles: Candlestick[]): number | null {
+  if (!Number.isFinite(eventTimeMs)) return null;
+  const containing = containingCandleTimestamp(eventTimeMs - 1, timeframe, candles);
+  return containing === null ? null : Math.floor(containing / 1000);
+}
+
+/**
+ * Per-point tooltip detail on the domain `TradePoint` shape. Paper fills carry
+ * no fee and no exchange order source; the tooltip mapper passes `fee: null` /
+ * `source: ''` so those rows are omitted instead of showing zeros.
+ */
+function paperPointDetail(kind: 'open' | 'close', timeMs: number, price: number, trade: PaperTrade): TradePoint {
+  return {
+    kind,
+    time: new Date(timeMs).toISOString(),
+    timeMs,
+    price,
+    qty: trade.quantity,
+    fee: 0,
+    profit: kind === 'close' ? trade.pnl : null,
+    source: '',
+    leverage: trade.leverage,
+  };
 }
 
 export function normalizePaperTradingSession(stored: unknown): PaperTradingSession {

@@ -1,4 +1,4 @@
-import { CandlestickSeries, ColorType, createChart, createSeriesMarkers, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type ISeriesMarkersPluginApi, type LogicalRange, type MouseEventParams, type SeriesMarker, type Time, type UTCTimestamp } from 'lightweight-charts';
+import { CandlestickSeries, ColorType, createChart, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDollarSign, Eraser, Eye, EyeOff, Magnet, MapPin, Minus, MoveUpRight, RefreshCcw, Scale, Search, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
@@ -36,7 +36,8 @@ import {
   initialPaperTradingSession,
   normalizePaperTradingSession,
   openMarket,
-  paperTradeMarkers,
+  paperTradeChartPoints,
+  focusedPaperTradePoints,
   paperTradingStats,
   placeEntryLimit,
   placeExitLimit,
@@ -684,7 +685,10 @@ export function App() {
 
   const freeReplayCurrentCandle = freeReplay ? currentCursorCandle(freeReplayCandles, freeReplay.cursorTime) : null;
   const paperStats = paperTradingStats(paperTrading, freeReplayCurrentCandle);
-  const paperMarkers = freeReplay ? paperTradeMarkers(paperTrading.trades, timeframe, freeReplayCandles).filter((marker) => Number(marker.time) <= freeReplay.cursorTime) : [];
+  // 11/02 标记层换成交割单复盘管线：点集纯函数锚定到包含成交时刻的已加载K线
+  // （修复跨周期做单后标记左移一根粗蜡烛），隐藏眼睛只留焦点单。
+  const paperMarkerPoints = freeReplay ? paperTradeChartPoints(paperTrading.trades, freeReplay.cursorTime, timeframe, freeReplayCandles) : [];
+  const focusPaperMarkerPoints = focusedPaperTradePoints(paperMarkerPoints, paperTrading.trades, orderFocus?.id ?? null);
 
   return (
     <main className="app-shell" style={shellStyle}>
@@ -851,8 +855,11 @@ export function App() {
               </div>
             </header>
             <div className="free-replay-workspace">
-              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperMarkers={paperMarkers} futureRetryToken={futureRetryToken} focusRequest={orderFocus ? { timeMs: orderFocus.timeMs, token: orderFocus.token } : null} cursorRequest={cursorReturnToken} onCandlesLoaded={setFreeReplayCandles} />
+              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperPoints={paperMarkerPoints} focusPoints={focusPaperMarkerPoints} futureRetryToken={futureRetryToken} focusRequest={orderFocus ? { timeMs: orderFocus.timeMs, token: orderFocus.token } : null} cursorRequest={cursorReturnToken} onCandlesLoaded={setFreeReplayCandles} />
+              {/* 11/02：按会话身份重挂面板 —— 单子/持仓随 props 更新，但本地状态
+                  （Tab、方向、限价输入、平仓比例）不得跨会话残留。 */}
               <FreeReplayPaperTradingPanel
+                key={`${freeReplay.instrument}:${freeReplay.startTime}`}
                 session={paperTrading}
                 stats={paperStats}
                 currentCandle={freeReplayCurrentCandle}
@@ -1259,10 +1266,13 @@ function stopLossDirectionHint(direction: PaperDirection, currentPrice: number):
   return direction === 'long' ? `低于当前价 ${currentPrice}` : `高于当前价 ${currentPrice}`;
 }
 
-function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, focusRequest, cursorRequest, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperMarkers: SeriesMarker<UTCTimestamp>[]; futureRetryToken: number; focusRequest: { timeMs: number; token: number } | null; cursorRequest: number; onCandlesLoaded: (candles: Candlestick[]) => void }) {
+function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRetryToken, focusRequest, cursorRequest, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperPoints: MarkerPoint[]; focusPoints: MarkerPoint[]; futureRetryToken: number; focusRequest: { timeMs: number; token: number } | null; cursorRequest: number; onCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  // 11/02：回溯复盘标记层改用交割单复盘同一套 TradeMarkerPrimitive 画布圆点
+  // + 悬浮卡片（用户要求 UI 一致）；内置箭头标记退役。
+  const markerPrimitiveRef = useRef<TradeMarkerPrimitive | null>(null);
+  const markerTooltipRef = useRef<TradeMarkerTooltip | null>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
   const loadingFutureRef = useRef(false);
   const lastFutureLoadAnchorRef = useRef<number | null>(null);
@@ -1345,11 +1355,35 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, fo
     });
     chartApiRef.current = chart;
     seriesRef.current = series;
-    markersRef.current = createSeriesMarkers(series, []);
+    // 11/02：与交割单复盘同款标记层 —— 画布圆点 + 悬浮卡片（TradeMarkerPrimitive
+    // + createTradeMarkerTooltip），不再用内置箭头标记。
+    const markerPrimitive = new TradeMarkerPrimitive([], []);
+    series.attachPrimitive(markerPrimitive);
+    markerPrimitiveRef.current = markerPrimitive;
+    const tooltip = createTradeMarkerTooltip(chartRef.current);
+    markerTooltipRef.current = tooltip;
     resetChartPriceScale(chart);
     const refreshOverlay = () => drawings.bumpOverlay();
+    const handleCrosshairMove = (param: MouseEventParams) => {
+      const primitive = markerPrimitiveRef.current;
+      const currentTooltip = markerTooltipRef.current;
+      if (!primitive || !currentTooltip) return;
+      const hit = param.point ? primitive.findPointAt(param.point.x, param.point.y) : null;
+      if (!hit || !param.point) {
+        currentTooltip.hide();
+        return;
+      }
+      currentTooltip.show(paperTooltipDataFor(hit), { x: param.point.x, y: param.point.y });
+    };
+    chart.subscribeCrosshairMove(handleCrosshairMove);
     chart.timeScale().subscribeVisibleTimeRangeChange(refreshOverlay);
-    return () => chart.remove();
+    return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
+      tooltip.destroy();
+      markerTooltipRef.current = null;
+      markerPrimitiveRef.current = null;
+      chart.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -1406,7 +1440,9 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, fo
     const visibleBars = pendingSwitchVisibleBarsRef.current ?? visibleBarsForChart(chart, chartRef.current);
     const range = cursorAnchoredTimeRange(replay.cursorTime, step, visibleBars);
     series.setData(chartDataWithWhitespace(visibleCandles, [range.from * 1000, range.to * 1000]));
-    markersRef.current?.setMarkers(markersVisible ? paperMarkers : []);
+    // 喂给 primitive 的蜡烛与 setData 同一份已揭示蜡烛：点价锚（高低点）与
+    // 横坐标来自同一根K线（点集在纯函数层已按已加载蜡烛对齐并过滤未来）。
+    markerPrimitiveRef.current?.setPoints(markersVisible ? paperPoints : focusPoints, visibleCandles);
     const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}`;
     if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey) {
       initializedRangeKeyRef.current = rangeKey;
@@ -1415,7 +1451,7 @@ function FreeReplayChart({ replay, timeframe, paperMarkers, futureRetryToken, fo
       // 在后，同一 commit 随后执行；开仓点未加载时它先取开仓点窗口，数据到了再定位）。
       if (!focusRequest) anchorViewportToCursor(range as { from: UTCTimestamp; to: UTCTimestamp });
     }
-  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe, paperMarkers, markersVisible]);
+  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, timeframe, paperPoints, focusPoints, markersVisible]);
 
   useEffect(() => {
     if (!loadedCandlesRef.current.length) return;
@@ -2205,6 +2241,27 @@ async function extendCandlesForLateActions(
     // Supplementary window: a failure here must not sink the primary load.
     return candles;
   }
+}
+
+/**
+ * Paper-fill hover card (11/02)。沿用交割单复盘的悬浮卡片结构（价格/数量/时间/
+ * 杠杆/盈亏），但纸面成交没有手续费与交易所订单来源 —— 传 null/'' 省掉那两行。
+ * 盈亏只对平仓点有意义（开仓点未实现）。每点的数量/杠杆/盈亏由点集纯函数
+ * 装进 `detail`（领域 TradePoint 形状）携带。
+ */
+function paperTooltipDataFor(point: MarkerPoint): TooltipData {
+  const detail = point.detail;
+  return {
+    kind: point.kind,
+    direction: point.direction,
+    timeMs: point.timeMs,
+    price: point.price,
+    qty: detail?.qty ?? 0,
+    fee: null,
+    profit: point.kind === 'close' ? (detail?.profit ?? null) : null,
+    source: '',
+    leverage: detail?.leverage ?? null,
+  };
 }
 
 /** Hover-card payload: per-action detail when the source has orders, else the
