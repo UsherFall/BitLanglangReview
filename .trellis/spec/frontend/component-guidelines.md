@@ -43,6 +43,19 @@ Important local patterns:
 - **A replay session records its own venue** (`free_replay_sessions.candle_source`, optional). A session recorded before the move has none and keeps replaying against Binance — the venue is a property of the SESSION, not a global setting, and a session the user already has progress in must not be moved under their feet.
 - `OtherCoinChart` reads the venue it is TOLD. It used to hard-code Binance for the replay and ignore the prop everywhere else, which made a `source=bitget` panel silently read Binance.
 
+### Free Replay's candle source is USER-selectable (11/02)
+
+- The start panel offers the same three sources as 选品 (币安/OKX/Bitget, default Bitget); the selected source is recorded into the new session's `candleSource` in the ROUTE vocabulary (`binance-only` = the strict no-fallback Binance Free Replay has always used; `okx`; `bitget`). The instrument list follows the source (`/api/free-replay/instruments?source=…` — each venue has its own symbol vocabulary).
+- An ACTIVE session can switch sources from a header select: progress/trades stay, `dataAnchorTime`/cursor are recomputed on the NEW source's grid, loaded candles are cleared, the chart refetches. This is an EXPLICIT user action — the "never move a session's venue silently" contract still holds; switching is how the user says "this is my price basis now".
+- The session's `instrument` keeps its creation-time vocabulary (the `(instrument, startTime)` session key must stay stable); every candle request translates instead via `replayRequestInstrument(instrument, routeSource)` (`usdtSymbolToOkxInstrument` / `okxInstrumentToBitgetSymbol`). A venue that does not know the translated instrument answers an empty window — a visible failure, never a silent venue switch.
+- `replayCandleGrid` maps the grid by the source's VALUE (`binance-only`/absent → `utc`, `okx`/`bitget` → `shanghai`), never by the field's PRESENCE: restore rewrites `null` to `binance-only`, and a presence-based mapping anchored restored legacy sessions to the wrong day boundary.
+- The auto-save PUT payload MUST carry `candleSource` (11/02 fix): the payload used to drop it, so a post-10/21 Bitget session lost its venue on the first save and restored as `binance-only`.
+- The chart's `rangeKey` includes `candleSource` — switching is a new data view, all per-rangeKey dedupe (initialization, cursor-follow, backfill) restarts.
+
+### Middle-gap healing (11/02)
+
+Historical paging and focus-window merges can leave a gap INSIDE the loaded candle array. The `earlier` loader only fires at the viewport's left edge and `later` only at the right edge/cursor+20, so a middle gap was never fetched by anything — it read as "一段 K 线空缺", and the reveal cursor JUMPED the gap (skipping candles). FreeReplayChart now detects the first in-range gap (`firstGapInRange`, same 1.5×step rule as `contiguousCandles`) over「visible range ∪ cursor+20 bars」and heals it with ONE `mode=initial` window centered on the gap (the exchange serves contiguous windows). `tools/backfill-candles.ts` is the one-time repair for existing cache holes (bounded at 20k bars per gap; wider spans are never-loaded history and stay to on-demand loading).
+
 ### The drawing layer lives in `src/ui/chart-drawing.tsx` (10/21)
 
 The tool row, the SVG overlay, the drag handling, the magnet and the persistence of a chart's levels are one reusable HOOK: `useChartDrawings({ instrument, board, timeframe, tradeId, chartApiRef, seriesRef, candles, snapCandles?, enabled?, toolbarExtra? })`. It returns `{ drawingTool, selectDrawingTool, drawings, selectedDrawingId, setSelectedDrawingId, toolbar, overlay, overlayRef, overlayVersion, bumpOverlay, magnetMode, setMagnetMode }`.

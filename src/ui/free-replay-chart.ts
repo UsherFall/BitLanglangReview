@@ -1,7 +1,8 @@
 import type { Candlestick } from '../domain/candlestick';
+import { okxInstrumentToBitgetSymbol, usdtSymbolToOkxInstrument } from '../domain/instrument-symbol';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { CandleGrid } from './chart-time';
-import { freeReplayCandleCompletionTime } from './chart-time';
+import { freeReplayCandleCompletionTime, timeframeMs } from './chart-time';
 
 /**
  * The candle source and day boundary Free Replay charts against.
@@ -25,6 +26,21 @@ export const FREE_REPLAY_CANDLE_SOURCE = 'bitget';
 export const FREE_REPLAY_CANDLE_GRID: CandleGrid = 'shanghai';
 
 /**
+ * A Free Replay session's recorded candle source (11/02). `binance-only` is the
+ * strict Binance venue Free Replay has always used for its「币安」option; `okx`
+ * and `bitget` are the other two selectable sources. This is the ROUTE's
+ * vocabulary — it is stored verbatim in the session and sent as `source=`.
+ */
+export type ReplayCandleSource = 'binance-only' | 'okx' | 'bitget';
+
+/** The UI-facing source list, in display order (选品同款词汇). */
+export const REPLAY_SOURCE_LABELS: Record<ReplayCandleSource, string> = {
+  'binance-only': '币安',
+  okx: 'OKX',
+  bitget: 'Bitget',
+};
+
+/**
  * The source a session recorded BEFORE the 10/21 move replays against.
  *
  * A session without a `candleSource` was recorded while Free Replay was still
@@ -39,7 +55,13 @@ export const LEGACY_REPLAY_CANDLE_GRID: CandleGrid = 'utc';
  *
  * The venue is a property of the SESSION, not a global setting (10/21): a
  * session created before the move keeps its old venue, a new one uses the
- * current default. The two travel together — the source decides the grid.
+ * chosen default. The two travel together — the source decides the grid.
+ *
+ * 11/02: the grid maps by the source's VALUE, not by the field's presence.
+ * Mapping "any named source → shanghai" mis-anchored a RESTORED legacy session:
+ * restore rewrites `null` to `binance-only`, and Binance days open at 00:00Z,
+ * not 00:00 Beijing — a 1D/1W/1M reveal window on a restored legacy session
+ * floored to the wrong day boundary.
  */
 export function replayCandleSource(session: { candleSource?: string } | null | undefined): string {
   // A session that names its venue uses it; a session recorded before the
@@ -51,8 +73,27 @@ export function replayCandleSource(session: { candleSource?: string } | null | u
 }
 
 export function replayCandleGrid(session: { candleSource?: string } | null | undefined): CandleGrid {
+  // 无会话（其他币面板）→ 当前默认源的日界；有会话 → 按源值映射（未记录 = 旧
+  // Binance 会话，恢复路径会把 null 改写成 'binance-only'，按值映射两者一致）。
   if (!session) return FREE_REPLAY_CANDLE_GRID;
-  return session.candleSource ? FREE_REPLAY_CANDLE_GRID : LEGACY_REPLAY_CANDLE_GRID;
+  const source = session.candleSource ?? LEGACY_REPLAY_CANDLE_SOURCE;
+  // Binance opens a day at 00:00Z; OKX and Bitget at 00:00 Beijing.
+  return source === 'binance-only' ? LEGACY_REPLAY_CANDLE_GRID : FREE_REPLAY_CANDLE_GRID;
+}
+
+/**
+ * The instrument name to send the candle route for one source (11/02).
+ *
+ * Binance and Bitget share the `base+USDT` vocabulary; OKX uses
+ * `base-USDT-SWAP`. A session keeps its instrument in the vocabulary it was
+ * CREATED with (the session key `(instrument, startTime)` must stay stable
+ * across source switches), and every candle request translates to the
+ * REQUESTED source's vocabulary instead. A name the target venue does not
+ * know answers an empty window — visible, never a silent venue switch.
+ */
+export function replayRequestInstrument(instrument: string, routeSource: string): string {
+  if (routeSource === 'okx') return usdtSymbolToOkxInstrument(instrument) ?? instrument;
+  return okxInstrumentToBitgetSymbol(instrument) ?? instrument;
 }
 
 export function visibleCandlesForFreeReplay(candles: Candlestick[], cursorTime: number): Candlestick[] {
@@ -101,4 +142,26 @@ export function shouldBackfillFreeReplayHistory(candles: Candlestick[], cursorTi
   const visibleThroughCursor = visibleCandlesForFreeReplay(candles, cursorTime);
   const requiredCandlesThroughCursor = Math.max(1, Math.round(visibleBars) - Math.max(1, Math.round(rightPaddingBars)));
   return visibleThroughCursor.length > 0 && visibleThroughCursor.length < requiredCandlesThroughCursor;
+}
+
+/**
+ * 第一个落在 [fromMs, toMs] 内的已加载数据洞（11/02）。
+ *
+ * 历史翻页取数会在缓存里留下空窗，焦点取窗合并也会把两段不相邻的窗口拼进
+ * 同一数组 —— earlier 只在视口左缘触发、later 只在右缘/光标前方 20 根触发，
+ * 夹在中间的洞永远没有任何加载器会锚到它（「一段 K 线空缺」的根因），揭示
+ * 光标还会直接跳过洞（少揭示蜡烛）。洞的判定与 `contiguousCandles` 同口径
+ * （相邻 gap > 1.5×step）。返回洞两侧蜡烛的时间戳（毫秒），无洞返回 null。
+ */
+export function firstGapInRange(candles: Candlestick[], fromMs: number, toMs: number, timeframe: ReviewTimeframe): { from: number; to: number } | null {
+  if (candles.length < 2) return null;
+  const step = timeframeMs(timeframe);
+  for (let i = 1; i < candles.length; i += 1) {
+    const previous = candles[i - 1];
+    const next = candles[i];
+    if (next.timestamp - previous.timestamp > step * 1.5 && previous.timestamp < toMs && next.timestamp > fromMs) {
+      return { from: previous.timestamp, to: next.timestamp };
+    }
+  }
+  return null;
 }

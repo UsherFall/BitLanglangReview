@@ -76,6 +76,27 @@ export function okxInstrumentToBitgetSymbol(instrument: string): string | null {
 }
 
 /**
+ * The OKX instrument id of a plain `base+USDT` symbol (11/02).
+ *
+ * The mirror of `okxInstrumentToBitgetSymbol`: Binance/Bitget write `BTCUSDT`,
+ * OKX `BTC-USDT-SWAP`, and the two vocabularies never mix inside one candle
+ * route request. Used by Free Replay when a session is switched to the OKX
+ * source: the session's stored instrument keeps its creation-time vocabulary
+ * (the session key `(instrument, startTime)` must stay stable), and the request
+ * translates instead.
+ *
+ * An id that is already OKX-style passes through; anything else returns null
+ * (the caller keeps the original name, and a venue that does not know the
+ * instrument answers an empty window — a visible failure, never a silent
+ * venue switch).
+ */
+export function usdtSymbolToOkxInstrument(symbol: string): string | null {
+  if (okxBaseAsset(symbol)) return symbol;
+  const match = /^([A-Z0-9]{2,})USDT$/.exec(symbol);
+  return match ? `${match[1]}-USDT-SWAP` : null;
+}
+
+/**
  * OKX-style base asset -> the Binance USDT-M symbol of the SAME asset, for the
  * cases where Binance's plain `base+USDT` is missing or no longer tradable.
  *

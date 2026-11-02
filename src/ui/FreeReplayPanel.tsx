@@ -4,7 +4,7 @@ import 'flatpickr/dist/themes/dark.css';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import type { ReviewTimeframe } from '../domain/trade';
 import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
-import { FREE_REPLAY_CANDLE_GRID, FREE_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
+import { FREE_REPLAY_CANDLE_SOURCE, REPLAY_SOURCE_LABELS, replayCandleGrid, type ReplayCandleSource } from './free-replay-chart';
 import type { PaperTradingSession } from './free-replay-paper-trading';
 
 type InstrumentResponse = {
@@ -60,22 +60,26 @@ export function FreeReplayPanel({
   const [startTime, setStartTime] = useState('');
   const [status, setStatus] = useState('加载交易对');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  // 11/02：行情源可选（选品同款词汇），新会话把所选源写进 candleSource；
+  // 交易对列表按源拉取（各源词汇不同：币安/Bitget `XXXUSDT`，OKX `XXX-USDT-SWAP`）。
+  const [source, setSource] = useState<ReplayCandleSource>(FREE_REPLAY_CANDLE_SOURCE);
   const startInputRef = useRef<HTMLInputElement>(null);
   const startPickerRef = useRef<{ close(): void; destroy(): void } | null>(null);
   const sessionList = sessions ?? [];
 
   useEffect(() => {
-    // 10/21: the panel lists the venue the replay will actually use.
-    // Free Replay replays Bitget positions, so it lists Bitget symbols.
-    fetch(`/api/free-replay/instruments?source=${FREE_REPLAY_CANDLE_SOURCE}`)
+    // 11/02：列表随所选源变 —— /api/free-replay/instruments 按源返回各自词汇表的
+    // 标的（okx → OKX 式、bitget → Bitget 式、默认 → 币安式）。
+    setStatus('加载交易对');
+    fetch(`/api/free-replay/instruments?source=${source}`)
       .then((response) => response.json())
       .then((next: InstrumentResponse) => {
         setInstruments(next.instruments);
-        setSelectedInstrument((current) => current || next.instruments[0] || '');
+        setSelectedInstrument((current) => (next.instruments.includes(current) ? current : next.instruments[0] || ''));
         setStatus('');
       })
       .catch(() => setStatus('交易对加载失败'));
-  }, []);
+  }, [source]);
 
   const filteredInstruments = instruments.filter((instrument) => instrument.toLowerCase().includes(instrumentSearch.trim().toLowerCase()));
 
@@ -107,6 +111,22 @@ export function FreeReplayPanel({
   return (
     <div className="free-replay-panel">
       <label>
+        行情源
+        <div className="segmented-control source-select" role="group" aria-label="行情源">
+          {(Object.keys(REPLAY_SOURCE_LABELS) as ReplayCandleSource[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={source === item ? 'selected' : ''}
+              aria-pressed={source === item}
+              onClick={() => setSource(item)}
+            >
+              {REPLAY_SOURCE_LABELS[item]}
+            </button>
+          ))}
+        </div>
+      </label>
+      <label>
         搜索交易对
         <input value={instrumentSearch} onChange={(event) => setInstrumentSearch(event.target.value)} />
       </label>
@@ -134,7 +154,7 @@ export function FreeReplayPanel({
       <button className="save-button" disabled={!selectedInstrument || !startTime} onClick={() => {
         if (!selectedInstrument || !startTime) return;
         const progressTime = freeReplayProgressTimeForStart(startTime);
-        const cursorTime = freeReplayCursorTimeForProgress(progressTime, timeframe, FREE_REPLAY_CANDLE_GRID);
+        const cursorTime = freeReplayCursorTimeForProgress(progressTime, timeframe, replayCandleGrid({ candleSource: source }));
         onStart?.({
           instrument: selectedInstrument,
           startTime,
@@ -143,9 +163,8 @@ export function FreeReplayPanel({
           progressTime,
           startCursorTime: cursorTime,
           cursorTime,
-          // 10/21: the session records the venue it will be replayed
-          // against, so it keeps this venue even if the default moves.
-          candleSource: FREE_REPLAY_CANDLE_SOURCE,
+          // 11/02：会话记录所选源（币安选项 = 严格 binance-only，不带兜底）。
+          candleSource: source,
         });
       }}>开始回溯复盘</button>
       <div className="replay-controls">

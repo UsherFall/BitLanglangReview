@@ -100,6 +100,10 @@ Why not Bitget's own candles? Bitget `/api/v2/mix/market/candles` keeps only a *
 - The mode→source binding lives in `src/ui/App.tsx` (`reviewModeBindings`): workbook review → `okx`, personal review → `binance`.
 - Binance daily candles align to UTC 0:00 (no -8h offset), so a trade near a UTC day boundary may sit on a different chart day than the OKX/UTC+8 view — accepted for the personal mode.
 
+## Cache Hole Backfill (tools/backfill-candles.ts, 11/02)
+
+Historical paging left real holes inside loaded ranges (e.g. 10/21–10/30 legacy-session pagination fetched Bitget pages for a Binance session, leaving the Binance cache with only scattered windows). The server's `contiguousCandles` truncates a returned window at a hole, and every client anchor comes from the loaded edge — a hole in the middle is never fetched by any normal path. `tools/backfill-candles.ts` scans the store for adjacent-candle gaps > 1.5×step and refills each hole from the exchange that OWNS the namespace: `bitget:` prefix → Bitget `/history-candles`, `-USDT-SWAP` suffix → OKX `history-candles`, bare `base+USDT` → Binance only (never cross-venue fallback for bare keys — that would pollute the Binance namespace with another venue's prices). Rows are written under the STORE key (namespaced), the exchange request uses the native symbol. Bounds: gaps > 20k bars are "never-loaded history" and are skipped (on-demand loading + the client's middle-gap heal cover them); requests go through the paced fetchers (`defaultBinanceFetchJson` / `defaultBitgetMarketFetchJson`) so a full-database run cannot trip 429s. Bitget `/history-candles` returns rows in ASCENDING order (measured 11/02; OKX returns DESCENDING) — paging cursors must take the page's MIN timestamp, not a positional index.
+
 ## API Windowing
 
 `src/server/app-plugin.ts` builds the initial Review Window by fetching 150 earlier and 150 later candlesticks around the entry time, then merges by timestamp. On-demand requests use `mode=earlier` or `mode=later` with an anchor.

@@ -970,6 +970,21 @@ p {
   color: white;
 }
 
+/* 11/02：回溯复盘工作区头部的行情源切换（进行中会话）。 */
+.timeframes .replay-source-select {
+  border: 1px solid #303844;
+  border-radius: 6px;
+  background: #161b22;
+  color: #d6dee7;
+  min-height: 34px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.timeframes .replay-source-select:hover {
+  background: #1f2937;
+}
+
 .chart-wrap {
   position: relative;
   min-height: 360px;
