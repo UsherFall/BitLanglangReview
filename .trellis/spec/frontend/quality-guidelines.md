@@ -23,7 +23,7 @@ When changing Free Replay, verify:
 
 - Future candlesticks remain hidden until reveal.
 - Rewind cannot move before the start progress.
-- Trade markers are not rendered.
+- Historical TRADE markers are not rendered; paper-fill open/close points ARE — each anchored to the loaded candle CONTAINING the fill instant (`eventTime - 1`, never the progress→cursor mapping), dropped when that candle is not loaded or is later than the reveal cursor (11/02).
 - Switching Review Timeframes preserves true Free Replay `progressTime` and maps the display cursor to the latest complete candlestick whose end time is not after that progress.
 
 ## Forbidden Patterns
