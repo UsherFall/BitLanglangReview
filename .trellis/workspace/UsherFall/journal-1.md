@@ -1372,3 +1372,26 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 - 顺带修既有 bug：earlier/later 翻页硬编码 `source=bitget`，旧会话（candle_source=null，应为 binance-only）翻页混进 Bitget 价，违反 10/21 会话自带 venue 契约。
 
 **验证**：vitest 617 全绿（+2 用例：一窗取数断言 initial+binance-only+无 earlier；开平仓/持仓行回光标）；tsc 零报错。spec 焦点单小节同步改写。
+
+
+## Session 32: 回溯复盘焦点单整窗替换：消除跨空洞价格跨越与标记挤压
+<!-- trellis-session: v=2 fp=e158a48236be3e29 -->
+
+**Date**: 2026-11-03
+**Task**: 回溯复盘焦点单整窗替换：消除跨空洞价格跨越与标记挤压
+**Branch**: `master`
+
+### Summary
+
+用户现场（2021 BTC 会话切 15m，K 线 9-7 直跳 9-30、开平仓点挤成一团）定位为 10/29 焦点取窗 merge 拼出 21.7 天洞 + containingCandleTimestamp 把洞内成交锚到缝左缘。按 10-30 任务设计落地整窗替换：FreeReplayChart 双数据集（游标/焦点）分离，焦点取窗一律 mode=initial 整窗替换；onCandlesLoaded 只喂游标数据集，标记锚定改走 onActiveCandlesLoaded 活动数据集（修掉焦点态老单子丢开平仓点的回归）；焦点态左右翻页从焦点窗口边缘续取，游标预取/历史回填焦点态跳过，洞自愈补切周期过渡闸；回光标锚定加 candlestickAtTime 时序守卫。新增 4 个回归用例（在旧实现上验证为红），全套 641 测试 + tsc 绿，spec 同步。任务 10-30-replay-focus-window-replace 归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3a5e433` | fix(replay): 点单焦点窗口改整窗替换 —— 双数据集分离，消除跨空洞拼接的价格跨越与标记挤压 |
+| `aa16d80` | docs(spec): 焦点单锚定契约补整窗替换/双数据集不变式与回归用例索引 |
+
+### Status
+
+[OK] **Completed**
