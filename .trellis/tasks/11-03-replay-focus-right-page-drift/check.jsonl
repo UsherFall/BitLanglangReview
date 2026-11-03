@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "验收基准：焦点单契约（整窗替换、双数据集、R2/R4、回光标时序守卫）在本修复后必须仍然全部成立"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查测试覆盖与提交规范"}

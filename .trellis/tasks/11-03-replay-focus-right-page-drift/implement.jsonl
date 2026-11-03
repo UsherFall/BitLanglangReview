@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "焦点单锚定契约（10/29–10-30 全节）：整窗替换/双数据集不变式、R4 焦点态翻页、R2 onCandlesLoaded 只喂游标数据集 —— 本任务改的就是焦点态翻页与渲染时序，必须不破这些契约"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "渲染走 React effect（renderedCandles → setData），新增 cursorTimeRef 镜像需符合既有 ref 镜像模式（rangeKeyRef 同款）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "测试与提交质量基线，新用例需按现有 app-free-replay.test.tsx 的 handler 捕获/fetch mock 模式写"}

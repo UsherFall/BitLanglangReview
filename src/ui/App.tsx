@@ -26,7 +26,7 @@ import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload,
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
-import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, replayCandleGrid, replayCandleSource, replayRequestInstrument, firstGapInRange, LEGACY_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
+import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, replayCandleGrid, replayCandleSource, replayRequestInstrument, firstGapInRange, shouldLoadLaterFocusCandles, LEGACY_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
 import {
   availableMargin,
   cancelPendingOrder,
@@ -1316,6 +1316,10 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   /** 进行中的游标初始加载键（rangeKey）：在飞去重 + 切周期/会话后的过期响应丢弃。 */
   const cursorInitialKeyRef = useRef('');
   const rangeKeyRef = useRef('');
+  // 11/03：自动加载 handler 的订阅 effect deps 不含 cursorTime（揭示步进不改
+  // loadedCandles），闭包里的 replay.cursorTime 会陈旧；每渲染同步镜像，R4
+  // 翻页的揭示边界闸读它。
+  const cursorTimeRef = useRef(0);
   const loadingLaterRef = useRef(false);
   const lastLoadLaterRangeRef = useRef<VisibleTimeRange | null>(null);
   const cursorFollowRangeKeyRef = useRef('');
@@ -1374,6 +1378,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const requestInstrument = replayRequestInstrument(replay.instrument, replayCandleSource(replay));
   // 最新 rangeKey 的同步镜像：异步取数落地时按它识别「取完已经切了周期/会话」的过期响应。
   rangeKeyRef.current = rangeKey;
+  cursorTimeRef.current = replay.cursorTime;
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1390,6 +1395,12 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       timeScale: {
         borderColor: '#2D333B',
         tickMarkFormatter: (time: Time) => formatChartTime(time, timeframe),
+        // 11/03 焦点拖动乱飘修复：焦点态右缘翻页追加一整页后立即 setData，LWC
+        // 默认的 shift-on-new-bar（给实时行情设计）在「旧最后一根可见」时会把
+        // 视口前移整页。关掉它，一切右端追加（焦点翻页/中段洞自愈）都走 LWC 的
+        // 视口补偿分支（时间范围保持不变）；揭示步进的跟随不变 —— 舒适区
+        // effect 在跟随方向每步都重锚 +1 根，行为逐帧等价（10/28 舒适区契约）。
+        shiftVisibleRangeOnNewBar: false,
       },
       autoSize: true,
     });
@@ -1724,7 +1735,9 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       }
       // R4（10-30）：焦点态向右平移从焦点窗口右缘继续加载更晚 K 线；非焦点态
       // 右缘由游标预取负责（shouldPrefetchFutureCandles），不动。
-      if (focusActiveRef.current && shouldLoadLaterByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadLaterRangeRef.current, logicalRange)) {
+      // 11/03 揭示边界闸：焦点窗口右缘已越过 cursorTime（刚平的单）时追加的
+      // 蜡烛全是未揭示未来，渲染数组永不增长，翻页只会请求风暴 —— 不翻。
+      if (focusActiveRef.current && shouldLoadLaterFocusCandles(activeCandlesRef.current, cursorTimeRef.current) && shouldLoadLaterByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadLaterRangeRef.current, logicalRange)) {
         lastLoadLaterRangeRef.current = logicalRange;
         void loadLaterActiveCandles();
       }

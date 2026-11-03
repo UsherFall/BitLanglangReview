@@ -145,6 +145,20 @@ export function shouldBackfillFreeReplayHistory(candles: Candlestick[], cursorTi
 }
 
 /**
+ * 焦点态右缘翻页是否还有可揭示的目标（11/03 焦点拖动乱飘修复）。
+ *
+ * 活动数据集最后一根已触及/越过揭示边界（cursorTime）时，`mode=later` 取回
+ * 的蜡烛全是未揭示未来，`visibleCandlesForFreeReplay` 全部过滤 → 渲染数组
+ * 永不增长 → `barsAfter` 恒 < 50 → 每个拖动帧都再发一次请求（请求风暴的
+ * 根因）。揭示边界（未来不可见）本来就是回放的右墙：这种态不翻页。
+ * 判据用严格小于 —— 最后一根恰在 cursorTime 上时，更晚的蜡烛同样是未来。
+ */
+export function shouldLoadLaterFocusCandles(activeCandles: Candlestick[], cursorTime: number): boolean {
+  const last = activeCandles[activeCandles.length - 1];
+  return last !== undefined && last.timestamp < cursorTime * 1000;
+}
+
+/**
  * 第一个落在 [fromMs, toMs] 内的已加载数据洞（11/02）。
  *
  * 历史翻页取数会在缓存里留下空窗，焦点取窗合并也会把两段不相邻的窗口拼进

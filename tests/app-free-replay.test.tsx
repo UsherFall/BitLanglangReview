@@ -7,6 +7,8 @@ import { App } from '../src/ui/App';
 const chartMocks = vi.hoisted(() => ({
   barsInLogicalRange: vi.fn(() => ({ barsBefore: 100, barsAfter: 100 })),
   coordinateToPrice: vi.fn(() => 110),
+  /** createChart 入参（11/03：断言回溯复盘关闭 shiftVisibleRangeOnNewBar）。 */
+  createChartOptions: [] as Array<Record<string, unknown>>,
   getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
   getVisibleRange: vi.fn(),
   /** 最近一次 series.setData 调用捕获（10-30 整窗替换：断言渲染数据无跨空洞缝）。 */
@@ -30,27 +32,30 @@ vi.mock('lightweight-charts', () => ({
   ColorType: { Solid: 'solid' },
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
-  createChart: () => ({
-    addSeries: () => ({ setData: chartMocks.setData, priceToCoordinate: vi.fn(), attachPrimitive: chartMocks.attachPrimitive, coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
-    remove: vi.fn(),
-    priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
-    subscribeCrosshairMove: vi.fn(),
-    unsubscribeCrosshairMove: vi.fn(),
-    timeScale: () => ({
-      timeToCoordinate: vi.fn(() => null),
-      coordinateToTime: vi.fn(),
-      getVisibleLogicalRange: chartMocks.getVisibleLogicalRange,
-      getVisibleRange: chartMocks.getVisibleRange,
-      options: chartMocks.timeScaleOptions,
-      setVisibleLogicalRange: chartMocks.setVisibleLogicalRange,
-      setVisibleRange: chartMocks.setVisibleRange,
-      subscribeVisibleLogicalRangeChange: chartMocks.subscribeVisibleLogicalRangeChange,
-      subscribeVisibleTimeRangeChange: vi.fn(),
-      timeToIndex: chartMocks.timeToIndex,
-      unsubscribeVisibleLogicalRangeChange: vi.fn(),
-      unsubscribeVisibleTimeRangeChange: vi.fn(),
-    }),
-  }),
+  createChart: (_element: unknown, options: Record<string, unknown>) => {
+    chartMocks.createChartOptions.push(options);
+    return ({
+      addSeries: () => ({ setData: chartMocks.setData, priceToCoordinate: vi.fn(), attachPrimitive: chartMocks.attachPrimitive, coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
+      remove: vi.fn(),
+      priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
+      subscribeCrosshairMove: vi.fn(),
+      unsubscribeCrosshairMove: vi.fn(),
+      timeScale: () => ({
+        timeToCoordinate: vi.fn(() => null),
+        coordinateToTime: vi.fn(),
+        getVisibleLogicalRange: chartMocks.getVisibleLogicalRange,
+        getVisibleRange: chartMocks.getVisibleRange,
+        options: chartMocks.timeScaleOptions,
+        setVisibleLogicalRange: chartMocks.setVisibleLogicalRange,
+        setVisibleRange: chartMocks.setVisibleRange,
+        subscribeVisibleLogicalRangeChange: chartMocks.subscribeVisibleLogicalRangeChange,
+        subscribeVisibleTimeRangeChange: vi.fn(),
+        timeToIndex: chartMocks.timeToIndex,
+        unsubscribeVisibleLogicalRangeChange: vi.fn(),
+        unsubscribeVisibleTimeRangeChange: vi.fn(),
+      }),
+    });
+  },
 }));
 
 /** Points currently held by the newest mounted chart's marker primitive. */
@@ -63,6 +68,7 @@ describe('App Free Replay', () => {
   beforeEach(() => {
     chartMocks.barsInLogicalRange.mockClear();
     chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 100 });
+    chartMocks.createChartOptions.length = 0;
     chartMocks.coordinateToPrice.mockClear();
     chartMocks.coordinateToPrice.mockReturnValue(110);
     chartMocks.getVisibleRange.mockReturnValue({ from: 1000, to: 2000 });
@@ -464,6 +470,174 @@ describe('App Free Replay', () => {
     // 再点恢复全部四点。
     fireEvent.click(screen.getByLabelText('显示开平仓标记'));
     await waitFor(() => expect((markerPoints() as unknown[]).length).toBe(4));
+  });
+
+  it('disables shiftVisibleRangeOnNewBar on the Free Replay chart (11/03 focus drag drift fix)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:55:00+08:00'), makeCandle('2024-05-21T10:00:00+08:00')] }));
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(chartMocks.createChartOptions.length).toBeGreaterThan(0));
+
+    const options = chartMocks.createChartOptions[chartMocks.createChartOptions.length - 1];
+    expect((options.timeScale as { shiftVisibleRangeOnNewBar?: boolean }).shiftVisibleRangeOnNewBar).toBe(false);
+  });
+
+  it('does not page later while the focus window already reaches the reveal boundary (no request storm)', async () => {
+    const candleRequests: string[] = [];
+    let initialFetchCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        // 游标窗口：光标 10:00 前方留足 24 根（> 预取阈值 20），不触发预取。
+        const cursorWindow = ['09:55', '10:00', '10:05', '10:10', '10:15', '10:20', '10:25', '10:30', '10:35', '10:40', '10:45', '10:50', '10:55', '11:00', '11:05', '11:10', '11:15', '11:20', '11:25', '11:30', '11:35', '11:40', '11:45', '11:50', '11:55'].map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+        if (mode === 'initial') {
+          initialFetchCount += 1;
+          // 第二次 initial = 焦点取窗：窗口右缘恰在揭示边界上（刚平的单，
+          // 游标 = 完成于开始时刻的 09:55 那根）。
+          return new Response(JSON.stringify({ candles: initialFetchCount === 1 ? cursorWindow : [makeCandle('2024-05-21T09:45:00+08:00'), makeCandle('2024-05-21T09:50:00+08:00'), makeCandle('2024-05-21T09:55:00+08:00')] }));
+        }
+        // earlier（历史回填）/ later：返回空，断言全靠 candleRequests 记录。
+        return new Response(JSON.stringify({ candles: [] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+
+    // 点成交行进焦点态，等焦点窗口（[09:45, 09:50, 09:55]）落地成渲染数据。
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getAllByTitle('跳到开仓点')[0]);
+    await waitFor(() => {
+      const lastCall = chartMocks.setData.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+      expect(lastCall.filter((item) => 'open' in item).map((item) => item.time)).toEqual([
+        Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+        Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+        Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+      ]);
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    // 向右拖到焦点窗口右缘（barsAfter < 50），连续三个不同 logical range 的拖动帧：
+    // 揭示边界闸关闭（焦点窗口右缘 == cursorTime），零 mode=later 请求（修复前
+    // 每帧都会再取一页 —— 请求风暴）。
+    expect(candleRequests.filter((url) => url.includes('mode=later'))).toEqual([]);
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 5 });
+    const handler = chartMocks.subscribeVisibleLogicalRangeChange.mock.calls.at(-1)?.[0];
+    expect(handler).toBeTypeOf('function');
+    handler?.({ from: 0, to: 160 });
+    handler?.({ from: 1, to: 161 });
+    handler?.({ from: 2, to: 162 });
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    expect(candleRequests.filter((url) => url.includes('mode=later'))).toEqual([]);
+  });
+
+  it('still pages later when the focus window right edge falls behind the cursor', async () => {
+    const candleRequests: string[] = [];
+    let initialFetchCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        // 游标窗口：光标 09:55 前方留足 24 根（> 预取阈值 20），不触发预取。
+        const cursorWindow = ['09:55', '10:00', '10:05', '10:10', '10:15', '10:20', '10:25', '10:30', '10:35', '10:40', '10:45', '10:50', '10:55', '11:00', '11:05', '11:10', '11:15', '11:20', '11:25', '11:30', '11:35', '11:40', '11:45', '11:50', '11:55'].map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+        if (mode === 'initial') {
+          initialFetchCount += 1;
+          // 第二次 initial = 焦点取窗：老单场景，窗口整体早于游标（09:55）。
+          return new Response(JSON.stringify({ candles: initialFetchCount === 1
+            ? cursorWindow
+            : [makeCandle('2024-05-21T09:00:00+08:00'), makeCandle('2024-05-21T09:05:00+08:00'), makeCandle('2024-05-21T09:10:00+08:00')] }));
+        }
+        if (mode === 'later') {
+          return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:15:00+08:00'), makeCandle('2024-05-21T09:20:00+08:00')] }));
+        }
+        return new Response(JSON.stringify({ candles: [] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+
+    // 焦点窗口（[09:00, 09:05, 09:10]）落地。
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getAllByTitle('跳到开仓点')[0]);
+    await waitFor(() => {
+      const lastCall = chartMocks.setData.mock.calls.at(-1)?.[0] as Array<Record<string, unknown>>;
+      expect(lastCall.filter((item) => 'open' in item).map((item) => item.time)).toEqual([
+        Date.parse('2024-05-21T09:00:00+08:00') / 1000,
+        Date.parse('2024-05-21T09:05:00+08:00') / 1000,
+        Date.parse('2024-05-21T09:10:00+08:00') / 1000,
+      ]);
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    // 右缘拖动 → 恰一次 mode=later，锚在焦点窗口最后一根（09:10）。
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 5 });
+    const handler = chartMocks.subscribeVisibleLogicalRangeChange.mock.calls.at(-1)?.[0];
+    expect(handler).toBeTypeOf('function');
+    handler?.({ from: 0, to: 160 });
+    await waitFor(() => expect(candleRequests.filter((url) => url.includes('mode=later')).length).toBe(1));
+    const laterRequest = candleRequests.find((url) => url.includes('mode=later')) ?? '';
+    expect(laterRequest).toContain(`anchor=${Date.parse('2024-05-21T09:10:00+08:00')}`);
+
+    // 同一 logical range 再拖不重发（既有去重不破）。
+    handler?.({ from: 0, to: 160 });
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    expect(candleRequests.filter((url) => url.includes('mode=later')).length).toBe(1);
   });
 
   it('sets a stop loss and closes automatically when the next revealed candle touches it', async () => {

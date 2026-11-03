@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
-import { firstGapInRange, nextFreeReplayCursor, nextFreeReplayProgress, previousFreeReplayCursor, previousFreeReplayProgress, replayCandleGrid, replayRequestInstrument, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from '../src/ui/free-replay-chart';
+import { firstGapInRange, nextFreeReplayCursor, nextFreeReplayProgress, previousFreeReplayCursor, previousFreeReplayProgress, replayCandleGrid, replayRequestInstrument, shouldBackfillFreeReplayHistory, shouldLoadLaterFocusCandles, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from '../src/ui/free-replay-chart';
 
 describe('Free Replay Chart', () => {
   it('shows candlesticks through the free replay cursor and hides future candlesticks', () => {
@@ -138,6 +138,26 @@ describe('Free Replay Chart', () => {
     // 相邻正常间隔不是洞。
     expect(firstGapInRange(candles.slice(0, 2), Date.parse('2024-05-21T10:00:00+08:00'), Date.parse('2024-05-21T10:05:00+08:00'), '5m')).toBeNull();
     expect(firstGapInRange([], 0, 1e12, '5m')).toBeNull();
+  });
+
+  it('gates focus-mode later paging on the reveal boundary (11/03 focus drag drift fix)', () => {
+    // 焦点窗口右缘落后于游标：还有可揭示区间 → 翻页可用。
+    expect(shouldLoadLaterFocusCandles([
+      makeCandle('2024-05-21T09:50:00+08:00'),
+      makeCandle('2024-05-21T10:00:00+08:00'),
+    ], Date.parse('2024-05-21T10:30:00+08:00') / 1000)).toBe(true);
+    // 右缘恰在游标上：更晚的蜡烛全是未揭示未来 → 不翻（严格小于）。
+    expect(shouldLoadLaterFocusCandles([
+      makeCandle('2024-05-21T09:50:00+08:00'),
+      makeCandle('2024-05-21T10:30:00+08:00'),
+    ], Date.parse('2024-05-21T10:30:00+08:00') / 1000)).toBe(false);
+    // 右缘越过游标（刚平的单，焦点窗口延伸到未来）：追加全是未来 → 不翻。
+    expect(shouldLoadLaterFocusCandles([
+      makeCandle('2024-05-21T09:50:00+08:00'),
+      makeCandle('2024-05-21T11:00:00+08:00'),
+    ], Date.parse('2024-05-21T10:30:00+08:00') / 1000)).toBe(false);
+    // 空数据集：不翻。
+    expect(shouldLoadLaterFocusCandles([], Date.parse('2024-05-21T10:30:00+08:00') / 1000)).toBe(false);
   });
 });
 
