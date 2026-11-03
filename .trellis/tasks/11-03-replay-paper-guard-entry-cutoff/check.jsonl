@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核对焦点单锚定契约、揭示边界闸、磁吸已揭示口径、测试清单（app-free-replay.test.tsx 必备用例形态）是否全部保持"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 变更必查项：未来柱隐藏、回退不越开始进度、paper 开平仓点锚定；npm test 全量跑"}

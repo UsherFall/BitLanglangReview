@@ -1884,6 +1884,215 @@ describe('App Free Replay', () => {
     }));
   });
 
+  // 11/03 R1：开始模拟交易后回退与成单时间线互斥 —— 按钮置灰 + 键盘 ← 同步
+  // 堵死（订阅 effect deps 补 paperTrading.active，闭包不陈旧）；重置后恢复。
+  it('disables rewind once paper trading starts and re-enables after reset', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => new Response(JSON.stringify({
+        candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+        ],
+      })),
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled());
+
+    // 正向对照：未开模拟时键盘 ← 能回退（游标变化 → 舒适区跟随效应销定）。
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    chartMocks.setVisibleRange.mockClear();
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+
+    const rewind = screen.getByRole('button', { name: '上一根 K 线' });
+    expect(rewind).toBeDisabled();
+    expect(rewind).toHaveAttribute('title', '开始模拟交易后不能回退 K 线');
+    // 步进不受影响。
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+
+    // 键盘 ← 同步堵死：函数级守卫拦截，游标不动、无任何视口销定。
+    chartMocks.setVisibleRange.mockClear();
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(chartMocks.setVisibleRange).not.toHaveBeenCalled();
+
+    // 重置模拟交易后回退恢复可用。
+    fireEvent.click(screen.getByRole('button', { name: '重置模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '上一根 K 线' })).toBeEnabled());
+  });
+
+  // 11/03 R2：焦点单「开仓点前」视图 —— 剪刀按钮隐藏开仓点之后的 K 线（严格
+  // 小于 positionOpenTime：同周期成交时开仓点 candle 完成于 10:00，其下一根
+  // 恰从 10:00 开档），开启瞬间把开仓 candle 锚到右缘（右畱10根），再点恢复。
+  it('hides candles after the focused order open point and restores them', async () => {
+    let initialFetchCount = 0;
+    const focusWindow = ['09:45', '09:50', '09:55', '10:00', '10:05', '10:10'].map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'initial') {
+          initialFetchCount += 1;
+          return new Response(JSON.stringify({ candles: initialFetchCount === 1
+            ? [makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }), makeCandle('2024-05-21T10:00:00+08:00', { close: 110 })]
+            : focusWindow }));
+        }
+        return new Response(JSON.stringify({ candles: [] }));
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+
+    // 焦点窗落地（揭示边界 = 游标 10:00 → 10:00 及之前全量可览）。
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+    ]));
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+
+    // 开仓完成于 10:00 → 截止开仓 candle（09:55，含）；10:00 及之后是未来。
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+    ]));
+    // 开启瞬间：开仓 candle 贴右缘右畱 10 根缓冲（与回光标同款锚定形状）。
+    const entrySec = Date.parse('2024-05-21T09:55:00+08:00') / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: entrySec - 150 * 300,
+      to: entrySec + 10 * 300,
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: '显示开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+    ]));
+  });
+
+  // 11/03 R2：隐藏态右缘翻页闸 —— 揭示边界换轨到开仓点后，焦点窗口右缘
+  // （10:00）已越过闸边界（开仓 candle 09:55），零 mode=later 请求（否则
+  // 隐藏使渲染数组永不增长 → barsAfter 恒 < 阈值 → 每个拖动帧都重发请求）。
+  it('does not page later in the pre-entry view (no request storm)', async () => {
+    const candleRequests: string[] = [];
+    let initialFetchCount = 0;
+    // 游标窗：光标 10:05 前方留足 22 根（> 预取阈值 20），不触发预取。
+    const cursorWindow = ['09:55', '10:00', ...Array.from({ length: 22 }, (_, index) => {
+      const minute = 5 + index * 5;
+      const hour = 10 + Math.floor(minute / 60);
+      return `${String(hour).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+    })].map((clock, index) => makeCandle(`2024-05-21T${clock}:00+08:00`, index === 0 ? { close: 100 } : index === 1 ? { close: 110 } : {}));
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        candleRequests.push(url);
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'initial') {
+          initialFetchCount += 1;
+          return new Response(JSON.stringify({ candles: initialFetchCount === 1
+            ? cursorWindow
+            // 焦点窗右缘 10:00 < 游标 10:05（旧闸会放行翻页），但已越过
+            // 开仓 candle 09:55（新闸关闭）。
+            : ['09:40', '09:45', '09:50', '09:55', '10:00'].map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`)) }));
+        }
+        return new Response(JSON.stringify({ candles: [] }));
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    // 步进到 10:05，让焦点窗右缘 (10:00) 落在游标与开仓点之间。
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:40:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+    ]));
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:40:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+    ]));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    // 右缘拖动（barsAfter < 50）三个不同 logical range 的帧：零 mode=later。
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 5 });
+    const handler = chartMocks.subscribeVisibleLogicalRangeChange.mock.calls.at(-1)?.[0];
+    expect(handler).toBeTypeOf('function');
+    handler?.({ from: 0, to: 160 });
+    handler?.({ from: 1, to: 161 });
+    handler?.({ from: 2, to: 162 });
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+    expect(candleRequests.filter((request) => request.includes('mode=later'))).toEqual([]);
+  });
+
+  // 11/03 R2：退出焦点即复位「开仓点前」视图 —— 步进清 orderFocus，剪刀按钮
+  // 消失；重新点单后隐藏态为关（不残留上一单的开关）。
+  it('resets the pre-entry view when leaving the order focus', async () => {
+    let initialFetchCount = 0;
+    const focusWindow = ['09:45', '09:50', '09:55', '10:00', '10:05'].map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode === 'initial') {
+          initialFetchCount += 1;
+          return new Response(JSON.stringify({ candles: initialFetchCount === 1
+            ? [makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }), makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }), makeCandle('2024-05-21T10:05:00+08:00', { close: 120 })]
+            : focusWindow }));
+        }
+        return new Response(JSON.stringify({ candles: [] }));
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toContain(Date.parse('2024-05-21T10:00:00+08:00') / 1000));
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).not.toContain(Date.parse('2024-05-21T10:00:00+08:00') / 1000));
+
+    // 步进（下一根）清焦点：剪刀按钮消失，视图回到游标数据集完整揭示。
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /开仓点后的 K 线/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:05:00+08:00') / 1000,
+    ]));
+
+    // 重新点单：隐藏态为关（按钮文案是「隐藏…」而非「显示…」）。
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' })).toBeInTheDocument());
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:50:00+08:00') / 1000,
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+      Date.parse('2024-05-21T10:05:00+08:00') / 1000,
+    ]));
+  });
+
   // 10/29 解除条款：点单锚定后，步进清除焦点（行高亮消失）。
   it('clears the order anchor when stepping to the next candle', async () => {
     stubFreeReplayFetch({

@@ -84,4 +84,23 @@ describe('FreeReplayPanel', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(pickerMocks.close).toHaveBeenCalledTimes(1);
   });
+
+  // 11/03：开始模拟交易后回退与成单时间线互斥 —— 面板按 canRewind 置灰，
+  // App 传 `!paperTrading.active`。
+  it('greys out rewind when paper trading has started and keeps next enabled', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+
+    const { rerender } = render(<FreeReplayPanel timeframe="5m" canRewind />);
+
+    expect(screen.getByRole('button', { name: '上一根 K 线' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+
+    rerender(<FreeReplayPanel timeframe="5m" canRewind={false} />);
+
+    const rewind = screen.getByRole('button', { name: '上一根 K 线' });
+    expect(rewind).toBeDisabled();
+    expect(rewind).toHaveAttribute('title', '开始模拟交易后不能回退 K 线');
+    // 步进不受影响 —— 模拟中仍要能向前揭示。
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+  });
 });

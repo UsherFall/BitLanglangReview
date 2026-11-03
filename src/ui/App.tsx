@@ -1,5 +1,5 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, PriceScaleMode, type IChartApi, type ISeriesApi, type LogicalRange, type MouseEventParams, type Time, type UTCTimestamp } from 'lightweight-charts';
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDollarSign, Eraser, Eye, EyeOff, Magnet, MapPin, Minus, MoveUpRight, RefreshCcw, Scale, Search, Star } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleDollarSign, Eraser, Eye, EyeOff, Magnet, MapPin, Minus, MoveUpRight, RefreshCcw, Scale, Scissors, Search, Star } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Candlestick, CandleSourceId } from '../domain/candlestick';
 import type { ScanResponse } from '../domain/coin-scan';
@@ -12,7 +12,7 @@ import { isSameVisibleRange, shouldLoadLater, type VisibleTimeRange } from './ch
 import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
-import { entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { containingCandleTimestamp, entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
@@ -517,7 +517,7 @@ export function App() {
   }
 
   function rewindFreeReplayCandle() {
-    if (!freeReplay) return;
+    if (!freeReplay || paperTrading.active) return;
     setOrderFocus(null);
     const progressTime = Math.max(previousFreeReplayProgress(freeReplay.cursorTime), freeReplay.startProgressTime);
     setFreeReplay({
@@ -682,7 +682,7 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reviewMode, freeReplay, freeReplayCandles, timeframe]);
+  }, [reviewMode, freeReplay, freeReplayCandles, timeframe, paperTrading.active]);
 
   useEffect(() => {
     selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
@@ -840,7 +840,7 @@ export function App() {
             onScanned={setScanResult}
             onSourceChange={setScanSource}
           />
-        ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
+        ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} canRewind={!paperTrading.active} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
           </>
         )}
       </aside>
@@ -1344,11 +1344,34 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Logarithmic);
   const [hoverPercentage, setHoverPercentage] = useState<number | null>(null);
   const [markersVisible, setMarkersVisible] = useState(true);
+  // 11/03 焦点单「开仓点前」视图：hideAfterFocus 开启时揭示边界临时换轨到焦点
+  // 单的开仓点（focusRequest.timeMs = positionOpenTime）—— 开仓点及之前的 K 线
+  // 可见，之后隐藏。图表本地 ephemeral UI 态：退出焦点即复位（见下方 effect），
+  // 不进会话保存；换焦点单不清（cutoff 跟随新单，连续审单）。残留 true 也
+  // 无害 —— focusRequest 为 null 时 cutoff 派生即 null，边界回到游标。
+  const [hideAfterFocus, setHideAfterFocus] = useState(false);
+  const focusCutoffMs = hideAfterFocus && focusRequest ? focusRequest.timeMs : null;
+  /** 渲染/磁吸揭示边界（秒）：焦点隐藏态 = 开仓点前一根毫秒（严格小于
+   *  positionOpenTime —— 同周期成交时开仓点 candle 完成于 positionOpenTime，
+   *  其下一根恰从该时刻开档、整根是「未来」；粗周期视图下包含 candle 开档
+   *  时间恒 < positionOpenTime，任何周期下「开仓点及之前」都成立）；否则 =
+   *  游标。取整秒避免浮点噪声在毫秒级边界上摇摆。 */
+  const revealBoundary = focusCutoffMs !== null ? Math.floor((focusCutoffMs - 1) / 1000) : replay.cursorTime;
+  /** 右缘翻页闸边界（秒）：比渲染边界早一个 step —— 数据集最后一根已到开仓
+   *  candle 时，更晚的蜡烛全是被隐藏的未来，翻页只会重演 11/03 的请求风暴
+   *  （渲染数组永不增长 → barsAfter 恒 < 阈值 → 每个拖动帧都重发 mode=later）。
+   *  游标态两者在网格上等价，既有 11/03 语义不变。 */
+  const laterGateBoundary = focusCutoffMs !== null ? Math.floor((focusCutoffMs - timeframeMs(timeframe)) / 1000) : replay.cursorTime;
+  // 翻页闸的 handler 订阅 effect deps 不含边界（闭包会陈旧），与 cursorTimeRef
+  // 同款每渲染同步。
+  const laterGateBoundaryRef = useRef(laterGateBoundary);
+  laterGateBoundaryRef.current = laterGateBoundary;
   // Free Replay keeps later candlesticks loaded (prefetch for the next reveal) but
   // hidden until the cursor reaches them. The magnet must only see the revealed
-  // ones: otherwise a point drawn in the blank right padding would snap to a
+  // ones (11/03: or, in the 焦点单 pre-entry view, only those up to the entry
+  // point): otherwise a point drawn in the blank right padding would snap to a
   // future candle's OHLC and leak its levels.
-  const magnetCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime);
+  const magnetCandles = visibleCandlesForFreeReplay(renderedCandles, revealBoundary);
   // The drawing layer (10/21): the tool row, the overlay, the drag handling and
   // the persistence now live in `chart-drawing.tsx`, shared with the trade-review
   // chart and the 选品 level drawer.
@@ -1367,6 +1390,21 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
         <button type="button" title="重置价格刻度" aria-label="重置价格刻度" onClick={resetPriceScale}><RefreshCcw size={16} /></button>
         <button type="button" className={priceScaleMode === PriceScaleMode.Logarithmic ? 'selected' : ''} title="对数价格刻度" aria-label="切换对数价格刻度" aria-pressed={priceScaleMode === PriceScaleMode.Logarithmic} onClick={toggleLogPriceScale}><Scale size={16} /></button>
         <button type="button" className={!markersVisible ? 'selected' : ''} title={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-label={markersVisible ? '隐藏开平仓标记' : '显示开平仓标记'} aria-pressed={!markersVisible} onClick={() => setMarkersVisible((current) => !current)}>{markersVisible ? <Eye size={16} /> : <EyeOff size={16} />}</button>
+        {/* 11/03 开仓点前视图：只在焦点单存在时出现（不渲染而非禁用 —— 与复盘图
+            条件渲染 Eye 的语言一致）。开仓点不在已加载数据里时点击后视图为空，
+            再点即恢复。 */}
+        {focusRequest ? (
+          <button
+            type="button"
+            className={hideAfterFocus ? 'selected' : ''}
+            title={hideAfterFocus ? '显示开仓点后的 K 线' : '隐藏开仓点后的 K 线'}
+            aria-label={hideAfterFocus ? '显示开仓点后的 K 线' : '隐藏开仓点后的 K 线'}
+            aria-pressed={hideAfterFocus}
+            onClick={() => setHideAfterFocus((current) => !current)}
+          >
+            <Scissors size={16} />
+          </button>
+        ) : null}
       </>
     ),
   });
@@ -1518,7 +1556,11 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     const series = seriesRef.current;
     const chart = chartApiRef.current;
     if (!series || !chart) return;
-    const visibleCandles = visibleCandlesForFreeReplay(renderedCandles, replay.cursorTime);
+    // 11/03 揭示边界换轨：焦点隐藏态（开仓点前视图）传开仓点前的严格边界，
+    // 其余传游标 —— 渲染、磁吸、翻页闸各读自己的边界口径。开仓点包含 candle
+    // （开档时间 < positionOpenTime）保留，「开仓点及之前」；之后的点因时间
+    // 不在 series 数据里由 primitive（timeToCoordinate null）自动不画。
+    const visibleCandles = visibleCandlesForFreeReplay(renderedCandles, revealBoundary);
     const step = timeframeMs(timeframe) / 1000;
     const visibleBars = pendingSwitchVisibleBarsRef.current ?? visibleBarsForChart(chart, chartRef.current);
     const range = cursorAnchoredTimeRange(replay.cursorTime, step, visibleBars);
@@ -1533,7 +1575,35 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       // 在后，同一 commit 随后执行；开仓点未加载时它先取开仓点窗口，数据到了再定位）。
       if (!focusRequest) anchorViewportToCursor(range as { from: UTCTimestamp; to: UTCTimestamp });
     }
-  }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, paperPoints, focusPoints, markersVisible, rangeKey]);
+  }, [renderedCandles, revealBoundary, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, paperPoints, focusPoints, markersVisible, rangeKey]);
+
+  // 11/03 开启「开仓点前」视图的瞬间把开仓点贴到右缘（右侧留 10 根缓冲，
+  // cursorAnchoredTimeRange 同款）：隐藏后右半屏是空白，居中锚定浪费一半画面。
+  // 本 effect 声明在渲染 effect 之后，同一 commit 里先 setData（数据已收缩）再
+  // 锚定，锚不会被随后的 setData 抹掉。只在 cutoff 变化时锚一次，翻页/数据
+  // 增长不重锚（deps 不含 renderedCandles —— 闭包里的它是锚定那一次 commit 的
+  // 快照，恰为取窗落地后的数据）。开仓点不在已加载数据里（取窗失败的兜底路径）
+  // 时跳过锚定。关闭（cutoff 归 null）不移动视口，蜡烛原地重现。
+  useEffect(() => {
+    if (focusCutoffMs === null) return;
+    const chart = chartApiRef.current;
+    if (!chart) return;
+    const snappedMs = containingCandleTimestamp(focusCutoffMs - 1, timeframe, renderedCandles);
+    if (snappedMs === null) return;
+    const step = timeframeMs(timeframe) / 1000;
+    const visibleBars = visibleBarsForChart(chart, chartRef.current);
+    suppressAutoLoadRef.current = true;
+    chart.timeScale().setVisibleRange(cursorAnchoredTimeRange(Math.floor(snappedMs / 1000), step, visibleBars) as { from: UTCTimestamp; to: UTCTimestamp });
+    window.setTimeout(() => {
+      suppressAutoLoadRef.current = false;
+    }, 0);
+  }, [focusCutoffMs, timeframe]);
+
+  // 11/03 焦点单退出即复位「开仓点前」视图：焦点是 ephemeral 态，步进/开平仓/
+  // 点持仓行/切会话/离开模式都清 orderFocus 走到这。
+  useEffect(() => {
+    if (!focusRequest) setHideAfterFocus(false);
+  }, [focusRequest]);
 
   useEffect(() => {
     if (!activeCandlesRef.current.length) return;
@@ -1737,7 +1807,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       // 右缘由游标预取负责（shouldPrefetchFutureCandles），不动。
       // 11/03 揭示边界闸：焦点窗口右缘已越过 cursorTime（刚平的单）时追加的
       // 蜡烛全是未揭示未来，渲染数组永不增长，翻页只会请求风暴 —— 不翻。
-      if (focusActiveRef.current && shouldLoadLaterFocusCandles(activeCandlesRef.current, cursorTimeRef.current) && shouldLoadLaterByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadLaterRangeRef.current, logicalRange)) {
+      if (focusActiveRef.current && shouldLoadLaterFocusCandles(activeCandlesRef.current, laterGateBoundaryRef.current) && shouldLoadLaterByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadLaterRangeRef.current, logicalRange)) {
         lastLoadLaterRangeRef.current = logicalRange;
         void loadLaterActiveCandles();
       }

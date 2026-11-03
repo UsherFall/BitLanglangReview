@@ -256,6 +256,13 @@ body.sidebar-resizing {
   border-color: #4b5563;
 }
 
+/* 11/03：开始模拟交易后回退与成单时间线互斥 —— 置灰并禁指针，对齐
+   .drawing-toolbar button:disabled 的既有语言。 */
+.replay-controls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .panel-status {
   font-size: 13px;
 }
@@ -1279,7 +1286,7 @@ button.paper-trade-row.active {
   position: absolute;
   z-index: 4;
   top: 10px;
-  left: 252px;
+  left: auto;
   right: 10px;
   min-height: 42px;
   display: flex;
@@ -1310,11 +1317,14 @@ button.paper-trade-row.active {
   margin-right: 4px;
 }
 
+/* 11/03：两个顶部读数面板都改右对齐 —— 原来写死 left: 252px 是「工具栏恰好
+   252px 宽」年代的对齐值，工具栏后来长到 ~270px（回溯）/ ~332px（复盘），
+   面板压在工具栏尾部按钮上。右侧锚不随工具栏宽度变化，且贴价格轴一侧。 */
 .hover-price-percentage {
   position: absolute;
   z-index: 4;
   top: 10px;
-  left: 252px;
+  right: 10px;
   min-height: 42px;
   display: flex;
   align-items: center;

@@ -40,6 +40,7 @@ export function FreeReplayPanel({
   onStart,
   onReveal,
   onRewind,
+  canRewind = true,
   sessions,
   activeReplay,
   onRestore,
@@ -49,6 +50,9 @@ export function FreeReplayPanel({
   onStart?: (start: FreeReplayStart) => void;
   onReveal?: () => void;
   onRewind?: () => void;
+  /** 11/03：开始模拟交易后回退会把游标拉回已成交单之前，成单时间线错乱 ——
+   * App 以 `!paperTrading.active` 传入，按钮置灰并把原因写进 title。 */
+  canRewind?: boolean;
   sessions?: FreeReplaySession[];
   activeReplay?: FreeReplayStart | null;
   onRestore?: (session: FreeReplaySession) => void;
@@ -168,7 +172,14 @@ export function FreeReplayPanel({
         });
       }}>开始回溯复盘</button>
       <div className="replay-controls">
-        <button type="button" onClick={onRewind}>上一根 K 线</button>
+        <button
+          type="button"
+          disabled={!canRewind}
+          title={canRewind ? undefined : '开始模拟交易后不能回退 K 线'}
+          onClick={onRewind}
+        >
+          上一根 K 线
+        </button>
         <button type="button" onClick={onReveal}>下一根 K 线</button>
       </div>
       <div className="free-replay-history" data-testid="free-replay-history">
