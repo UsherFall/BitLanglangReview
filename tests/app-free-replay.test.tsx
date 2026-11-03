@@ -111,6 +111,8 @@ describe('App Free Replay', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
     expect(screen.queryByText('选择交易对和开始时间，开始回溯复盘')).not.toBeInTheDocument();
+    // 11/03：头部不再提供进行中会话的行情源切换 —— 源只在新会话创建时选。
+    expect(screen.queryByLabelText('切换行情源')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
@@ -1037,47 +1039,6 @@ describe('App Free Replay', () => {
       const bodies = sessionPutBodies();
       expect(bodies.at(-1)?.candleSource).toBe('okx');
       expect(bodies.at(-1)?.instrument).toBe('BTC-USDT-SWAP');
-    });
-  });
-
-  it('switches the active session candle source from the header and translates the instrument', async () => {
-    const seeded = [makeSeededSession()];
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
-      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
-      if (url.startsWith('/api/free-replay/sessions')) {
-        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
-        if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
-        return new Response(JSON.stringify({ sessions: seeded }));
-      }
-      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
-      if (url.startsWith('/api/candles')) return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' })] }));
-      return new Response(JSON.stringify({}));
-    }));
-
-    render(<App />);
-
-    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
-    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
-
-    // 恢复旧会话（无 candleSource → binance-only）。
-    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT2024-05-21/ }));
-    await waitFor(() => expect(screen.getByText('回溯复盘 2024-05-21 10:00')).toBeInTheDocument());
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('source=binance-only')));
-
-    // 头部切到 OKX：新源请求 + 标的按 OKX 词汇翻译（BTCUSDT → BTC-USDT-SWAP）。
-    fireEvent.change(screen.getByLabelText('切换行情源'), { target: { value: 'okx' } });
-    await waitFor(() => {
-      const okxCalls = (fetch as unknown as { mock: { calls: Array<[string]> } }).mock.calls.filter(([callUrl]) => String(callUrl).includes('/api/candles') && String(callUrl).includes('source=okx'));
-      expect(okxCalls.length).toBeGreaterThan(0);
-      expect(okxCalls.some(([callUrl]) => String(callUrl).includes('instrument=BTC-USDT-SWAP'))).toBe(true);
-    });
-
-    // 会话身份不变，但新源落盘；单子/进度保留（PUT instrument 不变）。
-    await waitFor(() => {
-      const bodies = sessionPutBodies();
-      expect(bodies.at(-1)?.candleSource).toBe('okx');
-      expect(bodies.at(-1)?.instrument).toBe('BTCUSDT');
     });
   });
 

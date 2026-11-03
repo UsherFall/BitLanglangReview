@@ -26,7 +26,7 @@ import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload,
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
-import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, replayCandleGrid, replayCandleSource, replayRequestInstrument, firstGapInRange, REPLAY_SOURCE_LABELS, type ReplayCandleSource, LEGACY_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
+import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay, replayCandleGrid, replayCandleSource, replayRequestInstrument, firstGapInRange, LEGACY_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
 import {
   availableMargin,
   cancelPendingOrder,
@@ -537,30 +537,6 @@ export function App() {
     } : current);
   }
 
-  /**
-   * 11/02：进行中会话显式切换行情源。进度（progressTime）/单子/仓位保留；
-   * 取数锚点与光标按新源的日界网格重算，已加载蜡烛清空让图表重取。
-   * 这是用户的显式操作，不违背「不晞晞换源」契约；会话键 (instrument,
-   * startTime) 不变，自动保存把新源落盘。会话 instrument 保持创建时词汇，
-   * 图表请求时按新源翻译（replayRequestInstrument）。
-   */
-  function switchReplaySource(next: ReplayCandleSource) {
-    setFreeReplay((current) => {
-      if (!current || current.candleSource === next) return current;
-      const grid = replayCandleGrid({ candleSource: next });
-      return {
-        ...current,
-        candleSource: next,
-        dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
-        startCursorTime: freeReplayCursorTimeForStart(current.startTime, timeframe, grid),
-        cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, timeframe, grid),
-      };
-    });
-    setOrderFocus(null);
-    setFreeReplayCandles([]);
-    setFreeReplayActiveCandles([]);
-  }
-
   async function persistFreeReplaySession(payload: FreeReplaySessionPayload) {
     const key = sessionKey(payload.instrument, payload.startTime);
     if (deletedSessionKeysRef.current.has(key)) return;
@@ -890,17 +866,6 @@ export function App() {
               </div>
               <div className="timeframes">
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => switchFreeReplayTimeframe(item)}>{item}</button>)}
-                {/* 11/02：进行中会话的行情源切换 —— 显式操作，进度/单子保留，图表按新源重取。 */}
-                <select
-                  className="replay-source-select"
-                  aria-label="切换行情源"
-                  value={replayCandleSource(freeReplay)}
-                  onChange={(event) => switchReplaySource(event.target.value as ReplayCandleSource)}
-                >
-                  {(Object.keys(REPLAY_SOURCE_LABELS) as ReplayCandleSource[]).map((item) => (
-                    <option key={item} value={item}>{REPLAY_SOURCE_LABELS[item]}</option>
-                  ))}
-                </select>
                 <button type="button" className={otherCoinOpen ? 'selected' : ''} onClick={() => setOtherCoinOpen((current) => !current)}>其他币</button>
               </div>
             </header>

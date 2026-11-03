@@ -46,11 +46,11 @@ Important local patterns:
 ### Free Replay's candle source is USER-selectable (11/02)
 
 - The start panel offers the same three sources as 选品 (币安/OKX/Bitget, default Bitget); the selected source is recorded into the new session's `candleSource` in the ROUTE vocabulary (`binance-only` = the strict no-fallback Binance Free Replay has always used; `okx`; `bitget`). The instrument list follows the source (`/api/free-replay/instruments?source=…` — each venue has its own symbol vocabulary).
-- An ACTIVE session can switch sources from a header select: progress/trades stay, `dataAnchorTime`/cursor are recomputed on the NEW source's grid, loaded candles are cleared, the chart refetches. This is an EXPLICIT user action — the "never move a session's venue silently" contract still holds; switching is how the user says "this is my price basis now".
+- The source is chosen ONCE at session creation (11/03: the in-session header select was removed — the two pickers read as one duplicated control). An active session keeps its recorded source for its whole life; replaying another venue means starting a new session. The "never move a session's venue silently" contract now holds structurally, not just by convention.
 - The session's `instrument` keeps its creation-time vocabulary (the `(instrument, startTime)` session key must stay stable); every candle request translates instead via `replayRequestInstrument(instrument, routeSource)` (`usdtSymbolToOkxInstrument` / `okxInstrumentToBitgetSymbol`). A venue that does not know the translated instrument answers an empty window — a visible failure, never a silent venue switch.
 - `replayCandleGrid` maps the grid by the source's VALUE (`binance-only`/absent → `utc`, `okx`/`bitget` → `shanghai`), never by the field's PRESENCE: restore rewrites `null` to `binance-only`, and a presence-based mapping anchored restored legacy sessions to the wrong day boundary.
 - The auto-save PUT payload MUST carry `candleSource` (11/02 fix): the payload used to drop it, so a post-10/21 Bitget session lost its venue on the first save and restored as `binance-only`.
-- The chart's `rangeKey` includes `candleSource` — switching is a new data view, all per-rangeKey dedupe (initialization, cursor-follow, backfill) restarts.
+- The chart's `rangeKey` includes `candleSource` — a different source is a new data view, and all per-rangeKey dedupe (initialization, cursor-follow, backfill) restarts.
 
 ### Middle-gap healing (11/02)
 
