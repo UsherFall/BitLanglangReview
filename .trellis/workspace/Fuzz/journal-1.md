@@ -141,3 +141,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: 回溯复盘行情源可选 + K线缓存洞回填与自愈 + 模拟交易权益制
+<!-- trellis-session: v=2 fp=f03563ea1d631bd3 -->
+
+**Date**: 2026-11-03
+**Task**: 回溯复盘行情源可选 + K线缓存洞回填与自愈 + 模拟交易权益制
+**Branch**: `master`
+
+### Summary
+
+回溯复盘行情源做成选品同款可选（币安/OKX/Bitget）：开始面板三选一、进行中会话头部切源（进度/单子保留、光标按新源网格重算）、交易对词汇跨源翻译（BTCUSDT↔BTC-USDT-SWAP）、修复自动保存丢 candleSource 与按字段存在性映射网格的回归；一次性回填脚本 tools/backfill-candles.ts 补齐 BTC 三命名空间落在会话区间的全部缓存洞（偶发K线空缺根因，命名空间键写库/限速取数/2万根上限），客户端中段洞自愈（可见范围∪光标前方20根对洞中心取initial窗）；模拟交易开仓改权益制复利（可用=本金+已实现盈亏-占用，面板显示权益）。发现并修复回填游标取行序导致的 Bitget 升序翻页失效。635 测试全绿（level-alert-parity 为既有环境性缺失数据失败）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cde0c3d` | feat(replay): 行情源可选（币安/OKX/Bitget）+ K线缓存洞回填与中段洞自愈；修复自动保存丢 candleSource |
+| `4f2ced8` | feat(replay): 模拟交易开仓改权益制（复利）—— 可用额度 = 本金 + 已实现盈亏 − 持仓占用；面板显示当前权益 |
+
+### Status
+
+[OK] **Completed**
