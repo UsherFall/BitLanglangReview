@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "FreeReplayChart 既有契约全集：只揭示到光标、10/28 舒适区跟随、10/29 焦点单锚定与解除、10/30 回光标与标记过滤、周期切换密度保持与历史回填、venue 网格（replayCandleGrid/replayCandleSource）——本次改动直接修订这一节"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "FreeReplayChart 是重 effect 组件：新增/改写 effect 的声明顺序、ref 读取与依赖数组规则"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "orderFocus 是临时 UI 状态、不进 session payload；freeReplayCandles 由 onCandlesLoaded 单向供给的边界"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 行为变更的验证要求（npm test / tsc）与 app 级测试位置约定"}
+{"file": ".trellis/tasks/10-30-replay-focus-window-replace/design.md", "reason": "实现依据：双数据集模型、publishActive 契约、effect 时序守卫、边界条件"}
+{"file": ".trellis/tasks/archive/2026-10/10-29-replay-order-anchor/design.md", "reason": "被本次修订的原始设计：orderFocus 状态形、焦点 effect 去重键、兜底贴边逻辑"}

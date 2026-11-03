@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/10-30-replay-focus-window-replace/prd.md", "reason": "逐条对照 R1–R4 的验收标准"}
+{"file": ".trellis/tasks/10-30-replay-focus-window-replace/design.md", "reason": "核查实现与设计一致：双数据集不变式（数据集内部连续、onCandlesLoaded 只喂游标数据集）、焦点进出切换、时序守卫"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "核查 10/28 舒适区、10/29 焦点锚定/解除、10/30 回光标与标记过滤、只揭示到光标、venue 网格等既有契约未被破坏"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "核查 orderFocus 未泄漏进会话存盘协议、freeReplayCandles 的单一供给路径"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核查验证标准与测试位置约定"}
