@@ -237,6 +237,12 @@ export function App() {
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
   const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
+  /**
+   * 图表的【活动数据集】（10-30）：焦点态 = 焦点窗口，否则 = 游标窗口。只用于
+   * 开平仓标记点锚定 —— 点集必须锚在图上渲染的那份蜡烛上；统计/步进/浮盈仍
+   * 用 freeReplayCandles（游标数据集，R2 不变）。
+   */
+  const [freeReplayActiveCandles, setFreeReplayActiveCandles] = useState<Candlestick[]>([]);
   const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   // 10/29: 焦点单（点已完成交易行锚定开仓点）。token 递增使重复点同一行重新归位；
   // 步进/开平仓/点持仓行清除（详见 design.md 的解除条款）。临时状态，不进会话存盘。
@@ -552,6 +558,7 @@ export function App() {
     });
     setOrderFocus(null);
     setFreeReplayCandles([]);
+    setFreeReplayActiveCandles([]);
   }
 
   async function persistFreeReplaySession(payload: FreeReplaySessionPayload) {
@@ -595,6 +602,7 @@ export function App() {
     setPaperTrading(normalizePaperTradingSession(payload.paperTrading));
     setOrderFocus(null);
     setFreeReplayCandles([]);
+    setFreeReplayActiveCandles([]);
   }
 
   function handleFreeReplayStart(next: FreeReplayStart) {
@@ -609,6 +617,7 @@ export function App() {
     setFreeReplay(next);
     setOrderFocus(null);
     setFreeReplayCandles([]);
+    setFreeReplayActiveCandles([]);
     setPaperTrading(initialPaperTradingSession());
   }
 
@@ -715,7 +724,9 @@ export function App() {
   const paperStats = paperTradingStats(paperTrading, freeReplayCurrentCandle);
   // 11/02 标记层换成交割单复盘管线：点集纯函数锚定到包含成交时刻的已加载K线
   // （修复跨周期做单后标记左移一根粗蜡烛），隐藏眼睛只留焦点单。
-  const paperMarkerPoints = freeReplay ? paperTradeChartPoints(paperTrading.trades, freeReplay.cursorTime, timeframe, freeReplayCandles) : [];
+  // 10-30：锚定数据集 = 图表的活动数据集 —— 焦点态下焦点单的开仓点在游标窗口
+  // 之外，只有焦点窗口里有它的蜡烛；游标窗口的统计供给不动（R2）。
+  const paperMarkerPoints = freeReplay ? paperTradeChartPoints(paperTrading.trades, freeReplay.cursorTime, timeframe, freeReplayActiveCandles) : [];
   const focusPaperMarkerPoints = focusedPaperTradePoints(paperMarkerPoints, paperTrading.trades, orderFocus?.id ?? null);
 
   return (
@@ -894,7 +905,7 @@ export function App() {
               </div>
             </header>
             <div className="free-replay-workspace">
-              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperPoints={paperMarkerPoints} focusPoints={focusPaperMarkerPoints} futureRetryToken={futureRetryToken} focusRequest={orderFocus ? { timeMs: orderFocus.timeMs, token: orderFocus.token } : null} cursorRequest={cursorReturnToken} onCandlesLoaded={setFreeReplayCandles} />
+              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperPoints={paperMarkerPoints} focusPoints={focusPaperMarkerPoints} futureRetryToken={futureRetryToken} focusRequest={orderFocus ? { timeMs: orderFocus.timeMs, token: orderFocus.token } : null} cursorRequest={cursorReturnToken} onCandlesLoaded={setFreeReplayCandles} onActiveCandlesLoaded={setFreeReplayActiveCandles} />
               {/* 11/02：按会话身份重挂面板 —— 单子/持仓随 props 更新，但本地状态
                   （Tab、方向、限价输入、平仓比例）不得跨会话残留。 */}
               <FreeReplayPaperTradingPanel
@@ -1306,7 +1317,7 @@ function stopLossDirectionHint(direction: PaperDirection, currentPrice: number):
   return direction === 'long' ? `低于当前价 ${currentPrice}` : `高于当前价 ${currentPrice}`;
 }
 
-function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRetryToken, focusRequest, cursorRequest, onCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperPoints: MarkerPoint[]; focusPoints: MarkerPoint[]; futureRetryToken: number; focusRequest: { timeMs: number; token: number } | null; cursorRequest: number; onCandlesLoaded: (candles: Candlestick[]) => void }) {
+function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRetryToken, focusRequest, cursorRequest, onCandlesLoaded, onActiveCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperPoints: MarkerPoint[]; focusPoints: MarkerPoint[]; futureRetryToken: number; focusRequest: { timeMs: number; token: number } | null; cursorRequest: number; onCandlesLoaded: (candles: Candlestick[]) => void; onActiveCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   // 11/02：回溯复盘标记层改用交割单复盘同一套 TradeMarkerPrimitive 画布圆点
@@ -1321,11 +1332,31 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const initializedRangeKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
   const pointerRef = useRef<{ inside: boolean; x: number; y: number }>({ inside: false, x: 0, y: 0 });
-  const loadedCandlesRef = useRef<Candlestick[]>([]);
+  // 10-30 双数据集整窗替换（对齐交割单复盘语义）：`activeCandlesRef` 是当前
+  // 【活动数据集】—— 焦点态 = 焦点窗口，否则 = 游标窗口；两份数据集分开存放，
+  // 任何一份内部都连续，永不互相 merge。10/29 把焦点窗口 merge 进游标窗口的
+  // 做法会把两段不相邻的数据拼进同一份渲染数据，索引型时间轴把缝两侧画成
+  // 相邻（用户现场：15m 下 9-7 → 9-30 直接跨越，洞内开平仓点全锚到缝左缘
+  // 那一根）。
+  const activeCandlesRef = useRef<Candlestick[]>([]);
+  /** 游标数据集：锚在 cursorTime 的连续窗口。只有它喂 App（currentCursorCandle/浮盈/开平仓可用性）。 */
+  const cursorCandlesRef = useRef<Candlestick[]>([]);
+  /** 焦点窗口：以开仓点为中心的一次 mode=initial，连续。只服务渲染与焦点态翻页。 */
+  const focusCandlesRef = useRef<Candlestick[]>([]);
+  const focusActiveRef = useRef(false);
+  const wasFocusedRef = useRef(false);
+  /** 焦点窗口已落地（installed）/取窗失败（failed）的去重键，值 = rangeKey:token。 */
+  const focusInstalledKeyRef = useRef('');
+  const focusFailedKeyRef = useRef('');
+  /** 进行中的游标初始加载键（rangeKey）：在飞去重 + 切周期/会话后的过期响应丢弃。 */
+  const cursorInitialKeyRef = useRef('');
+  const rangeKeyRef = useRef('');
+  const loadingLaterRef = useRef(false);
+  const lastLoadLaterRangeRef = useRef<VisibleTimeRange | null>(null);
   const cursorFollowRangeKeyRef = useRef('');
-  // 10/29 焦点单定位：去重键 `rangeKey:token`。开仓点在已加载窗口之外时只取
-  // 一次以开仓点为中心的 initial 窗口（focusWindowKeyRef）；取过仍不覆盖就贴
-  // 已加载最早边缘定位 —— 与交割单复盘同模式，一次到位，绝不逐页追。
+  // 10/29 焦点单定位：去重键 `rangeKey:token`（切周期 token 不变但 rangeKey
+  // 变 → 新周期重新取窗重新锚定；重复点同一行 token 递增 → 重新取窗归位）。
+  // 取窗失败/空就贴游标数据集最早边缘定位，一次到位，绝不逐页追。
   const appliedFocusKeyRef = useRef('');
   const focusWindowKeyRef = useRef('');
   const loadingWindowRef = useRef(false);
@@ -1376,6 +1407,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   //（会话 instrument 保持创建时写法，会话键不变）。
   const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}:${replay.candleSource ?? ''}`;
   const requestInstrument = replayRequestInstrument(replay.instrument, replayCandleSource(replay));
+  // 最新 rangeKey 的同步镜像：异步取数落地时按它识别「取完已经切了周期/会话」的过期响应。
+  rangeKeyRef.current = rangeKey;
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1460,20 +1493,45 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     setHoverPercentage(null);
     lastFutureLoadAnchorRef.current = null;
     lastLoadEarlierRangeRef.current = null;
+    lastLoadLaterRangeRef.current = null;
     initializedRangeKeyRef.current = '';
     focusWindowKeyRef.current = '';
     appliedFocusKeyRef.current = '';
+    focusInstalledKeyRef.current = '';
+    focusFailedKeyRef.current = '';
     gapHealKeyRef.current = '';
-    const params = new URLSearchParams({ instrument: requestInstrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: replayCandleSource(replay) });
-    fetchCandles(params)
-      .then((candles) => {
-        const merged = mergeCandles(candles);
-        updateLoadedCandles(merged);
-        setRenderedCandles(merged);
-        setStatus(merged.length ? '' : '没有 K 线');
-      })
-      .catch((error) => setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败'));
+    void loadCursorInitialWindow();
   }, [replay.instrument, replay.startTime, replay.dataAnchorTime, replay.candleSource, timeframe, requestInstrument, rangeKey]);
+
+  // 10-30 退出焦点：活动数据集切回游标数据集（步进/开平仓/点持仓行/会话操作
+  // 都会清 orderFocus 走到这）。游标数据集缺失或跨了周期（焦点期间的极端失败
+  // 路径）时按 dataAnchorTime 重取一次；rangeKey 同变时初始加载已在飞，靠
+  // cursorInitialKeyRef 去重不会重取。恢复后渲染 effect 用游标数据重挂 series，
+  // 回光标锚定由 cursorRequest effect 的 candlestickAtTime 守卫等数据真进 series。
+  useEffect(() => {
+    if (focusRequest) {
+      wasFocusedRef.current = true;
+      return;
+    }
+    if (!wasFocusedRef.current) return;
+    wasFocusedRef.current = false;
+    focusActiveRef.current = false;
+    focusCandlesRef.current = [];
+    focusInstalledKeyRef.current = '';
+    focusFailedKeyRef.current = '';
+    appliedFocusKeyRef.current = '';
+    focusWindowKeyRef.current = '';
+    historyBackfillVisibleBarsRef.current = null;
+    historyBackfillKeyRef.current = '';
+    const cursorCandles = cursorCandlesRef.current;
+    if (cursorCandles.length && cursorCandles[0].timeframe === timeframe) {
+      publishActive(cursorCandles, { publishToApp: true });
+      setStatus('');
+    } else {
+      setStatus('加载 K 线');
+      void loadCursorInitialWindow();
+    }
+  }, [focusRequest, timeframe, rangeKey]);
 
   useEffect(() => {
     if (!pointerRef.current.inside) return;
@@ -1502,11 +1560,25 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }, [renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, paperPoints, focusPoints, markersVisible, rangeKey]);
 
   useEffect(() => {
-    if (!loadedCandlesRef.current.length) return;
-    setRenderedCandles(loadedCandlesRef.current);
+    if (!activeCandlesRef.current.length) return;
+    setRenderedCandles(activeCandlesRef.current);
   }, [replay.cursorTime]);
 
+  // 10-30：活动数据集（= 渲染数据集）喂 App 的开平仓点锚定。焦点态下 App 才能
+  // 拿到焦点窗口算出该单的开/平仓点；onCandlesLoaded 仍是游标数据集专线（R2）。
   useEffect(() => {
+    onActiveCandlesLoaded(renderedCandles);
+  }, [renderedCandles, onActiveCandlesLoaded]);
+
+  useEffect(() => {
+    // 焦点态跳过历史回填：回填追的是游标（shouldBackfillFreeReplayHistory 以
+    // cursorTime 为准），焦点态的活动数据集是开仓点窗口，追它是错目标；并清掉
+    // 切周期残留的触发，避免退出焦点后误补一次（design 步骤 6）。
+    if (focusActiveRef.current) {
+      historyBackfillVisibleBarsRef.current = null;
+      historyBackfillKeyRef.current = '';
+      return;
+    }
     const visibleBars = historyBackfillVisibleBarsRef.current;
     if (!visibleBars || loadingEarlierRef.current || !loadedCandles.length) return;
     if (loadedCandles[0].timeframe !== timeframe) return;
@@ -1561,35 +1633,63 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     }, 0);
   }, [replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey]);
 
-  // 10/29 焦点单定位：点已完成交易行把视口锚到该仓位回合的开仓点（与交割单
-  // 复盘选中交易同一窗口函数 entryVisibleRange，±150 根）。每个 rangeKey+token
-  // 只定位一次，之后用户可自由平移缩放；切周期 rangeKey 变 → 同一 token 在新
-  // 周期重新定位（焦点跨周期存活，App 在切周期时不清 orderFocus）。开仓点在
-  // 已加载窗口之外时，取一次以开仓点为中心的 initial 窗口（交割单复盘模式）
-  // 合并后定位；取过仍不覆盖则贴已加载最早边缘，不逐页追、不循环。只移动
-  // 视口，渲染层 visibleCandlesForFreeReplay 保证不揭示未来 K 线。
+  // 10-30 焦点单定位 = 整窗替换（10/29 锚定语义不变，数据集语义对齐交割单复盘）：
+  // 点已完成交易行 → 取一次以开仓点为中心的 mode=initial 窗口（±150 根，服务端
+  // 保证窗内连续）→【替换】活动数据集 → 锚到开仓点（entryVisibleRange）。不再
+  // merge 进游标窗口，同一渲染数据里永远只有一个连续窗口，结构上不可能拼出
+  // 跨空洞的价格缝。每个 rangeKey+token 只定位一次，之后用户可自由平移缩放；
+  // 切周期 rangeKey 变 → 同一 token 在新周期重新取窗重新定位（焦点跨周期存活，
+  // App 在切周期时不清 orderFocus）。取窗失败/空则贴游标数据集最早边缘，不逐页
+  // 追、不循环。只揭示到 cursorTime 由渲染层 visibleCandlesForFreeReplay 保证。
   useEffect(() => {
     const chart = chartApiRef.current;
     if (!chart || !focusRequest) return;
-    if (initializedRangeKeyRef.current !== rangeKey) return;
     const focusKey = `${rangeKey}:${focusRequest.token}`;
     if (appliedFocusKeyRef.current === focusKey) return;
-    const first = loadedCandlesRef.current[0];
-    // 切周期后的过渡 commit 里 loadedCandles 还是上一周期的数据：此时取窗会把
-    // 新周期的窗口合进旧周期数组。等初始加载落地再动 —— 与历史回填 effect 同一
-    // 道闸。
-    if (!first || first.timeframe !== timeframe) return;
-    let anchorMs = focusRequest.timeMs;
-    if (focusRequest.timeMs < first.timestamp) {
-      if (focusWindowKeyRef.current === focusKey) {
-        // 本焦点已取过一次窗口仍未覆盖（ venue 历史不解或失败）：贴已加载最早边。
-        anchorMs = first.timestamp;
-      } else {
-        focusWindowKeyRef.current = focusKey;
-        void loadFocusWindowCandles(focusRequest.timeMs);
-        return;
+    if (focusWindowKeyRef.current !== focusKey) {
+      focusWindowKeyRef.current = focusKey;
+      focusInstalledKeyRef.current = '';
+      focusFailedKeyRef.current = '';
+      // 首次进入焦点：活动数据集此时还是游标窗口，备份进游标数据集；之后游标
+      // 窗口的加载只写 cursorCandlesRef，不再碰活动数据集。
+      if (!focusActiveRef.current) {
+        cursorCandlesRef.current = activeCandlesRef.current;
+        focusActiveRef.current = true;
       }
+      const fetchRangeKey = rangeKey;
+      setStatus('加载开仓点 K 线');
+      fetchInitialWindow(new Date(focusRequest.timeMs).toISOString())
+        .then((candles) => {
+          if (rangeKeyRef.current !== fetchRangeKey) return; // 取窗期间切了周期/会话：丢弃
+          if (!candles.length) {
+            focusFailedKeyRef.current = focusKey;
+            setStatus('');
+            return;
+          }
+          const merged = mergeCandles(candles);
+          focusCandlesRef.current = merged;
+          focusInstalledKeyRef.current = focusKey;
+          publishActive(merged, { publishToApp: false });
+          setStatus('');
+        })
+        .catch((error) => {
+          if (rangeKeyRef.current !== fetchRangeKey) return;
+          focusFailedKeyRef.current = focusKey;
+          setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
+        });
+      return;
     }
+    // 已取过窗：等本键落地/失败后再锚定（loadedCandles 依赖保证落地后的
+    // commit 里本 effect 重跑，此时渲染 effect 已用焦点窗口重挂 series）。
+    const installed = focusInstalledKeyRef.current === focusKey;
+    const failed = focusFailedKeyRef.current === focusKey;
+    if (!installed && !failed) return;
+    const firstActive = activeCandlesRef.current[0];
+    const anchorMs = installed
+      // 取到了但开仓点落在窗口之外（venue 那段历史无解）：贴焦点窗口最早边。
+      ? (firstActive && focusRequest.timeMs < firstActive.timestamp ? firstActive.timestamp : focusRequest.timeMs)
+      // 取窗失败/空：贴游标数据集最早边（活动数据集从未离开游标窗口）。
+      : (cursorCandlesRef.current[0]?.timestamp ?? focusRequest.timeMs);
     appliedFocusKeyRef.current = focusKey;
     const range = entryVisibleRange(new Date(anchorMs).toISOString(), timeframe, replayCandleGrid(replay));
     suppressAutoLoadRef.current = true;
@@ -1597,21 +1697,26 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     window.setTimeout(() => {
       suppressAutoLoadRef.current = false;
     }, 0);
-  }, [focusRequest, loadedCandles, renderedCandles, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey]);
+  }, [focusRequest, loadedCandles, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey]);
 
   // 10/30 回到光标：开平仓提交/点持仓行后，视口主动跳回光标（光标右侧留 10
   // 根缓冲，与初始锚定同一函数）。每个令牌只消费一次 —— 切周期不重新消费，
  // 否则会把切周期后的焦点锚定拽回光标。步进不经此 —— 舒适区契约（10/28）不变。
+  // 10-30 守卫：series 里必须已经有光标那根。退出焦点的恢复是异步的（退出
+  // effect → publishActive → 渲染 effect 重挂 series 都在后续 commit），拿焦点
+  // 窗口的 timeToIndex 去锚光标会锚到错误的逻辑索引；守卫不过不消费令牌，
+  // renderedCandles 依赖让数据落地后的下一次 commit 重试。
   useEffect(() => {
     const chart = chartApiRef.current;
     if (!chart || !cursorRequest) return;
     if (initializedRangeKeyRef.current !== rangeKey) return;
     if (appliedCursorKeyRef.current === String(cursorRequest)) return;
+    if (!candlestickAtTime(renderedCandles, replay.cursorTime as UTCTimestamp)) return;
     appliedCursorKeyRef.current = String(cursorRequest);
     const step = timeframeMs(timeframe) / 1000;
     const visibleBars = pendingSwitchVisibleBarsRef.current ?? visibleBarsForChart(chart, chartRef.current);
     anchorViewportToCursor(cursorAnchoredTimeRange(replay.cursorTime, step, visibleBars) as { from: UTCTimestamp; to: UTCTimestamp });
-  }, [cursorRequest, loadedCandles, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey]);
+  }, [cursorRequest, loadedCandles, renderedCandles, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey]);
 
   // 11/02 中段洞自愈：历史翻页/焦点取窗会把不相邻的窗口拼进同一已加载数组，
   // earlier 只在视口左缘触发、later 只在右缘/光标前方 20 根触发 —— 夹在中间的洞
@@ -1622,11 +1727,15 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     if (loadingWindowRef.current) return;
     const chart = chartApiRef.current;
     if (!chart) return;
+    // 切周期后的过渡 commit 里活动数据集还是上一周期的数据：跨周期间距会被
+    // 误判成洞（15m 序列按 5m step 量，每对相邻都「是洞」），补洞窗会把新周期
+    // 的数据合进旧周期数组。等新周期数据落地再动 —— 与历史回填同一道闸。
+    if (!activeCandlesRef.current.length || activeCandlesRef.current[0].timeframe !== timeframe) return;
     const step = timeframeMs(timeframe) / 1000;
     const visible = currentFreeReplayVisibleRange(chart);
     const fromMs = (visible ? Math.min(visible.from, replay.cursorTime) : replay.cursorTime) * 1000;
     const toMs = Math.max(visible?.to ?? 0, replay.cursorTime + step * 20) * 1000;
-    const gap = firstGapInRange(loadedCandlesRef.current, fromMs, toMs, timeframe);
+    const gap = firstGapInRange(activeCandlesRef.current, fromMs, toMs, timeframe);
     if (!gap) return;
     const healKey = `${rangeKey}:${gap.from}:${gap.to}`;
     if (gapHealKeyRef.current === healKey) return;
@@ -1646,6 +1755,13 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       if (shouldLoadEarlierByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadEarlierRangeRef.current, logicalRange)) {
         lastLoadEarlierRangeRef.current = logicalRange;
         void loadEarlierFreeReplayCandles();
+        return;
+      }
+      // R4（10-30）：焦点态向右平移从焦点窗口右缘继续加载更晚 K 线；非焦点态
+      // 右缘由游标预取负责（shouldPrefetchFutureCandles），不动。
+      if (focusActiveRef.current && shouldLoadLaterByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadLaterRangeRef.current, logicalRange)) {
+        lastLoadLaterRangeRef.current = logicalRange;
+        void loadLaterActiveCandles();
       }
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
@@ -1653,6 +1769,10 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }, [loadedCandles, replay.instrument, replay.startTime, replay.candleSource, timeframe]);
 
   useEffect(() => {
+    // 焦点态不预取：焦点窗口是静态的开仓点±150 根，预取追游标是错目标，
+    // 还会把焦点窗口逐页拽向游标（shouldPrefetchFutureCandles 在游标越过所有
+    // 已加载蜡烛时恒真）。焦点态的右缘加载由平移触发（loadLaterActiveCandles）。
+    if (focusActiveRef.current) return;
     const last = loadedCandles[loadedCandles.length - 1];
     if (!last || loadingFutureRef.current || lastFutureLoadAnchorRef.current === last.timestamp) return;
     if (!shouldPrefetchFutureCandles(loadedCandles, replay.cursorTime, 20)) return;
@@ -1669,15 +1789,11 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     fetchCandles(params)
       .then((candles) => {
         if (!candles.length) return;
-        const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
-        loadedCandlesRef.current = merged;
-        // Must reach the loaded state too: it drives the anchor guard above, so
-        // skipping it pins `last` to the initial window and lets a session
-        // prefetch later candlesticks exactly once. Rendered candlesticks stay
-        // on the cursor-change effect so prefetched candles remain hidden until
-        // they are revealed.
-        setLoadedCandles(merged);
-        onCandlesLoaded(merged);
+        // render: false —— 预取的蜡烛保持「已加载未揭示」，渲染同步留给游标变化
+        // effect。Must reach the loaded state too: it drives the anchor guard
+        // above, so skipping it pins `last` to the initial window and lets a
+        // session prefetch later candlesticks exactly once.
+        installIntoDataset(candles, 'cursor', { render: false });
       })
       .catch((error) => {
         // Clear the anchor so the next trigger can retry it; keeping it would
@@ -1692,10 +1808,13 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
 
   async function loadEarlierFreeReplayCandles() {
     const chart = chartApiRef.current;
-    if (loadingEarlierRef.current || !chart || !loadedCandles.length) return;
+    if (loadingEarlierRef.current || !chart || !activeCandlesRef.current.length) return;
+    // 焦点态下活动数据集 = 焦点窗口，向左翻页从焦点窗口左缘继续（R4）；
+    // 属主按发起时的焦点态捕获，响应落地时由 installIntoDataset 决定发布面。
+    const dataset = focusActiveRef.current ? 'focus' : 'cursor';
     loadingEarlierRef.current = true;
     setStatus('加载更早 K 线');
-    const anchor = loadedCandles[0].timestamp;
+    const anchor = activeCandlesRef.current[0].timestamp;
     const params = new URLSearchParams({
       instrument: requestInstrument,
       timeframe,
@@ -1708,13 +1827,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     });
     try {
       const candles = await fetchCandles(params);
-      if (candles.length) {
-        const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
-        loadedCandlesRef.current = merged;
-        setLoadedCandles(merged);
-        setRenderedCandles(merged);
-        onCandlesLoaded(merged);
-      }
+      if (candles.length) installIntoDataset(candles, dataset);
       setStatus('');
     } catch (error) {
       setStatus(error instanceof ServerCandleError ? error.message : '更早 K 线加载失败');
@@ -1724,30 +1837,47 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }
 
   /**
-   * 以任意时刻为中心取一个 ±150 根的 initial 窗口并合并（10/30 焦点取窗与
-   * 11/02 洞补齐共用）：initial 模式本身就是「以任意点为中心的交易所连续窗」，
-   * 合并后洞被填上；渲染层按光标过滤，不会揭示未来 K 线。
+   * R4（10-30）：焦点态右缘翻页 —— 从活动数据集（= 焦点窗口）最新一根继续向后取。
+   * 非焦点态不从这里走：右缘由游标预取（shouldPrefetchFutureCandles）负责。
+   */
+  async function loadLaterActiveCandles() {
+    const chart = chartApiRef.current;
+    if (loadingLaterRef.current || !chart || !activeCandlesRef.current.length) return;
+    const dataset = focusActiveRef.current ? 'focus' : 'cursor';
+    const anchor = activeCandlesRef.current[activeCandlesRef.current.length - 1].timestamp;
+    loadingLaterRef.current = true;
+    setStatus('加载更晚 K 线');
+    const params = new URLSearchParams({
+      instrument: requestInstrument,
+      timeframe,
+      entryTime: replay.startTime,
+      mode: 'later',
+      anchor: String(anchor),
+      source: replayCandleSource(replay),
+    });
+    try {
+      const candles = await fetchCandles(params);
+      if (candles.length) installIntoDataset(candles, dataset);
+      setStatus('');
+    } catch (error) {
+      setStatus(error instanceof ServerCandleError ? error.message : '更晚 K 线加载失败');
+    } finally {
+      loadingLaterRef.current = false;
+    }
+  }
+
+  /**
+   * 11/02 中段洞自愈：对洞中心取一次 initial 窗合进属主数据集（initial 模式
+   * 本身就是「以任意点为中心的交易所连续窗」，合并即填上）。焦点态下焦点窗口
+   * 恒定连续不会触发；游标态下合进游标数据集并喂 App。
    */
   async function loadWindowCandles(timeMs: number, statusText: string): Promise<void> {
     if (loadingWindowRef.current) return;
     loadingWindowRef.current = true;
     setStatus(statusText);
-    const params = new URLSearchParams({
-      instrument: requestInstrument,
-      timeframe,
-      entryTime: new Date(timeMs).toISOString(),
-      mode: 'initial',
-      source: replayCandleSource(replay),
-    });
     try {
-      const candles = await fetchCandles(params);
-      if (candles.length) {
-        const merged = mergeCandles([...loadedCandlesRef.current, ...candles]);
-        loadedCandlesRef.current = merged;
-        setLoadedCandles(merged);
-        setRenderedCandles(merged);
-        onCandlesLoaded(merged);
-      }
+      const candles = await fetchInitialWindow(new Date(timeMs).toISOString());
+      if (candles.length) installIntoDataset(candles, focusActiveRef.current ? 'focus' : 'cursor');
       setStatus('');
     } catch (error) {
       setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
@@ -1756,9 +1886,45 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     }
   }
 
-  /** 10/30 焦点单取窗（见 focus effect 的说明）。 */
-  function loadFocusWindowCandles(timeMs: number) {
-    return loadWindowCandles(timeMs, '加载开仓点 K 线');
+  /** 一次 mode=initial 取窗（±150 根，服务端保证窗内连续）：焦点取窗与洞补齐共用。 */
+  function fetchInitialWindow(entryTimeISO: string): Promise<Candlestick[]> {
+    const params = new URLSearchParams({
+      instrument: requestInstrument,
+      timeframe,
+      entryTime: entryTimeISO,
+      mode: 'initial',
+      source: replayCandleSource(replay),
+    });
+    return fetchCandles(params);
+  }
+
+  /**
+   * 标准游标初始加载：initial 窗口锚在 dataAnchorTime（进度/游标），写游标数据集。
+   * 焦点态下不碰活动数据集（渲染仍是焦点窗口），只喂 App；cursorInitialKeyRef
+   * 做同键在飞去重，rangeKeyRef 识别切周期/会话后的过期响应。
+   */
+  async function loadCursorInitialWindow() {
+    if (cursorInitialKeyRef.current === rangeKey) return;
+    cursorInitialKeyRef.current = rangeKey;
+    const fetchRangeKey = rangeKey;
+    const params = new URLSearchParams({ instrument: requestInstrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: replayCandleSource(replay) });
+    try {
+      const candles = await fetchCandles(params);
+      if (rangeKeyRef.current !== fetchRangeKey) return;
+      const merged = mergeCandles(candles);
+      cursorCandlesRef.current = merged;
+      if (focusActiveRef.current) {
+        onCandlesLoaded(merged);
+      } else {
+        publishActive(merged, { publishToApp: true });
+      }
+      setStatus(merged.length ? '' : '没有 K 线');
+    } catch (error) {
+      if (rangeKeyRef.current !== fetchRangeKey) return;
+      setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
+    } finally {
+      if (cursorInitialKeyRef.current === fetchRangeKey) cursorInitialKeyRef.current = '';
+    }
   }
 
   /** 光标锚定视口：光标右侧留 10 根缓冲（初始锚定与「回到光标」共用）。 */
@@ -1778,10 +1944,34 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     }, 0);
   }
 
-  function updateLoadedCandles(candles: Candlestick[]) {
-    loadedCandlesRef.current = candles;
+  /**
+   * 发布活动数据集（10-30）：渲染（loaded/rendered）始终跟随活动数据集；
+   * `publishToApp` 仅在发布【游标数据集】时为真 —— App 的 freeReplayCandles
+   * 服务 currentCursorCandle/浮盈/开平仓可用性，绝不喂焦点窗口（R2）。
+   * `render: false` 只同步 loaded 不同步 rendered（未来预取的「已加载未揭示」）。
+   */
+  function publishActive(candles: Candlestick[], { publishToApp, render = true }: { publishToApp: boolean; render?: boolean }) {
+    activeCandlesRef.current = candles;
     setLoadedCandles(candles);
-    onCandlesLoaded(candles);
+    if (render) setRenderedCandles(candles);
+    if (publishToApp) onCandlesLoaded(candles);
+  }
+
+  /**
+   * 把一页取数合进【属主数据集】（10-30 双数据集）：属主仍是活动数据集时发布
+   * （游标数据集发布时喂 App）；焦点态下游标窗口在后台生长（在飞的翻页/预取
+   * 跨越了进入焦点的瞬间）时只喂 App，不碰渲染。
+   */
+  function installIntoDataset(candles: Candlestick[], dataset: 'cursor' | 'focus', options: { render?: boolean } = {}) {
+    const ownerRef = dataset === 'focus' ? focusCandlesRef : cursorCandlesRef;
+    const merged = mergeCandles([...ownerRef.current, ...candles]);
+    ownerRef.current = merged;
+    const isActive = (dataset === 'focus') === focusActiveRef.current;
+    if (isActive) {
+      publishActive(merged, { publishToApp: dataset === 'cursor', render: options.render });
+    } else if (dataset === 'cursor') {
+      onCandlesLoaded(merged);
+    }
   }
 
   function currentFreeReplayVisibleRange(chart: IChartApi): NumericVisibleRange | null {
@@ -1806,7 +1996,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   function updateHoverPercentage(clientY: number) {
     const series = seriesRef.current;
     const rect = chartRef.current?.getBoundingClientRect();
-    const baseline = currentCursorCandle(loadedCandlesRef.current, replay.cursorTime)?.close;
+    // 基准读游标数据集（10-30）：焦点态下活动数据集是焦点窗口，不含光标那根。
+    const baseline = currentCursorCandle(cursorCandlesRef.current, replay.cursorTime)?.close;
     if (!series || !rect) {
       setHoverPercentage(null);
       return;
@@ -2259,6 +2450,12 @@ function visibleBarsForChart(chart: IChartApi, element: HTMLElement | null): num
 function shouldLoadEarlierByLogicalRange(series: ISeriesApi<'Candlestick'>, range: NumericVisibleRange, threshold = 50): boolean {
   const barsInfo = series.barsInLogicalRange(range);
   return barsInfo !== null && barsInfo.barsBefore < threshold;
+}
+
+/** 右缘对称版（10-30）：焦点态向右平移时从焦点窗口右缘继续加载。 */
+function shouldLoadLaterByLogicalRange(series: ISeriesApi<'Candlestick'>, range: NumericVisibleRange, threshold = 50): boolean {
+  const barsInfo = series.barsInLogicalRange(range);
+  return barsInfo !== null && barsInfo.barsAfter < threshold;
 }
 
 function pointToScreen(point: ChartPoint, chart: IChartApi, series: ISeriesApi<'Candlestick'>): { x: number; y: number } | null {

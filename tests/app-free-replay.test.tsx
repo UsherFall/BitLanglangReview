@@ -9,6 +9,8 @@ const chartMocks = vi.hoisted(() => ({
   coordinateToPrice: vi.fn(() => 110),
   getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 160 })),
   getVisibleRange: vi.fn(),
+  /** 最近一次 series.setData 调用捕获（10-30 整窗替换：断言渲染数据无跨空洞缝）。 */
+  setData: vi.fn(),
   priceScaleApplyOptions: vi.fn(),
   setVisibleLogicalRange: vi.fn(),
   setVisibleRange: vi.fn(),
@@ -29,7 +31,7 @@ vi.mock('lightweight-charts', () => ({
   CrosshairMode: { Normal: 0 },
   PriceScaleMode: { Normal: 0, Logarithmic: 1 },
   createChart: () => ({
-    addSeries: () => ({ setData: vi.fn(), priceToCoordinate: vi.fn(), attachPrimitive: chartMocks.attachPrimitive, coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
+    addSeries: () => ({ setData: chartMocks.setData, priceToCoordinate: vi.fn(), attachPrimitive: chartMocks.attachPrimitive, coordinateToPrice: chartMocks.coordinateToPrice, barsInLogicalRange: chartMocks.barsInLogicalRange }),
     remove: vi.fn(),
     priceScale: () => ({ applyOptions: chartMocks.priceScaleApplyOptions }),
     subscribeCrosshairMove: vi.fn(),
@@ -68,6 +70,7 @@ describe('App Free Replay', () => {
     chartMocks.getVisibleLogicalRange.mockReturnValue({ from: 0, to: 160 });
     chartMocks.priceScaleApplyOptions.mockClear();
     chartMocks.primitives.length = 0;
+    chartMocks.setData.mockClear();
     chartMocks.setVisibleLogicalRange.mockClear();
     chartMocks.setVisibleRange.mockClear();
     chartMocks.subscribeVisibleLogicalRangeChange.mockClear();
@@ -1877,6 +1880,182 @@ describe('App Free Replay', () => {
     expect(row.className).toContain('active');
   });
 
+  // ─── 10-30 整窗替换：点单焦点窗口不再与游标窗口 merge ───────────────────
+  // 共享场景：15m 会话，游标 10:00，一笔已完成单开仓 08:00（远离游标窗口）。
+  // 旧实现把焦点窗口 merge 进游标窗口，两段不相邻数据在索引型时间轴上拼出缝
+  // （用户现场：15m 下 9-7 → 9-30 跨越 + 洞内开平仓点全挤在缝左缘那一根）。
+  const distantOpenMs = Date.parse('2024-05-21T08:00:00+08:00');
+
+  function seedSessionWithDistantTrade() {
+    return [makeSeededSession({
+      cursorTime: Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+      paperTrading: {
+        active: true,
+        startedAtCursorTime: Date.parse('2024-05-21T08:00:00+08:00') / 1000,
+        nextId: 2,
+        pendingEntry: null,
+        pendingExit: null,
+        position: null,
+        trades: [{
+          id: 'fill-1',
+          positionId: 'position-1',
+          direction: 'long',
+          entryPrice: 95,
+          entryTime: distantOpenMs,
+          positionOpenPrice: 95,
+          positionOpenTime: distantOpenMs,
+          exitPrice: 100,
+          exitTime: Date.parse('2024-05-21T09:30:00+08:00'),
+          quantity: 1,
+          margin: 95,
+          notional: 95,
+          leverage: 1,
+          pnl: 5,
+          returnRate: 0.0526,
+        }],
+      },
+    })];
+  }
+
+  /** 连续 15m 序列：焦点窗（锚 08:00）与游标窗（锚 10:00）互不重叠。 */
+  function distantTradeCandleStub(url: string): Response {
+    const params = new URL(`http://localhost${url}`).searchParams;
+    const entryTime = params.get('entryTime');
+    if (params.get('mode') === 'initial' && entryTime === new Date(distantOpenMs).toISOString()) {
+      return new Response(JSON.stringify({ candles: [
+        makeCandle('2024-05-21T07:00:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T07:15:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T07:30:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T07:45:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T08:00:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T08:15:00+08:00', { timeframe: '15m' }),
+      ] }));
+    }
+    if (params.get('mode') === 'initial') {
+      return new Response(JSON.stringify({ candles: [
+        makeCandle('2024-05-21T09:00:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T09:15:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T09:30:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+        makeCandle('2024-05-21T10:15:00+08:00', { timeframe: '15m' }),
+      ] }));
+    }
+    return new Response(JSON.stringify({ candles: [] }));
+  }
+
+  async function restoreSeededSessionAndFocus() {
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT/ }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const row = screen.getByRole('button', { name: /开 05-21 08:00/ });
+    fireEvent.click(row);
+    const openSec = distantOpenMs / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 900,
+      to: openSec + 150 * 900,
+    }));
+    return row;
+  }
+
+  it('renders one contiguous window after focusing a distant order, never a stitched seam', async () => {
+    stubFreeReplayFetch({ sessions: seedSessionWithDistantTrade(), onCandles: distantTradeCandleStub });
+    await restoreSeededSessionAndFocus();
+
+    // 核心回归：最后一次 setData 的真实蜡烛两两相邻恒等于一个 15m step。
+    // 旧 merge 实现下 08:15 → 09:00 的相邻对会把缝暴露出来（2700 ≠ 900）。
+    const times = lastSetDataRealTimes();
+    expect(times.length).toBeGreaterThan(1);
+    for (let index = 1; index < times.length; index += 1) {
+      expect(times[index] - times[index - 1]).toBe(900);
+    }
+    // 焦点窗口里必须能看到该单的开仓点（10-30 回归：点集锚定活动数据集 ——
+    // 游标数据集不含焦点窗口，锚错数据集会让最老的单子丢开/平仓点）。
+    const points = markerPoints() as Array<{ timeMs?: number; kind?: string }>;
+    expect(points.some((point) => point.timeMs === distantOpenMs && point.kind === 'open')).toBe(true);
+  });
+
+  it('keeps market-open available while an order is focused (cursor dataset still feeds the app)', async () => {
+    stubFreeReplayFetch({ sessions: seedSessionWithDistantTrade(), onCandles: distantTradeCandleStub });
+    await restoreSeededSessionAndFocus();
+
+    // R2：焦点态下 currentCursorCandle 仍由游标数据集供给 —— 市价开仓不禁用。
+    fireEvent.click(screen.getByRole('tab', { name: '操作' }));
+    expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled();
+  });
+
+  it('restores the cursor window with cursor candles on screen after stepping out of focus', async () => {
+    stubFreeReplayFetch({ sessions: seedSessionWithDistantTrade(), onCandles: distantTradeCandleStub });
+    const row = await restoreSeededSessionAndFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+
+    // R3：步进退出焦点 → 活动数据集切回游标窗口，图上立刻有游标附近 K 线
+    // （游标 10:00 → 步进到 10:15，而不是空窗）。
+    const steppedCursorSec = Date.parse('2024-05-21T10:15:00+08:00') / 1000;
+    await waitFor(() => expect(lastSetDataRealTimes()).toContain(steppedCursorSec));
+    expect(row.className).not.toContain('active');
+    // 视口跟随回游标（10/28 舒适区契约）：mock 视口 span=1000、pad=10×15m=9000
+    // → followsForward 锚 { from: cursor-span+pad, to: cursor+pad }。
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: steppedCursorSec - 1000 + 9000,
+      to: steppedCursorSec + 9000,
+    }));
+  });
+
+  it('re-fetches the focus window and stays contiguous across a timeframe switch while focused', async () => {
+    stubFreeReplayFetch({
+      sessions: seedSessionWithDistantTrade(),
+      onCandles: (url) => {
+        const params = new URL(`http://localhost${url}`).searchParams;
+        const entryTime = params.get('entryTime');
+        const timeframe = params.get('timeframe');
+        if (timeframe === '5m') {
+          if (params.get('mode') === 'initial' && entryTime === new Date(distantOpenMs).toISOString()) {
+            return new Response(JSON.stringify({ candles: [
+              makeCandle('2024-05-21T07:50:00+08:00'),
+              makeCandle('2024-05-21T07:55:00+08:00'),
+              makeCandle('2024-05-21T08:00:00+08:00'),
+              makeCandle('2024-05-21T08:05:00+08:00'),
+              makeCandle('2024-05-21T08:10:00+08:00'),
+            ] }));
+          }
+          if (params.get('mode') === 'initial') {
+            return new Response(JSON.stringify({ candles: [
+              makeCandle('2024-05-21T09:50:00+08:00'),
+              makeCandle('2024-05-21T09:55:00+08:00'),
+              makeCandle('2024-05-21T10:00:00+08:00'),
+              makeCandle('2024-05-21T10:05:00+08:00'),
+              makeCandle('2024-05-21T10:10:00+08:00'),
+              makeCandle('2024-05-21T10:15:00+08:00'),
+            ] }));
+          }
+          return new Response(JSON.stringify({ candles: [] }));
+        }
+        return distantTradeCandleStub(url);
+      },
+    });
+    await restoreSeededSessionAndFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '5m' }));
+
+    // 焦点跨周期存活：新周期重新取窗并重新锚到开仓点（±150 根 5m）。
+    const openSec = distantOpenMs / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 300,
+      to: openSec + 150 * 300,
+    }));
+    // 渲染数据无跨周期缝：最后一次 setData 的真实蜡烛两两相邻恒等于 5m。
+    const times = lastSetDataRealTimes();
+    expect(times.length).toBeGreaterThan(1);
+    for (let index = 1; index < times.length; index += 1) {
+      expect(times[index] - times[index - 1]).toBe(300);
+    }
+  });
+
   // 10/30：开平仓提交/点持仓行后视口跳回光标（光标锚定，与初始同款），
   // 且焦点清除；步进不经此（舒适区契约另有用例）。
   it('returns the viewport to the cursor after a paper trading action or a position-row click', async () => {
@@ -1999,6 +2178,13 @@ function sessionPutBodies(): Array<Record<string, unknown>> {
   return fetchMock.mock.calls
     .filter(([, callInit]) => callInit?.method === 'PUT')
     .map(([, callInit]) => JSON.parse(String(callInit?.body)) as Record<string, unknown>);
+}
+
+/** 最后一次 series.setData 载荷里的真实蜡烛时间（秒；过滤两端各 200 根补白）。 */
+function lastSetDataRealTimes(): number[] {
+  const calls = chartMocks.setData.mock.calls;
+  const data = (calls.at(-1)?.[0] ?? []) as Array<{ time: number | string; open?: number }>;
+  return data.filter((item) => item.open !== undefined).map((item) => Number(item.time));
 }
 
 /** 10/29 新用例的共享 fetch 桩：基线路由 + 调用方给 candles 应答。 */
