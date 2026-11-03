@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "回溯复盘图表集成契约：FreeReplayChart refs/effects、venue 与 grid 同行、会话记录源、OtherCoin/画线的 venue 规则（本次扩展：源可选、词汇翻译、中段洞自愈）"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "free replay 会话状态与自动保存契约：PUT 不丢字段、恢复路径、deleted-session 防复活"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 验证要求与测试口径（npm test、jsdom 约束）"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "领域类型复用（MarketDataSource、CandleSourceId）与 API 边界类型"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "服务端蜡烛源/缓存契约：命名空间规则、contiguousCandles、closed-bar 不变量（回填脚本与读侧自愈不得破坏）"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Direction/ReviewTimeframe/timeframeMs 等领域时间契约（回填脚本与网格映射复用）"}
