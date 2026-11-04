@@ -25,6 +25,7 @@ When changing Free Replay, verify:
 - Rewind cannot move before the start progress, and cannot move AT ALL while `paperTrading.active` (11/03: button + keyboard ← both locked, function-level guard in `rewindFreeReplayCandle`).
 - The 焦点单 pre-entry view (剪刀按钮, 11/03) keeps the two boundaries straight: render/magnet filter strictly below `positionOpenTime` (the candle OPENING at `positionOpenTime` is already the future), later-paging gate one step earlier than that (no request storm), auto-resets on focus exit, and never leaks into the session save payload.
 - Historical TRADE markers are not rendered; paper-fill open/close points ARE — each anchored to the loaded candle CONTAINING the fill instant (`eventTime - 1`, never the progress→cursor mapping), dropped when that candle is not loaded or is later than the reveal cursor (11/02).
+- Paper round annotations (11/04) write the ROUND id (`paper:{instrument}:{startTime}:{positionId}`), so every fill row of one round shares its tags/star; the star toggle must not open the editor, and the library row must send `module: 'paper'` so tag counts stay module-scoped.
 - Switching Review Timeframes preserves true Free Replay `progressTime` and maps the display cursor to the latest complete candlestick whose end time is not after that progress.
 
 ## Forbidden Patterns

@@ -136,6 +136,18 @@ _Avoid_: future leak, second replay cursor, panel on a different venue than its 
 The saved state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, **Free Replay Cursor**, and paper trading session. Free Replay sessions auto-save as history and can be restored so the reviewer resumes from where they left off.
 _Avoid_: journal entry, review note
 
+**Paper Round** (模拟单回合):
+One paper position in a **Free Replay**, from its first open to the moment it is FULLY closed — the annotation unit for paper trading, deliberately coarser than a fill so that a position scaled out in three partial closes is one reviewable round, not three. A round is identified by `paper:{instrument}:{startTime}:{positionId}` (`paperRoundReviewId` in `src/domain/paper-round.ts`): the session key makes it stable across restores, and `positionId` (`position-N`, persisted in the session blob) makes it stable within a session. Its market data (direction, prices, pnl, fill count) is DERIVED per request from `free_replay_sessions.paper_trading_json` by `groupFillsIntoRounds` — no round snapshot table exists, so the blob stays the single source of truth. A round whose position is still open is NOT a Paper Round yet: it has no closing price, so it stays out of the **Paper Round Library** until fully closed.
+_Avoid_: paper trade, paper fill, partial close
+
+**Paper Round Review** (回合批注):
+The tags / one note / star attached to a **Paper Round**, stored in the SAME `trade_reviews` table as real trades under the round's `paper:` id. Reusing the table is what makes tag renaming free: tag NAMES are global, so a rename rewrites paper rows too, while per-tag `N 笔` counts stay module-scoped (`module: 'paper'` scopes to the `paper:` prefix, `trade`/`bitget` exclude it). One round's annotation is edited from TWO entries — the in-replay 单子 row (annotate while practising) and the **Paper Round Library** (tidy up afterwards) — both writing that one row. Deleting a **Free Replay Session** cascades its reviews away (`deleteReviewsByPrefix('paper:{instrument}:{startTime}:')`, trailing colon required): the round's market data dies with the blob, so keeping the annotation would leave a row nothing can render.
+_Avoid_: separate paper review table, per-fill annotation
+
+**Paper Round Library** (模拟单库):
+The cross-session list of closed **Paper Rounds** on the 回溯复盘 home screen (sit next to 历史会话, no new top-level nav). Rows show direction / entry→exit / pnl / fill count / source session and sort by closing time descending, filterable by tag, star state, and source session. Clicking a row restores its source **Free Replay Session** and focuses the chart on that round. It answers the question the real-trade queue cannot: how did the practice trades I imagined actually resolve.
+_Avoid_: paper backtest report, simulated PnL dashboard
+
 **Free Replay Start Time**:
 The reviewer-chosen local date and minute where a **Free Replay** begins. The start time is placed on the containing **Candlestick** in the active **Review Timeframe**.
 _Avoid_: second-level timestamp, exchange server time, exact tick

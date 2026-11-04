@@ -53,7 +53,11 @@ import {
   type PaperTradingSettings,
   type PaperTradingSession,
 } from './free-replay-paper-trading';
-import { ReviewEditor, type ReviewModule, type SavedReviewPayload } from './ReviewEditor';
+import { ReviewEditor, type ReviewModule, type SavedReviewPayload, type TagMutation } from './ReviewEditor';
+import { paperRoundReviewId, paperSessionReviewPrefix, type PaperRound, type PaperRoundFilters } from '../domain/paper-round';
+import { rewritePaperReviewTags, type PaperReviewMap } from './paper-review-state';
+import { PaperRoundReviewEditor, type PaperReviewSavedPayload } from './PaperRoundReviewEditor';
+import type { PaperRoundLibraryResponse, PaperRoundSessionRow } from './FreeReplayPanel';
 import { firstUnreviewedTrade, reviewProgress } from './review-progress';
 import { TradeMarkerPrimitive } from './trade-marker-primitive';
 import { allTradeChartPoints, tradeChartPoints, type MarkerPoint } from './trade-markers';
@@ -78,16 +82,16 @@ type TagMutationResponse = {
   tagCounts: Record<string, number>;
 };
 
-/** A global tag edit: rename when `to` is a name, delete when `to` is null. */
-type TagMutation = { from: string; to: string | null };
-
 /** Applies a global tag edit to one trade's review. Dedupes for the merge case. */
+function reviewWithTagEdit(review: TradeReview, from: string, to: string | null): TradeReview {
+  const tags = to === null
+    ? review.tags.filter((tag) => tag !== from)
+    : review.tags.map((tag) => (tag === from ? to : tag));
+  return { ...review, tags: [...new Set(tags)] };
+}
 function rewriteTradeTags(trade: ReviewedTrade, from: string, to: string | null): ReviewedTrade {
   if (!trade.review) return trade;
-  const tags = to === null
-    ? trade.review.tags.filter((tag) => tag !== from)
-    : trade.review.tags.map((tag) => (tag === from ? to : tag));
-  return { ...trade, review: { ...trade.review, tags: [...new Set(tags)] } };
+  return { ...trade, review: reviewWithTagEdit(trade.review, from, to) };
 }
 
 const sortLabels: Record<SortField, string> = {
@@ -203,6 +207,9 @@ function sessionKey(instrument: string, startTime: string): string {
   return `${instrument}:${startTime}`;
 }
 
+/** Default (unfiltered) Paper Round library payload. */
+const emptyPaperLibrary: PaperRoundLibraryResponse = { rounds: [], sessions: [], tags: [], tagCounts: {} };
+
 export function App() {
   const [filters, setFilters] = useState<ReviewQueueOptions>({ sortField: 'entryTime', sortDirection: 'asc' });
   const [data, setData] = useState<TradeResponse>({ trades: [], instruments: [], tags: [], tagCounts: {} });
@@ -251,6 +258,12 @@ export function App() {
   // （步进不走这里，10/28 舒适区契约不变）。
   const [cursorReturnToken, setCursorReturnToken] = useState(0);
   const [freeReplaySessions, setFreeReplaySessions] = useState<FreeReplaySession[]>([]);
+  // 11/04 模拟单库：跨会话聚合的已完结回合 + paper 作用域的标签与批注。
+  // `paperReviews` 是回放内单子行与库行共享的那一份数据（回合 ID 索引）。
+  const [paperLibrary, setPaperLibrary] = useState<PaperRoundLibraryResponse>(emptyPaperLibrary);
+  const [paperReviews, setPaperReviews] = useState<PaperReviewMap>({});
+  const [paperFilters, setPaperFilters] = useState<PaperRoundFilters>({});
+  const [paperLibraryToken, setPaperLibraryToken] = useState(0);
   // Bumped when a reveal has no further candlestick to show, so the chart
   // retries the future fetch instead of ignoring the click silently.
   const [futureRetryToken, setFutureRetryToken] = useState(0);
@@ -350,6 +363,47 @@ export function App() {
       .then((response) => response.json())
       .then(({ sessions }: { sessions?: FreeReplaySession[] }) => setFreeReplaySessions(sessions ?? []));
   }, []);
+
+  // 11/04 模拟单库：单库数据在进入回溯复盘模式时、以及批注/删会话/新增回放
+  // 回合后重取（paperLibraryToken）。服务端派生回合行情，客户端不缓存。
+  useEffect(() => {
+    if (reviewMode !== 'freeReplay') return;
+    const params = new URLSearchParams();
+    if (paperFilters.tag) params.set('tag', paperFilters.tag);
+    if (paperFilters.starred) params.set('starred', paperFilters.starred);
+    if (paperFilters.session) params.set('session', paperFilters.session);
+    fetch(`/api/paper/rounds?${params}`)
+      .then((response) => response.json())
+      .then((next: Partial<PaperRoundLibraryResponse>) => {
+        const library: PaperRoundLibraryResponse = {
+          rounds: Array.isArray(next?.rounds) ? next.rounds : [],
+          sessions: Array.isArray(next?.sessions) ? next.sessions : [],
+          tags: Array.isArray(next?.tags) ? next.tags : [],
+          tagCounts: next?.tagCounts ?? {},
+          reviews: Array.isArray(next?.reviews) ? next.reviews : [],
+        };
+        setPaperLibrary(library);
+        setPaperReviews((current) => {
+          // 只合并，不删除：开放回放中的回合可能不在库列表里，但它们的批注
+          // 仍需要给单子行用。
+          const merged: PaperReviewMap = { ...current };
+          // 整表先填（含仍在持仓回合的批注 —— 它们不进库列表，但单子行要能读到）。
+          for (const review of library.reviews ?? []) merged[review.tradeId] = review;
+          for (const round of library.rounds) {
+            if (round.review) merged[round.id] = round.review;
+          }
+          return merged;
+        });
+      })
+      .catch(() => setPaperLibrary(emptyPaperLibrary));
+  }, [reviewMode, paperFilters, paperLibraryToken]);
+
+  // 11/04：单库数据在两种时机重取 —— 进入回溯复盘（含删会话后回首页），
+  // 以及与活跃回放脱钩（回放中刚平掉的回合此时才该出现在库里）。
+  useEffect(() => {
+    if (reviewMode !== 'freeReplay' || freeReplay) return;
+    setPaperLibraryToken((token) => token + 1);
+  }, [reviewMode, freeReplay]);
 
   // Trailing-debounced auto-save: any reveal, rewind, timeframe switch, or
   // paper trading change persists the active Free Replay session.
@@ -495,6 +549,98 @@ export function App() {
   }
 
   /**
+   * 11/04 模拟单批注保存：`/api/reviews` 回答保存后的 review + paper 作用域
+   * 的标签表与计数，三处（库列表 / 当前回放单子行）同步修补，不再重复拉取。
+   */
+  function handlePaperReviewSaved(payload: PaperReviewSavedPayload) {
+    applyPaperReview(payload.review);
+    setPaperLibrary((current) => ({
+      ...current,
+      // 保存接口回答的是 paper 作用域的标签表与计数，就地修补即可（不要重取）。
+      tags: payload.tags ?? current.tags,
+      tagCounts: payload.tagCounts ?? current.tagCounts,
+    }));
+  }
+
+  /** Records a global paper tag edit on the local library snapshot. */
+  function rewriteRoundTags(round: PaperRound, from: string, to: string | null): PaperRound {
+    if (!round.review) return round;
+    return { ...round, review: reviewWithTagEdit(round.review, from, to) };
+  }
+
+  /** Writes one saved/optimistic review into BOTH local snapshots (map + library rows). */
+  function applyPaperReview(review: TradeReview) {
+    setPaperReviews((current) => ({ ...current, [review.tradeId]: review }));
+    setPaperLibrary((current) => ({
+      ...current,
+      rounds: current.rounds.map((round) => (round.id === review.tradeId ? { ...round, review } : round)),
+    }));
+  }
+
+  /**
+   * 星标一键切换（11/04）：回放单子行与库行都走这里。先乐观更新本地，请求
+   * 失败再回滚 —— 星标是单击操作，不该先打开编辑器再点保存。
+   */
+  function toggleRoundStar(reviewId: string, currentReview: TradeReview | undefined) {
+    const nextStarred = !(currentReview?.starred ?? false);
+    const optimistic: TradeReview = currentReview
+      ? { ...currentReview, starred: nextStarred }
+      : { tradeId: reviewId, tags: [], note: '', starred: nextStarred, updatedAt: new Date().toISOString() };
+    applyPaperReview(optimistic);
+
+    void fetch('/api/reviews', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tradeId: reviewId, tags: optimistic.tags, note: optimistic.note, starred: nextStarred, module: 'paper' }),
+    })
+      .then((response) => response.json())
+      .then((payload: PaperReviewSavedPayload) => handlePaperReviewSaved(payload))
+      .catch(() => applyPaperReview({ ...optimistic, starred: !nextStarred }));
+  }
+
+  /** Same payload shape, but from the in-replay 单子 rows (same map, same route). */
+  async function mutatePaperTag({ from, to }: TagMutation) {
+    const response = await fetch(to === null ? '/api/tags/delete' : '/api/tags/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(to === null ? { tag: from, module: 'paper' } : { from, to, module: 'paper' }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(body?.error ?? '标签操作失败');
+    }
+    const result = (await response.json()) as TagMutationResponse;
+    setPaperReviews((current) => rewritePaperReviewTags(current, from, to));
+    setPaperLibrary((current) => ({
+      ...current,
+      tags: result.tags,
+      tagCounts: result.tagCounts,
+      rounds: current.rounds.map((round) => rewriteRoundTags(round, from, to)),
+    }));
+    setPaperFilters((current) => (current.tag === from ? { ...current, tag: to ?? undefined } : current));
+  }
+
+  /**
+   * 11/04 库行点击：恢复来源会话，并把视口焦点定位到该回合末笔成交。
+   * 恢复会清空 candles/orderFocus，而单子行在会话恢复后才就位，所以焦点请求
+   * 排在下一帧 —— 与点单子行（focusPaperOrder）用的是同一套 token 机制。
+   */
+  function openPaperRound(round: PaperRound) {
+    const session = freeReplaySessions.find((item) => item.instrument === round.instrument && item.startTime === round.startTime);
+    if (!session) return;
+    restoreFreeReplaySession(session);
+    const lastTradeId = round.tradeIds[round.tradeIds.length - 1];
+    window.setTimeout(() => {
+      setOrderFocus((current) => ({
+        // 锚点用回合的开仓点（与单子行一致），成交 ID 取末笔以高亮该行。
+        id: lastTradeId,
+        timeMs: round.positionOpenTime,
+        token: (current?.token ?? 0) + 1,
+      }));
+    }, 0);
+  }
+
+  /**
    * 10/30 回到光标：清焦点单并把视口跳回光标（开平仓提交、点持仓行）。
    * 步进不走这里 —— 10/28 舒适区契约不变。
    */
@@ -615,6 +761,17 @@ export function App() {
       deletedSessionKeysRef.current.delete(key);
       throw error;
     }
+    // 11/04：服务端级联删除了这个会话的回合批注，本地也要把对应 review 丢掉，
+    // 否则首页单库会留着永远渲染不出来的孤儿行。
+    setPaperReviews((current) => {
+      const prefix = paperSessionReviewPrefix(instrument, startTime);
+      const next: PaperReviewMap = {};
+      for (const [id, review] of Object.entries(current)) {
+        if (!id.startsWith(prefix)) next[id] = review;
+      }
+      return next;
+    });
+    setPaperLibraryToken((token) => token + 1);
     setFreeReplaySessions((current) => current.filter((session) => !(session.instrument === instrument && session.startTime === startTime)));
     if (freeReplay && freeReplay.instrument === instrument && freeReplay.startTime === startTime) {
       setFreeReplay(null);
@@ -704,6 +861,19 @@ export function App() {
   // 之外，只有焦点窗口里有它的蜡烛；游标窗口的统计供给不动（R2）。
   const paperMarkerPoints = freeReplay ? paperTradeChartPoints(paperTrading.trades, freeReplay.cursorTime, timeframe, freeReplayActiveCandles) : [];
   const focusPaperMarkerPoints = focusedPaperTradePoints(paperMarkerPoints, paperTrading.trades, orderFocus?.id ?? null);
+
+  // 11/04：当前回放会话的回合批注明细。同一回合的多行（部分平仓）共享
+  // 同一个 review id，所以按 positionId 建一次索引即可。
+  const paperRoundIndex = new Map<string, { id: string; reviewId: string }>();
+  if (freeReplay) {
+    for (const trade of paperTrading.trades) {
+      if (paperRoundIndex.has(trade.positionId)) continue;
+      paperRoundIndex.set(trade.positionId, {
+        id: trade.positionId,
+        reviewId: paperRoundReviewId(freeReplay.instrument, freeReplay.startTime, trade.positionId),
+      });
+    }
+  }
 
   return (
     <main className="app-shell" style={shellStyle}>
@@ -840,7 +1010,29 @@ export function App() {
             onScanned={setScanResult}
             onSourceChange={setScanSource}
           />
-        ) : <FreeReplayPanel timeframe={timeframe} sessions={freeReplaySessions} activeReplay={freeReplay} canRewind={!paperTrading.active} onStart={handleFreeReplayStart} onReveal={revealNextFreeReplayCandle} onRewind={rewindFreeReplayCandle} onRestore={restoreFreeReplaySession} onDelete={handleDeleteSession} />}
+        ) : (                                  
+          <FreeReplayPanel
+            timeframe={timeframe}
+            sessions={freeReplaySessions}
+            activeReplay={freeReplay}
+            canRewind={!paperTrading.active}
+            onStart={handleFreeReplayStart}
+            onReveal={revealNextFreeReplayCandle}
+            onRewind={rewindFreeReplayCandle}
+            onRestore={restoreFreeReplaySession}
+            onDelete={handleDeleteSession}
+            paperRounds={paperLibrary.rounds}
+            paperRoundSessions={paperLibrary.sessions}
+            paperTags={paperLibrary.tags}
+            paperTagCounts={paperLibrary.tagCounts}
+            paperReviews={paperReviews}
+            onSavePaperReview={handlePaperReviewSaved}
+            onMutatePaperTag={mutatePaperTag}
+            onTogglePaperStar={(round) => toggleRoundStar(round.id, paperReviews[round.id] ?? round.review)}
+            onOpenPaperRound={openPaperRound}
+            onPaperFiltersChange={setPaperFilters}
+          />
+        )}
           </>
         )}
       </aside>
@@ -890,6 +1082,13 @@ export function App() {
                 onCancelOrder={(kind) => setPaperTrading((current) => cancelPendingOrder(current, kind))}
                 onSetStopLoss={(legId, stopPrice) => freeReplayCurrentCandle && setPaperTrading((current) => placeStopLoss(current, legId, stopPrice, freeReplayCurrentCandle.close, freeReplay.progressTime))}
                 onCancelStopLoss={(legId) => setPaperTrading((current) => cancelStopLoss(current, legId))}
+                roundReviewId={(trade) => paperRoundIndex.get(trade.positionId)?.reviewId ?? null}
+                paperReviews={paperReviews}
+                paperTags={paperLibrary.tags}
+                paperTagCounts={paperLibrary.tagCounts}
+                onSavePaperReview={handlePaperReviewSaved}
+                onMutatePaperTag={mutatePaperTag}
+                onToggleRoundStar={toggleRoundStar}
               />
             </div>
             {otherCoinOpen && (
@@ -1022,6 +1221,13 @@ function FreeReplayPaperTradingPanel({
   focusedOrderId,
   onFocusOrder,
   onReturnToCursor,
+  roundReviewId,
+  paperReviews,
+  paperTags,
+  paperTagCounts,
+  onSavePaperReview,
+  onMutatePaperTag,
+  onToggleRoundStar,
 }: {
   session: PaperTradingSession;
   stats: PaperStats;
@@ -1039,8 +1245,18 @@ function FreeReplayPaperTradingPanel({
   focusedOrderId: string | null;
   onFocusOrder: (trade: PaperTrade) => void;
   onReturnToCursor: () => void;
+  /** 11/04：回合批注 —— 成交行 → 所属回合的 review id（未建回合时为 null）。 */
+  roundReviewId: (trade: PaperTrade) => string | null;
+  paperReviews: Record<string, TradeReview>;
+  paperTags: string[];
+  paperTagCounts: Record<string, number>;
+  onSavePaperReview: (payload: PaperReviewSavedPayload) => void;
+  onMutatePaperTag: (mutation: TagMutation) => Promise<void>;
+  /** 单子行的星标直接写库（一次点击不该先打开编辑器）。 */
+  onToggleRoundStar: (reviewId: string, review: TradeReview | undefined) => void;
 }) {
   const [panelTab, setPanelTab] = useState<'trade' | 'orders'>('trade');
+  const [editingRoundId, setEditingRoundId] = useState<string | null>(null);
   const [direction, setDirection] = useState<PaperDirection>('long');
   const [positionRatioPercent, setPositionRatioPercent] = useState(100);
   const [leverage, setLeverage] = useState(1);
@@ -1189,21 +1405,56 @@ function FreeReplayPaperTradingPanel({
         )}
         {session.pendingEntry && <div className="paper-pending-row">待开仓 {session.pendingEntry.limitPrice}</div>}
         {session.pendingExit && <div className="paper-pending-row">待平仓 {session.pendingExit.limitPrice}</div>}
-        {session.trades.map((trade) => (
-          <button
-            key={`${trade.id}:${trade.exitTime}`}
-            type="button"
-            className={`paper-trade-row ${focusedOrderId === trade.id ? 'active' : ''}`}
-            title="跳到开仓点"
-            onClick={() => onFocusOrder(trade)}
-          >
-            <span>{formatPaperDirection(trade.direction)}</span>
-            <span>{trade.entryPrice} → {trade.exitPrice}</span>
-            <strong className={profitTone(trade.pnl) ?? ''}>{formatSignedUsdt(trade.pnl)}</strong>
-            <span>{formatPercent(trade.returnRate)}</span>
-            <span className="paper-order-time">开 {formatPaperTime(trade.positionOpenTime)}</span>
-          </button>
-        ))}
+        {session.trades.map((trade) => {
+          // 11/04：同一回合的多个成交行共享同一份批注（部分平仓）。星标与
+          // 标签都从回合的 review id 读，增删一次全部行同步。
+          const reviewId = roundReviewId(trade);
+          const review = reviewId ? paperReviews[reviewId] : undefined;
+          const isEditing = reviewId !== null && editingRoundId === reviewId;
+          return (
+            <div key={`${trade.id}:${trade.exitTime}`} className="paper-trade-row-wrap">
+              <button
+                type="button"
+                className={`paper-trade-row ${focusedOrderId === trade.id ? 'active' : ''}`}
+                title="跳到开仓点"
+                onClick={() => onFocusOrder(trade)}
+              >
+                <span>{formatPaperDirection(trade.direction)}</span>
+                <span>{trade.entryPrice} → {trade.exitPrice}</span>
+                <strong className={profitTone(trade.pnl) ?? ''}>{formatSignedUsdt(trade.pnl)}</strong>
+                <span>{formatPercent(trade.returnRate)}</span>
+                <span className="paper-order-time">开 {formatPaperTime(trade.positionOpenTime)}</span>
+              </button>
+              {reviewId && (
+                <div className="paper-trade-row-review">
+                  <button
+                    type="button"
+                    className={`star-toggle ${review?.starred ? 'active' : ''}`}
+                    aria-label={`${review?.starred ? '取消收藏' : '收藏'} ${trade.positionId}`}
+                    title={review?.starred ? '取消收藏' : '收藏'}
+                    onClick={() => onToggleRoundStar(reviewId, review)}
+                  >
+                    <Star size={14} fill={review?.starred ? 'currentColor' : 'none'} />
+                  </button>
+                  <span className="tags">{review?.tags.join(' · ') || '未标记'}</span>
+                  <button type="button" aria-label={`批注 ${trade.positionId}`} title="批注" onClick={() => setEditingRoundId(isEditing ? null : reviewId)}>
+                    {isEditing ? '收起' : '批注'}
+                  </button>
+                </div>
+              )}
+              {isEditing && reviewId && (
+                <PaperRoundReviewEditor
+                  reviewId={reviewId}
+                  review={review}
+                  availableTags={paperTags}
+                  tagCounts={paperTagCounts}
+                  onMutateTag={onMutatePaperTag}
+                  onSaved={onSavePaperReview}
+                />
+              )}
+            </div>
+          );
+        })}
         {!position && !session.pendingEntry && !session.pendingExit && !session.trades.length && <p className="paper-help-text">暂无单子</p>}
       </div>
       )}

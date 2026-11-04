@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "批注数据模型（TradeReview/tags/starred）与回合 ID 需对齐现有领域契约"}
+{"file": ".trellis/spec/domain/review-queue.md", "reason": "复盘库列表的过滤/排序语义对齐真实单复盘队列"}
+{"file": ".trellis/spec/server/api-plugin.md", "reason": "新增 /api/paper/rounds 路由与 module='paper' 作用域需遵守 API 插件规范"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "复用 trade_reviews 表与前缀级联删除涉及 SQLite 持久层约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "单子行星标/行内批注编辑器与 FreeReplayPanel 新区块需遵守组件规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "paperReviews 状态、保存后局部修补与跳回 focus 时序需遵守状态管理规范"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用 ReviewEditor/TagCombobox 与既有 review 路由前的复用评估"}

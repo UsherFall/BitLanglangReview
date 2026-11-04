@@ -103,4 +103,91 @@ describe('FreeReplayPanel', () => {
     // 步进不受影响 —— 模拟中仍要能向前揭示。
     expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
   });
+
+  // 11/04：回顾页首页并列的「模拟单库」—— 跨会话聚合已完结回合。
+  const round = {
+    id: 'paper:BTCUSDT:2024-05-21 10:07:position-1',
+    positionId: 'position-1',
+    instrument: 'BTCUSDT',
+    startTime: '2024-05-21 10:07',
+    direction: 'long' as const,
+    entryPrice: 100,
+    entryTime: 0,
+    exitPrice: 110,
+    exitTime: 1,
+    positionOpenPrice: 100,
+    positionOpenTime: 0,
+    quantity: 1,
+    margin: 100,
+    notional: 100,
+    leverage: 1,
+    pnl: 10,
+    returnRate: 0.1,
+    fillCount: 2,
+    tradeIds: ['fill-1', 'fill-2'],
+  };
+
+  it('lists closed paper rounds with their source session', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+
+    render(
+      <FreeReplayPanel
+        timeframe="5m"
+        paperRounds={[round]}
+        paperRoundSessions={[{ instrument: 'BTCUSDT', startTime: '2024-05-21 10:07', updatedAt: '2024-05-21T09:00:00.000Z', roundCount: 1 }]}
+        paperTags={['追高']}
+        paperTagCounts={{ 追高: 1 }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /模拟单库 \(1\)/ })).toBeInTheDocument();
+    expect(screen.getByText('+10.00%')).toBeInTheDocument();
+    expect(screen.getByText('2 笔')).toBeInTheDocument();
+    // 来源会话标签让库行可比对（币种 + 回放起点）。
+    expect(screen.getByText('2024-05-21 10:07 起')).toBeInTheDocument();
+  });
+
+  it('opens the source session when a library row is clicked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+    const onOpenPaperRound = vi.fn();
+
+    render(<FreeReplayPanel timeframe="5m" paperRounds={[round]} onOpenPaperRound={onOpenPaperRound} />);
+
+    fireEvent.click(screen.getByTitle('回到该回合'));
+
+    expect(onOpenPaperRound).toHaveBeenCalledWith(round);
+  });
+
+  // 11/04：库行的星标是单击直写，不该顺手展开批注编辑器 —— 两处入口对同一
+  // 动作必须表现一致（回放单子行同样如此）。
+  it('toggles the star from a library row without opening the editor', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+    const onTogglePaperStar = vi.fn();
+
+    render(<FreeReplayPanel timeframe="5m" paperRounds={[round]} onTogglePaperStar={onTogglePaperStar} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '收藏 BTCUSDT position-1' }));
+
+    expect(onTogglePaperStar).toHaveBeenCalledWith(round);
+    expect(screen.queryByLabelText(`批注 ${round.id}`)).not.toBeInTheDocument();
+  });
+
+  it('reports library filter changes so the server can re-derive the list', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+    const onPaperFiltersChange = vi.fn();
+
+    render(
+      <FreeReplayPanel
+        timeframe="5m"
+        paperRounds={[round]}
+        paperTags={['追高']}
+        paperTagCounts={{ 追高: 1 }}
+        onPaperFiltersChange={onPaperFiltersChange}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('按收藏状态筛选模拟单'), { target: { value: 'yes' } });
+
+    expect(onPaperFiltersChange).toHaveBeenCalledWith({ tag: undefined, starred: 'yes', session: undefined });
+  });
 });

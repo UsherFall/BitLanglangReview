@@ -26,9 +26,21 @@ Server data is fetched through these routes from `src/server/app-plugin.ts`:
 - `/api/candles` returns cached/fetched candlesticks for initial, earlier, or later modes.
 - `/api/drawings` lists, saves, and deletes chart drawings, scoped by **board** (10/26): GET/POST require `board` = `scan` (选品抽屉) | `review` (复盘/回溯图), missing/illegal → 400. Listing matches the instrument CANONICALLY inside the board; the 距线 scan measures the `scan` board only.
 - `/api/free-replay/instruments` returns OKX SWAP instruments.
-- `/api/free-replay/sessions` lists saved Free Replay sessions; PUT upserts one on `(instrument, startTime)`, DELETE removes one.
+- `/api/free-replay/sessions` lists saved Free Replay sessions; PUT upserts one on `(instrument, startTime)`, DELETE removes one AND cascades its paper round reviews.
+- `/api/paper/rounds` returns the 模拟单库 (`rounds` / `sessions` / `reviews` / `tags` / `tagCounts`); `App` re-fetches it on entering 回溯复盘, on returning to the replay home screen, and when the library filters change.
 
 After saving a review, update local `data` state in place like `handleReviewSaved` does: merge new tags into the tag list and replace only the matching trade review.
+
+## Paper Round Annotations (11/04)
+
+One review row per **Paper Round**, keyed `paper:{instrument}:{startTime}:{positionId}`, held in `App` as `paperReviews` (id → `TradeReview`). Rules this codebase relies on:
+
+- **One map, two entries.** The in-replay 单子 rows and the 模拟单库 rows read the same map, so an edit in either place shows up in the other without a refetch. Inside the replay, resolve a fill's round id through `paperRoundReviewId(...)` — never use `trade.id` (a fill id) as the review id.
+- **Seeded from `reviews`, not just `rounds`.** The library answer's `rounds` excludes the still-open round, but its partial fills are annotatable during the replay; seed the map from `reviews` (every `paper:` review) and then from `rounds`.
+- **Saves patch in place.** `/api/reviews` (with `module: 'paper'`) answers `{ review, tags, tagCounts }`; write the review into the map and the round row, and replace `tags`/`tagCounts` from the payload (counts are module-scoped, a locally merged list could not drop a tag that just lost its last round). Do not refetch the whole library on save.
+- **Stars are one click.** The star toggle saves immediately (optimistically, rolling back on failure) from both entries; expanding an annotation editor to add a star would make the two entries behave differently for the same action. Tags/note keep the explicit save button.
+- **Tag rename/delete must patch paper rows too.** `mutatePaperTag` posts with `module: 'paper'` and rewrites `paperReviews` + library rows, otherwise the local snapshot would resurrect the old tag name on the next save.
+- **Session delete drops its annotations locally.** The server cascade deletes the rows; `App.handleDeleteSession` prunes its in-memory reviews by `paperSessionReviewPrefix` and bumps `paperLibraryToken`, so the library cannot keep rows nothing can render.
 
 ## Derived State
 

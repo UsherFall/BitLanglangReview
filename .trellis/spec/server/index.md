@@ -24,3 +24,5 @@ It owns:
 - Returning JSON payloads consumed by React.
 
 It should reuse domain contracts from `src/domain` and keep UI rendering concerns out of `src/server`.
+
+Two server modules are pure derivations rather than services — keep them that way so they stay testable without SQLite or HTTP: `src/server/paper-rounds.ts` (`buildPaperRoundLibrary(sessions, reviews, filters)`, the 模拟单库 derivation) and the domain `paper-round.ts` helpers it composes.

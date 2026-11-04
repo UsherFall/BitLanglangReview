@@ -4,6 +4,8 @@
 
 `src/server/review-store.ts` persists one review per trade in `trade_reviews`. It enables SQLite WAL mode, stores tags as JSON, and upserts on `trade_id`.
 
+`deleteReviewsByPrefix(prefix)` (11/04) removes review rows by id prefix and returns the count; it is the Free Replay session cascade. `LIKE` special characters (`%`, `_`, and the `!` escape char itself) are escaped and the statement pins `escape '!'` — an instrument or start time containing `_` must match literally, or the cascade would delete a neighbouring session's rounds. Callers must pass a prefix ending in `:` (see `paperSessionReviewPrefix`); `tests/review-store.test.ts` pins both the cascade and the prefix-collision case.
+
 Keep tag cleanup in the store boundary. `uniqueCleanTags` trims tags, removes empty entries, and preserves first-seen order through `Set`. Existing coverage is `tests/review-store.test.ts`.
 
 ## Drawing Store

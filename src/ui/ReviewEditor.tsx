@@ -91,7 +91,14 @@ export function ReviewEditor({
   );
 }
 
-function TagsCombobox({
+/**
+ * The tag chip list + option dropdown with rename/delete affordances.
+ *
+ * Exported (11/04) so the Paper Round editor reuses the exact same picker: the
+ * paper module shares tag NAMES globally, so its editor must offer the same
+ * rename/delete operations over the same component, not a look-alike copy.
+ */
+export function TagsCombobox({
   availableTags,
   tagCounts,
   selectedTags,

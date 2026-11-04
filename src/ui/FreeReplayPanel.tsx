@@ -1,14 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import flatpickr from 'flatpickr';
 import 'flatpickr/dist/themes/dark.css';
-import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Star, Trash2 } from 'lucide-react';
+import { paperSessionKey, type PaperRound } from '../domain/paper-round';
+import type { TradeReview } from '../domain/review';
 import type { ReviewTimeframe } from '../domain/trade';
 import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
 import { FREE_REPLAY_CANDLE_SOURCE, REPLAY_SOURCE_LABELS, replayCandleGrid, type ReplayCandleSource } from './free-replay-chart';
 import type { PaperTradingSession } from './free-replay-paper-trading';
+import { PaperRoundReviewEditor, type PaperReviewSavedPayload } from './PaperRoundReviewEditor';
+import type { TagMutation } from './ReviewEditor';
 
 type InstrumentResponse = {
   instruments: string[];
+};
+
+/** One session that holds at least one closed Paper Round (library filter option). */
+export type PaperRoundSessionRow = {
+  instrument: string;
+  startTime: string;
+  updatedAt: string;
+  roundCount: number;
+};
+
+/** `GET /api/paper/rounds` answer. */
+export type PaperRoundLibraryResponse = {
+  rounds: PaperRound[];
+  sessions: PaperRoundSessionRow[];
+  tags: string[];
+  tagCounts: Record<string, number>;
+  /** Every paper-scoped review, including open-round ones the list omits. */
+  reviews?: TradeReview[];
 };
 
 export type FreeReplayStart = {
@@ -45,6 +67,16 @@ export function FreeReplayPanel({
   activeReplay,
   onRestore,
   onDelete,
+  paperRounds,
+  paperRoundSessions,
+  paperTags,
+  paperTagCounts,
+  paperReviews,
+  onSavePaperReview,
+  onTogglePaperStar,
+  onMutatePaperTag,
+  onOpenPaperRound,
+  onPaperFiltersChange,
 }: {
   timeframe: ReviewTimeframe;
   onStart?: (start: FreeReplayStart) => void;
@@ -57,6 +89,24 @@ export function FreeReplayPanel({
   activeReplay?: FreeReplayStart | null;
   onRestore?: (session: FreeReplaySession) => void;
   onDelete?: (instrument: string, startTime: string) => void;
+  /** 回溯复盘首页的「模拟单库」（11/04）—— 无活跃回放时与会话列表并列。 */
+  paperRounds?: PaperRound[];
+  paperRoundSessions?: PaperRoundSessionRow[];
+  paperTags?: string[];
+  paperTagCounts?: Record<string, number>;
+  /** Round review id → saved review, shared with the in-replay rows. */
+  paperReviews?: Record<string, TradeReview>;
+  onSavePaperReview?: (payload: PaperReviewSavedPayload) => void;
+  /**
+   * One-click star from a library row (11/04): the star must toggle the
+   * annotation, not open the editor — opening an editor to add a star would make
+   * the two entries behave differently for the same action.
+   */
+  onTogglePaperStar?: (round: PaperRound) => void;
+  onMutatePaperTag?: (mutation: TagMutation) => Promise<void>;
+  /** 点库行：恢复来源会话并定位该回合末笔成交。 */
+  onOpenPaperRound?: (round: PaperRound) => void;
+  onPaperFiltersChange?: (filters: { tag?: string; starred?: 'yes' | 'no'; session?: string }) => void;
 }) {
   const [instruments, setInstruments] = useState<string[]>([]);
   const [selectedInstrument, setSelectedInstrument] = useState('');
@@ -64,6 +114,14 @@ export function FreeReplayPanel({
   const [startTime, setStartTime] = useState('');
   const [status, setStatus] = useState('加载交易对');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [libraryCollapsed, setLibraryCollapsed] = useState(false);
+  const [tagFilter, setTagFilter] = useState('');
+  const [starredFilter, setStarredFilter] = useState<'' | 'yes' | 'no'>('');
+  const [sessionFilter, setSessionFilter] = useState('');
+  const [editingRoundId, setEditingRoundId] = useState<string | null>(null);
+  const roundList = paperRounds ?? [];
+  const roundSessions = paperRoundSessions ?? [];
+  const roundReviews = paperReviews ?? {};
   // 11/02：行情源可选（选品同款词汇），新会话把所选源写进 candleSource；
   // 交易对列表按源拉取（各源词汇不同：币安/Bitget `XXXUSDT`，OKX `XXX-USDT-SWAP`）。
   const [source, setSource] = useState<ReplayCandleSource>(FREE_REPLAY_CANDLE_SOURCE);
@@ -228,9 +286,118 @@ export function FreeReplayPanel({
           </div>
         )}
       </div>
+      {/* 11/04 sim 单库：与「历史会话」并列，不设新导航。行数据是跨会话聚的
+          已完结合回，批注与回放内单子行共享同一份 `paper:` 批注。 */}
+      <div className="free-replay-history paper-round-library" data-testid="paper-round-library">
+        <button type="button" className="history-header" aria-expanded={!libraryCollapsed} onClick={() => setLibraryCollapsed((current) => !current)}>
+          <span>模拟单库{roundList.length ? ` (${roundList.length})` : ''}</span>
+          {libraryCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+        {!libraryCollapsed && (
+          <div className="history-list">
+            <div className="paper-round-filters">
+              <select
+                aria-label="按标签筛选模拟单"
+                value={tagFilter}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setTagFilter(value);
+                  onPaperFiltersChange?.({ tag: value || undefined, starred: starredFilter || undefined, session: sessionFilter || undefined });
+                }}
+              >
+                <option value="">全部标签</option>
+                {(paperTags ?? []).map((tag) => (
+                  <option key={tag} value={tag}>{tag} ({paperTagCounts?.[tag] ?? 0})</option>
+                ))}
+              </select>
+              <select
+                aria-label="按收藏状态筛选模拟单"
+                value={starredFilter}
+                onChange={(event) => {
+                  const value = event.target.value as '' | 'yes' | 'no';
+                  setStarredFilter(value);
+                  onPaperFiltersChange?.({ tag: tagFilter || undefined, starred: value || undefined, session: sessionFilter || undefined });
+                }}
+              >
+                <option value="">收藏状态</option>
+                <option value="yes">已收藏</option>
+                <option value="no">未收藏</option>
+              </select>
+              <select
+                aria-label="按来源会话筛选模拟单"
+                value={sessionFilter}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSessionFilter(value);
+                  onPaperFiltersChange?.({ tag: tagFilter || undefined, starred: starredFilter || undefined, session: value || undefined });
+                }}
+              >
+                <option value="">全部会话</option>
+                {roundSessions.map((row) => (
+                  <option key={paperSessionKey(row.instrument, row.startTime)} value={paperSessionKey(row.instrument, row.startTime)}>
+                    {row.instrument} · {formatRoundSessionStart(row.startTime)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {roundList.length === 0 ? <p className="history-empty">暂无已完结的模拟单</p> : roundList.map((round) => {
+              const review = roundReviews[round.id] ?? round.review;
+              const isEditing = editingRoundId === round.id;
+              return (
+                <div key={round.id} className="paper-round-row-wrap">
+                  <div className="paper-round-row">
+                    <button
+                      type="button"
+                      className={`star-toggle ${review?.starred ? 'active' : ''}`}
+                      aria-label={`${review?.starred ? '取消收藏' : '收藏'} ${round.instrument} ${round.positionId}`}
+                      title={review?.starred ? '取消收藏' : '收藏'}
+                      onClick={() => onTogglePaperStar?.(round)}
+                    >
+                      <Star size={14} fill={review?.starred ? 'currentColor' : 'none'} />
+                    </button>
+                    <button type="button" className="paper-round-row-main" title="回到该回合" onClick={() => onOpenPaperRound?.(round)}>
+                      <span>{round.instrument}</span>
+                      <span className={round.direction === 'long' ? 'long' : 'short'}>{round.direction === 'long' ? '多' : '空'}</span>
+                      <span>{round.entryPrice} → {round.exitPrice}</span>
+                      <strong className={round.pnl >= 0 ? 'profit' : 'loss'}>{round.pnl.toFixed(2)}</strong>
+                      <span className={round.returnRate >= 0 ? 'profit' : 'loss'}>{formatRoundPercent(round.returnRate)}</span>
+                      <span>{round.fillCount} 笔</span>
+                      <span className="paper-order-time">{formatRoundSessionStart(round.startTime)} 起</span>
+                      <span className="tags">{review?.tags.join(' · ') || '未标记'}</span>
+                    </button>
+                    <button type="button" aria-label={`批注 ${round.instrument} ${round.positionId}`} title="批注" onClick={() => setEditingRoundId(isEditing ? null : round.id)}>
+                      {isEditing ? '收起' : '批注'}
+                    </button>
+                  </div>
+                  {isEditing && (
+                    <PaperRoundReviewEditor
+                      reviewId={round.id}
+                      review={review}
+                      availableTags={paperTags ?? []}
+                      tagCounts={paperTagCounts ?? {}}
+                      onMutateTag={onMutatePaperTag}
+                      onSaved={(payload) => onSavePaperReview?.(payload)}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
       {status && <p className="panel-status">{status}</p>}
     </div>
   );
+}
+
+function formatRoundSessionStart(value: string): string {
+  return value;
+}
+
+/** Signed percent for a round's realized return (0.1 → +10.00%). */
+function formatRoundPercent(value: number): string {
+  if (!Number.isFinite(value)) return '-';
+  return `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)}%`;
 }
 
 function formatSessionTime(value: string): string {

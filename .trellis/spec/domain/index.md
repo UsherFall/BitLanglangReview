@@ -21,3 +21,5 @@ Representative files:
 - `src/domain/build-review-queue.ts`
 - `src/domain/candlestick.ts`
 - `src/domain/drawing.ts`
+- `src/domain/paper-trading.ts` (paper data types + `normalizePaperTrade`, shared with the server)
+- `src/domain/paper-round.ts` (Paper Round grouping / ids / filters)

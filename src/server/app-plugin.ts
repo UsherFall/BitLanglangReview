@@ -2,6 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
+import {
+  paperSessionReviewPrefix,
+  scopeReviewsToPaperRounds,
+} from '../domain/paper-round';
+import { buildPaperRoundLibrary } from './paper-rounds';
 import { scopeReviewsToTrades, type TradeReview } from '../domain/review';
 import type { ReviewQueueOptions } from '../domain/review-queue';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
@@ -126,9 +131,12 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const okxInstrumentService = new OkxInstrumentService();
 
       // Module-scoped reviews for tag payloads: 'trade' = xlsx universe,
-      // 'bitget' = mapped bg- universe, absent = every review (legacy global).
+      // 'bitget' = mapped bg- universe, 'paper' = Free Replay Paper Rounds
+      // (11/04, `paper:` prefix), absent = every review (legacy global).
+      // Tag NAMES stay global while counts stay per module (「共名、分计数」).
       const scopedReviewsForModule = (module?: string): TradeReview[] => {
         const allReviews = reviewStore.listReviews();
+        if (module === 'paper') return scopeReviewsToPaperRounds(allReviews);
         if (module === 'trade') return scopeReviewsToTrades(allReviews, trades.map((trade) => trade.id));
         if (module === 'bitget') {
           const ids = bitgetPositionStore
@@ -327,9 +335,42 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
             return send(res, 400, { error: 'instrument and startTime are required' });
           }
           freeReplaySessionStore.deleteSession(instrument, startTime);
-          return send(res, 200, { ok: true });
+          // 11/04 cascade: a Round's market data lives only in the session
+          // blob, so keeping its annotations would leave rows the library can
+          // never render. The prefix ENDS with ':' — matching on
+          // `paper:{instrument}:{startTime}` instead would also take down a
+          // session whose start time merely starts with the same digits.
+          const deletedReviews = reviewStore.deleteReviewsByPrefix(paperSessionReviewPrefix(instrument, startTime));
+          return send(res, 200, { ok: true, deletedReviews });
         }
         return send(res, 405, { error: 'Method not allowed' });
+      });
+
+      // 11/04 paper review library: every CLOSED Paper Round across all replay
+      // sessions, merged with its saved annotations.
+      //
+      // Round market data is DERIVED per request from the session blob — the
+      // blob stays the single source of truth, and no round snapshot table can
+      // drift from it. Only the annotations (tags/note/starred) live in
+      // `trade_reviews` under the round's `paper:` id.
+      server.middlewares.use('/api/paper/rounds', async (req, res) => {
+        if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+        const url = new URL(req.url ?? '', 'http://local');
+        const { rounds, sessions, reviews } = buildPaperRoundLibrary(
+          freeReplaySessionStore.listSessions(),
+          reviewStore.listReviews(),
+          {
+            tag: url.searchParams.get('tag') || undefined,
+            starred: (url.searchParams.get('starred') as 'yes' | 'no' | null) || undefined,
+            session: url.searchParams.get('session') || undefined,
+          },
+        );
+        send(res, 200, {
+          rounds,
+          sessions,
+          reviews,
+          ...tagPayload(reviewStore, scopedReviewsForModule('paper')),
+        });
       });
 
       // Bootstrap for the panel's 行情源 selector: the server's startup source.

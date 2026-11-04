@@ -2621,6 +2621,216 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
     await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
   });
+
+  // 11/04：回放内单子行支持回合批注（标签/笔记/收藏）。批注粒度是回合，
+  // 所以同一回合的多行共享同一份 `paper:{instrument}:{startTime}:{positionId}` 数据。
+  it('annotates a paper round from the in-replay order rows', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/paper/rounds')) return new Response(JSON.stringify({ rounds: [], sessions: [], tags: [], tagCounts: {} }));
+      if (url.startsWith('/api/reviews')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { tradeId: string; tags: string[]; note: string; starred: boolean };
+        return new Response(JSON.stringify({
+          review: { ...body, updatedAt: '2024-05-21T12:00:00.000Z' },
+          tags: body.tags,
+          tagCounts: Object.fromEntries(body.tags.map((tag) => [tag, 1])),
+        }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({ candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+        ] }));
+      }
+      return new Response(JSON.stringify({}));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getByRole('button', { name: /批注 position-1/ }));
+    fireEvent.change(screen.getByLabelText('模拟单备注'), { target: { value: '追高进的，回踩没等到' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存批注' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/reviews', expect.objectContaining({
+      method: 'POST',
+      body: expect.stringContaining('"tradeId":"paper:BTCUSDT:2024-05-21 10:00:position-1"'),
+    })));
+    // 保存请求必须带 paper 作用域，标签计数才不会混进真实单。
+    expect(String(fetchMock.mock.calls.find(([url]) => String(url) === '/api/reviews')?.[1]?.body)).toContain('"module":"paper"');
+    await waitFor(() => expect(screen.getByLabelText('模拟单备注')).toHaveValue('追高进的，回踩没等到'));
+  });
+
+  it('keeps one round annotation shared by its partial-close rows', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/paper/rounds')) return new Response(JSON.stringify({ rounds: [], sessions: [], tags: [], tagCounts: {} }));
+      if (url.startsWith('/api/reviews')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { tradeId: string; tags: string[]; note: string; starred: boolean };
+        return new Response(JSON.stringify({
+          review: { ...body, updatedAt: '2024-05-21T12:00:00.000Z' },
+          tags: body.tags,
+          tagCounts: {},
+        }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({ candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+        ] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    // 星标是单击直写：不先展开编辑器。
+    fireEvent.click(screen.getByRole('button', { name: /收藏 position-1/ }));
+    expect(screen.queryByLabelText('模拟单备注')).not.toBeInTheDocument();
+
+    // 收藏写的是回合 id，不是成交 id —— 回合的多行因此共享同一个星标状态。
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/reviews', expect.objectContaining({
+      body: expect.stringContaining('"tradeId":"paper:BTCUSDT:2024-05-21 10:00:position-1"'),
+    })));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /取消收藏 position-1/ }).length).toBeGreaterThan(0));
+  });
+
+  it('annotates every fill row of the same round from one editor', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        return new Response(JSON.stringify({ sessions: [] }));
+      }
+      if (url.startsWith('/api/paper/rounds')) return new Response(JSON.stringify({ rounds: [], sessions: [], tags: [], tagCounts: {} }));
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({ candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+          makeCandle('2024-05-21T10:10:00+08:00', { close: 130 }),
+        ] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    await startReplayAndCloseTrade();
+    // 第二笔：同一回合的另一次部分平仓（50% → 剩下的 100%）。
+    fireEvent.click(screen.getByRole('tab', { name: '操作' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    // 同一回合的两个成交行共享一个批注入口：批注按钮按 positionId 命名，
+    // 所以两行只能打开同一份批注数据（此处断言入口数量与回合数一致）。
+    await waitFor(() => expect(document.querySelectorAll('.paper-trade-row')).toHaveLength(2));
+    expect(screen.getAllByLabelText(/批注 position-\d+/)).toHaveLength(2);
+  });
+  // 11/04：库行点击 = 恢复来源会话 + 焦点定位回合末笔成交（R7）。这是设计里
+  // 最容易坏的一环（恢复清 candles/orderFocus，焦点要等会话就位）。
+  it('restores the source session from a library row and focuses its round', async () => {
+    const session = makeSeededSession({
+      paperTrading: {
+        active: true,
+        startedAtCursorTime: Date.parse('2024-05-21T10:00:00+08:00') / 1000,
+        nextId: 3,
+        pendingEntry: null,
+        pendingExit: null,
+        position: null,
+        trades: [{
+          id: 'fill-1',
+          positionId: 'position-1',
+          direction: 'long',
+          entryPrice: 100,
+          entryTime: Date.parse('2024-05-21T10:00:00+08:00'),
+          positionOpenPrice: 100,
+          positionOpenTime: Date.parse('2024-05-21T10:00:00+08:00'),
+          exitPrice: 110,
+          exitTime: Date.parse('2024-05-21T10:15:00+08:00'),
+          quantity: 1,
+          margin: 500,
+          notional: 5000,
+          leverage: 10,
+          pnl: 10,
+          returnRate: 0.02,
+        }],
+      },
+    });
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+      if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      if (url.startsWith('/api/free-replay/sessions')) {
+        if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+        return new Response(JSON.stringify({ sessions: [session] }));
+      }
+      if (url.startsWith('/api/paper/rounds')) {
+        return new Response(JSON.stringify({
+          rounds: [{
+            id: 'paper:BTCUSDT:2024-05-21 10:00:position-1',
+            positionId: 'position-1',
+            instrument: 'BTCUSDT',
+            startTime: '2024-05-21 10:00',
+            direction: 'long',
+            entryPrice: 100,
+            entryTime: Date.parse('2024-05-21T10:00:00+08:00'),
+            exitPrice: 110,
+            exitTime: Date.parse('2024-05-21T10:15:00+08:00'),
+            positionOpenPrice: 100,
+            positionOpenTime: Date.parse('2024-05-21T10:00:00+08:00'),
+            quantity: 1,
+            margin: 500,
+            notional: 5000,
+            leverage: 10,
+            pnl: 10,
+            returnRate: 0.02,
+            fillCount: 1,
+            tradeIds: ['fill-1'],
+          }],
+          sessions: [{ instrument: 'BTCUSDT', startTime: '2024-05-21 10:00', updatedAt: '2024-05-21T12:00:00+08:00', roundCount: 1 }],
+          tags: [],
+          tagCounts: {},
+        }));
+      }
+      if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+      if (url.startsWith('/api/candles')) {
+        return new Response(JSON.stringify({ candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+        ] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /模拟单库/ })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTitle('回到该回合'));
+
+    // 会话被恢复（工作区标题出现），且焦点落在这回合上：单子行的 active 态。
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    await waitFor(() => expect(screen.getAllByTitle('跳到开仓点')[0].className).toContain('active'));
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {

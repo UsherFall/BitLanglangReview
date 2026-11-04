@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查阶段的质量门槛（测试/类型/可访问性）"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "domain 类型下移 + server 派生 + ui 消费的跨层数据流核查"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "核对批注模型与标签全局共享语义未被破坏"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "核对级联删除前缀匹配与 Source Workbook 只读约束"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "核对跨会话恢复 + 焦点定位的状态时序"}

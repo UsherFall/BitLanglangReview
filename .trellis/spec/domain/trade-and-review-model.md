@@ -74,6 +74,18 @@ reviewStore.saveReview({ tradeId, tags, note }); // drops an existing starred fl
 reviewStore.saveReview({ tradeId, tags, note, starred: currentReview?.starred ?? false });
 ```
 
+## Paper Rounds Share The Review Table (11/04)
+
+A **Paper Round** (one paper position in a Free Replay, open → fully closed) is annotated with the SAME rows real trades use: `trade_reviews` keyed by the round id `paper:{instrument}:{startTime}:{positionId}` (`paperRoundReviewId` / `paperSessionReviewPrefix` in `src/domain/paper-round.ts`). Consequences that must not be broken:
+
+- **No new table, no DDL.** Renaming/deleting a tag is already global (`renameTag`/`deleteTag` rewrite every row), so paper rounds get it for free — that is the reason for reuse, not an accident.
+- **Tag names global, counts per module.** `scopeReviewsToPaperRounds` / `scopedReviewsForModule('paper')` keep `paper:` rows; `trade` and `bitget` scopes match explicit id sets, so they exclude `paper:` by construction. Never widen a module scope to `listReviews()` — that mixes 笔 counts across modules.
+- **Round market data is DERIVED, never stored.** `groupFillsIntoRounds` builds rounds from the session blob's fills on every request; a persisted round snapshot would need reconciliation against the blob. Only the review fields are persisted.
+- **The open round is not a round yet.** `groupFillsIntoRounds` excludes `session.position?.id`, and an open round's partial fills are excluded with it. Annotations made on such a fill during the replay still exist (the library answer carries every `paper:` review so the client can rehydrate them) — they simply become a library row once the position closes.
+- **Round granularity, not fill granularity.** A round scaled out in three partial closes is ONE annotated unit; every fill row of it reads and writes the same review id.
+
+`PaperTrade` / `PaperTradingSession` etc. therefore live in `src/domain/paper-trading.ts` (types only, re-exported by `src/ui/free-replay-paper-trading.ts`) and `normalizePaperTrade` lives there too — the server must parse the same blob the UI parses, and the two must not diverge on defaults.
+
 ## Candlestick And Drawing Contracts
 
 `src/domain/candlestick.ts` keeps market candles as millisecond timestamps with OHLCV fields and a `ReviewTimeframe`. Chart code converts to seconds only at the `lightweight-charts` boundary.
@@ -84,4 +96,4 @@ The toolbar offers `horizontal` and `ray` only. `ray` is the two-point tool: `po
 
 ## Verification
 
-When changing these contracts, update both server and UI callers and run `npm test`. High-signal tests include `tests/trade-import.test.ts`, `tests/drawing-store.test.ts`, `tests/app-drawings.test.tsx` (drawing kinds and previews), `tests/app-drawing-snap.test.tsx` (drawing interaction), `tests/trade-markers.test.ts`, and `tests/free-replay-chart.test.ts`.
+When changing these contracts, update both server and UI callers and run `npm test`. High-signal tests include `tests/trade-import.test.ts`, `tests/drawing-store.test.ts`, `tests/app-drawings.test.tsx` (drawing kinds and previews), `tests/app-drawing-snap.test.tsx` (drawing interaction), `tests/trade-markers.test.ts`, `tests/free-replay-chart.test.ts`, `tests/paper-round.test.ts` (round grouping/filters/id), `tests/paper-rounds.test.ts` (library derivation), and `tests/review-store.test.ts` (`deleteReviewsByPrefix` cascade + prefix collisions).

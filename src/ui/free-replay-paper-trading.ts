@@ -1,104 +1,36 @@
 import type { Candlestick } from '../domain/candlestick';
+import {
+  normalizePaperTrades,
+  type PaperDirection,
+  PaperLeg,
+  PaperOrder,
+  PaperOrderKind,
+  PaperPosition,
+  PaperStats,
+  PaperTrade,
+  PaperTradingSession,
+  PaperTradingSettings,
+} from '../domain/paper-trading';
 import type { Direction, ReviewTimeframe, TradePoint } from '../domain/trade';
 import { containingCandleTimestamp } from './chart-time';
 import type { MarkerPoint } from './trade-markers';
 
+// The paper data shapes live in `src/domain/paper-trading.ts` (11/04) so the
+// server can derive Paper Rounds from the persisted session blob without
+// importing UI runtime. Re-exported here so existing call sites stay unchanged.
+export type {
+  PaperDirection,
+  PaperLeg,
+  PaperOrder,
+  PaperOrderKind,
+  PaperPosition,
+  PaperStats,
+  PaperTrade,
+  PaperTradingSession,
+  PaperTradingSettings,
+};
+
 export const PAPER_ACCOUNT_EQUITY = 1000;
-
-export type PaperDirection = 'long' | 'short';
-export type PaperOrderKind = 'entry' | 'exit';
-
-export type PaperTradingSettings = {
-  direction: PaperDirection;
-  positionRatioPercent: number;
-  leverage: number;
-};
-
-// One scale-in batch ("仓") of the aggregated position. Each batch owns its
-// own stop-loss price; the stop size is always this batch's remaining
-// quantity, so no separate stop-order quantity is needed.
-export type PaperLeg = {
-  id: string;
-  entryPrice: number;
-  entryTime: number;
-  quantity: number;
-  margin: number;
-  notional: number;
-  leverage: number;
-  stopPrice?: number;
-};
-
-// Aggregated position: the displayed entry price is the quantity-weighted
-// average of the remaining legs; realized pnl of manual/limit closes uses
-// FIFO over the legs, while a leg's own stop closes exactly that leg.
-export type PaperPosition = {
-  id: string;
-  direction: PaperDirection;
-  // First-leg open of this position round (fixed at creation, marker anchor).
-  originPrice: number;
-  originTime: number;
-  // Aggregates over the remaining legs.
-  entryPrice: number;
-  entryTime: number;
-  quantity: number;
-  margin: number;
-  notional: number;
-  leverage: number;
-  legs: PaperLeg[];
-};
-
-export type PaperOrder = {
-  id: string;
-  kind: PaperOrderKind;
-  direction: PaperDirection;
-  limitPrice: number;
-  // Entry orders size their margin at fill time: available * ratio / 100.
-  positionRatioPercent?: number;
-  leverage?: number;
-  // The single global take-profit exit locks a fixed quantity at placement.
-  quantity?: number;
-  createdAtCursorTime: number;
-};
-
-// One closed portion. Each partial close records its own row.
-export type PaperTrade = {
-  id: string;
-  positionId: string;
-  direction: PaperDirection;
-  // FIFO basis of the closed quantity (weighted when a fill spans legs).
-  entryPrice: number;
-  entryTime: number;
-  // Origin of the position round this fill belongs to (marker anchor).
-  positionOpenPrice: number;
-  positionOpenTime: number;
-  exitPrice: number;
-  exitTime: number;
-  quantity: number;
-  margin: number;
-  notional: number;
-  leverage: number;
-  pnl: number;
-  returnRate: number;
-};
-
-export type PaperTradingSession = {
-  active: boolean;
-  startedAtCursorTime: number | null;
-  nextId: number;
-  pendingEntry: PaperOrder | null;
-  pendingExit: PaperOrder | null;
-  position: PaperPosition | null;
-  trades: PaperTrade[];
-};
-
-export type PaperStats = {
-  realizedPnl: number;
-  totalReturnRate: number;
-  winRate: number | null;
-  profitLossRatio: number | null;
-  tradeCount: number;
-  floatingPnl: number | null;
-};
 
 export function initialPaperTradingSession(): PaperTradingSession {
   return {
@@ -414,7 +346,7 @@ export function normalizePaperTradingSession(stored: unknown): PaperTradingSessi
     pendingEntry: s.pendingEntry ? normalizeOrder(s.pendingEntry) : null,
     pendingExit: s.pendingExit ? normalizeExitOrder(s.pendingExit, positionQuantity) : null,
     position,
-    trades: Array.isArray(s.trades) ? s.trades.map(normalizeTrade) : [],
+    trades: normalizePaperTrades(s.trades),
   };
 }
 
@@ -669,28 +601,6 @@ function normalizeExitOrder(order: Partial<PaperOrder> & { closeRatioPercent?: n
     limitPrice,
     quantity,
     createdAtCursorTime: typeof raw.createdAtCursorTime === 'number' ? raw.createdAtCursorTime : 0,
-  };
-}
-
-function normalizeTrade(trade: PaperTrade): PaperTrade {
-  const source = (trade ?? {}) as Partial<PaperTrade>;
-  const id = typeof source.id === 'string' ? source.id : 'fill-0';
-  return {
-    id,
-    positionId: source.positionId ?? id,
-    direction: source.direction ?? 'long',
-    entryPrice: source.entryPrice ?? 0,
-    entryTime: source.entryTime ?? 0,
-    positionOpenPrice: source.positionOpenPrice ?? source.entryPrice ?? 0,
-    positionOpenTime: source.positionOpenTime ?? source.entryTime ?? 0,
-    exitPrice: source.exitPrice ?? 0,
-    exitTime: source.exitTime ?? 0,
-    quantity: source.quantity ?? 0,
-    margin: source.margin ?? 0,
-    notional: source.notional ?? 0,
-    leverage: source.leverage ?? 1,
-    pnl: source.pnl ?? 0,
-    returnRate: source.returnRate ?? 0,
   };
 }
 

@@ -133,6 +133,25 @@ export class ReviewStore {
     return apply();
   }
 
+  /**
+   * Deletes every review whose `trade_id` starts with `prefix`, and returns how
+   * many rows went away.
+   *
+   * Used by the Free Replay session DELETE (11/04): a deleted session's Paper
+   * Rounds have no market data left to render, so their annotations are orphans.
+   * The caller passes `paper:{instrument}:{startTime}:` INCLUDING the trailing
+   * colon — without it, sessions whose start times share a prefix would take
+   * each other's reviews down.
+   *
+   * `like` is escaped so `%` / `_` inside instrument or start time behave
+   * literally; `!` is the escape character (SQLite has no default).
+   */
+  deleteReviewsByPrefix(prefix: string): number {
+    const escaped = prefix.replace(/[!%_]/g, (char) => `!${char}`);
+    const result = this.db.prepare("delete from trade_reviews where trade_id like ? escape '!'").run(`${escaped}%`);
+    return result.changes;
+  }
+
   close(): void {
     this.db.close();
   }

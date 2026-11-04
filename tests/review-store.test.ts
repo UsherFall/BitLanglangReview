@@ -102,4 +102,45 @@ describe('Review Store', () => {
     expect(store.getReview('t1')?.tags).toEqual(['x']);
     expect(store.getReview('t2')?.tags).toEqual(['x']);
   });
+
+  // 11/04: deleting a Free Replay session cascades its Paper Round reviews away.
+  // The prefix must END with ':' — without it a session whose start time merely
+  // starts with the same digits (`... 10:0` vs `... 10:07`) would be wiped too.
+  describe('deleteReviewsByPrefix', () => {
+    const round = (instrument: string, startTime: string, positionId: string) => `paper:${instrument}:${startTime}:${positionId}`;
+
+    it('removes every review of the session and nothing else', () => {
+      const store = new ReviewStore(':memory:');
+      store.saveReview({ tradeId: round('BTCUSDT', '2024-05-21 10:07', 'position-1'), tags: ['追高'], note: '' });
+      store.saveReview({ tradeId: round('BTCUSDT', '2024-05-21 10:07', 'position-2'), tags: [], note: '' });
+      store.saveReview({ tradeId: round('BTCUSDT', '2023-03-01 08:00', 'position-1'), tags: ['箱体'], note: '' });
+      store.saveReview({ tradeId: 'bg-123', tags: ['箱体'], note: '' });
+
+      expect(store.deleteReviewsByPrefix('paper:BTCUSDT:2024-05-21 10:07:')).toBe(2);
+
+      expect(store.getReview(round('BTCUSDT', '2024-05-21 10:07', 'position-1'))).toBeNull();
+      expect(store.getReview(round('BTCUSDT', '2023-03-01 08:00', 'position-1'))?.tags).toEqual(['箱体']);
+      expect(store.getReview('bg-123')?.tags).toEqual(['箱体']);
+    });
+
+    it('does not take down a session whose start time shares a prefix', () => {
+      const store = new ReviewStore(':memory:');
+      store.saveReview({ tradeId: round('BTCUSDT', '2024-05-21 10:0', 'position-1'), tags: [], note: '' });
+      store.saveReview({ tradeId: round('BTCUSDT', '2024-05-21 10:07', 'position-1'), tags: [], note: '' });
+
+      expect(store.deleteReviewsByPrefix('paper:BTCUSDT:2024-05-21 10:07:')).toBe(1);
+      expect(store.getReview(round('BTCUSDT', '2024-05-21 10:0', 'position-1'))).not.toBeNull();
+    });
+
+    it('treats LIKE wildcards in the instrument literally', () => {
+      const store = new ReviewStore(':memory:');
+      // `_` is a LIKE wildcard; an instrument that contains one must not match
+      // a neighbouring symbol.
+      store.saveReview({ tradeId: round('A_B', '2024-05-21 10:07', 'position-1'), tags: [], note: '' });
+      store.saveReview({ tradeId: round('AXB', '2024-05-21 10:07', 'position-1'), tags: [], note: '' });
+
+      expect(store.deleteReviewsByPrefix('paper:A_B:2024-05-21 10:07:')).toBe(1);
+      expect(store.getReview(round('AXB', '2024-05-21 10:07', 'position-1'))).not.toBeNull();
+    });
+  });
 });
