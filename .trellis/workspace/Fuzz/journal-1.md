@@ -164,3 +164,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: 回溯复盘模拟后锁回退 + 焦点单开仓点前视图 + 顶部读数面板右对齐
+<!-- trellis-session: v=2 fp=a41c9e02 -->
+
+**Date**: 2026-11-03
+**Task**: 回溯复盘：模拟交易后锁回退、开仓点前视图、顶部面板重叠修复
+**Branch**: `master`
+
+### Summary
+
+三项回溯复盘交互改进（Fuzz 反馈）：①开始模拟交易后「上一根 K 线」置灰 + 键盘 ← 堵死（函数级守卫在 rewindFreeReplayCandle 入口；键盘订阅 effect deps 补 paperTrading.active 防闭包陈旧——按钮堵了键盘还漏的坑）；②焦点单「开仓点前」视图：工具栏剪刀按钮（有焦点单才渲染）把揭示边界临时换轨到开仓点——渲染/磁吸边界严格小于 positionOpenTime（同周期成交时开仓后首根恰从该时刻开档，`<=` 会泄漏一根未来，实现时修掉），右缘翻页闸用早一个 step 的闸边界（数据集到开仓 candle 即停发 mode=later，杜绝 11-03 同型请求风暴），开启瞬间开仓 candle 锚右缘留 10 根，退出焦点自动复位、不进会话保存；③hover 百分比面板与复盘图 OHLC 读数条都写死 left: 252px（工具栏 252px 年代的对齐值，现 ~270/~332px 压住尾部按钮）→ 双双改右对齐。新增 6 用例（回退锁正负对照、隐藏/恢复+锚定、隐藏态零 later 请求、退出复位+重点不残留、组件级 canRewind），647 全绿（level-alert-parity 既有环境性失败）。spec 补三节契约：回退锁、开仓点前视图双边界、顶部面板右锚规则。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fbe90be` | feat(replay): 模拟后锁回退 + 焦点单开仓点前视图 + 顶部读数面板右对齐 |
+
+### Status
+
+[OK] **Completed**
