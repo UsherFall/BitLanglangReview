@@ -1417,3 +1417,24 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+<!-- trellis-session: v=2 fp=pi_01a1a56a-43e0-7246-82ad-c7e622506a11 -->
+
+**Date**: 2026-11-04
+**Task**: 11-04-paper-trade-review-library
+**Branch**: `master`
+
+### Summary
+
+回溯复盘模拟单复盘库：从一句「回放做的单子也该能批注收藏」收敛出完整方案并实现。关键决策：批注粒度=回合（position round，非部分平仓 fill）；批注复用 trade_reviews 表（`paper:{instrument}:{startTime}:{positionId}` 前缀 ID）——标签共名分计数、改名全局联动零成本、无 DDL；回合行情数据从会话 blob 实时派生不落库（单一事实源）；已完结回合才进库；库放回溯首页与历史会话并列（用户否掉顶部新导航，担心模块重合 → 「两个入口一份数据两个场景」化解）；删会话级联删批注（deleteReviewsByPrefix 尾冒号 + LIKE 转义防撞车）。PaperTrade 等类型下移 domain（含 normalizePaperTrade 共享解析默认值）。实现由 DS 完成，主会话独立检查抓出并修复：编辑器内星标 persist 吞错误导致回滚失效 + 星标点击静默提交草稿（违反「标签/笔记显式保存」契约），补 3 个组件测试。685 测试全绿 + tsc clean。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f4264d` | feat(replay): 模拟单复盘库 —— 回合批注(标签/笔记/收藏) + 跨会话聚合 + 删会话级联 |
+| `ed6f5ea` | chore(task): archive 11-04-paper-trade-review-library |
+
+### Status
+
+[OK] **Completed**
