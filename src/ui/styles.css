@@ -228,6 +228,13 @@ body.sidebar-resizing {
   display: grid;
   gap: 12px;
   padding: 12px;
+  /* 11/04：面板吃满侧栏剩余高度 —— 列表变长后内容超出时面板自身可滚，
+     不再被 sidebar 的 overflow: hidden 裁底。align-content:start 防 grid
+     默认 stretch 把表单行拉高。 */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
 }
 
 .replay-controls {
@@ -294,7 +301,9 @@ body.sidebar-resizing {
 .history-list {
   display: grid;
   gap: 4px;
-  max-height: 260px;
+  /* 11/04：写死 260px 不随分辨率伸缩 —— 改为视口相对 + 上下限钳制
+     （1080p≈281px，1440p≈374px，4K 封顶 560px；矮屏最低 160px）。 */
+  max-height: clamp(160px, 26vh, 560px);
   overflow-y: auto;
 }
 
