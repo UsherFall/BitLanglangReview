@@ -186,3 +186,28 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: 回溯复盘侧栏列表自适应 + 模拟单库交互 + 切周期视图回右缘
+<!-- trellis-session: v=2 fp=fcc72256c773c0c7 -->
+
+**Date**: 2026-11-04
+**Task**: 回溯复盘侧栏列表自适应 + 模拟单库交互 + 切周期视图回右缘
+**Branch**: `master`
+
+### Summary
+
+三个 UI 小修 + 一个视图缺陷任务。UI：历史会话/模拟单库列表高度从写死 260px 改为视口钳制，模拟单库进一步改 flex 填满铺到页面底部（收起退回内容高度），库行点选/批注展开加蓝色选中高亮。任务 11-04-replay-timeframe-switch-viewport：修复回溯复盘切周期后视图不落光标右缘——首锚守卫加 renderedRangeKeyRef（旧周期数据帧不消费锚定，新数据落地才锚，会话切换同坑一并覆盖）、switchFreeReplayTimeframe 清 orderFocus（焦点单不再跨周期存活，行高亮/剪刀态复位），游标数据集加 cursorCandlesRangeKeyRef 盖章防旧数据误发布；四个测试用例改写/新增（含首锚时机回归），全量 684 用例通过。遗留观察项：翻页加载器响应缺 rangeKey 过期守卫（既有弱点，后续轻量任务加固）；一次未复现的全量偶发失败（疑似并行负载下 waitFor 超时）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9c3cbce` | fix(replay): 历史会话/模拟单库列表高度自适应视口 |
+| `5813069` | fix(replay): 模拟单库列表铺满到页面底部 |
+| `16ea543` | feat(replay): 模拟单库行选中高亮 |
+| `f31793d` | fix(replay): 切周期首锚等新数据落地 + 焦点单不跨周期 |
+
+### Status
+
+[OK] **Completed**
