@@ -115,6 +115,8 @@ export function FreeReplayPanel({
   const [status, setStatus] = useState('加载交易对');
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [libraryCollapsed, setLibraryCollapsed] = useState(false);
+  /** 11/04：库行选中态 —— 点「回到该回合」后记住该行，高亮对齐交割单复盘的选中语言。 */
+  const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null);
   const [tagFilter, setTagFilter] = useState('');
   const [starredFilter, setStarredFilter] = useState<'' | 'yes' | 'no'>('');
   const [sessionFilter, setSessionFilter] = useState('');
@@ -343,9 +345,10 @@ export function FreeReplayPanel({
             {roundList.length === 0 ? <p className="history-empty">暂无已完结的模拟单</p> : roundList.map((round) => {
               const review = roundReviews[round.id] ?? round.review;
               const isEditing = editingRoundId === round.id;
+              const isActive = selectedRoundId === round.id || isEditing;
               return (
                 <div key={round.id} className="paper-round-row-wrap">
-                  <div className="paper-round-row">
+                  <div className={`paper-round-row ${isActive ? 'active' : ''}`}>
                     <button
                       type="button"
                       className={`star-toggle ${review?.starred ? 'active' : ''}`}
@@ -355,7 +358,7 @@ export function FreeReplayPanel({
                     >
                       <Star size={14} fill={review?.starred ? 'currentColor' : 'none'} />
                     </button>
-                    <button type="button" className="paper-round-row-main" title="回到该回合" onClick={() => onOpenPaperRound?.(round)}>
+                    <button type="button" className="paper-round-row-main" title="回到该回合" onClick={() => { setSelectedRoundId(round.id); onOpenPaperRound?.(round); }}>
                       <span>{round.instrument}</span>
                       <span className={round.direction === 'long' ? 'long' : 'short'}>{round.direction === 'long' ? '多' : '空'}</span>
                       <span>{round.entryPrice} → {round.exitPrice}</span>

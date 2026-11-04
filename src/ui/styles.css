@@ -2382,6 +2382,14 @@ label,
   border-color: #4b5563;
 }
 
+/* 11/04：库行选中高亮（回到该回合 / 展开批注时亮起）—— 沿用
+   .paper-trade-row.active / .history-row.active 同一套蓝色选中语言。
+   放在 :hover 之后，同特异性下选中态覆盖悬停。 */
+.paper-round-row.active {
+  border-color: #3b82f6;
+  background: #16233a;
+}
+
 .paper-round-row-main {
   flex: 1;
   min-width: 0;
