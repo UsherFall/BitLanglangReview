@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "FreeReplayChart 双数据集/焦点单/切周期状态机的既有约定，改 orderFocus 与首锚守卫前必读"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "本次新增 renderedRangeKeyRef + 修改渲染 effect 守卫条件，涉及 effect/ref 纪律"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "LWC mock 测试断言口径与回归验证要求"}

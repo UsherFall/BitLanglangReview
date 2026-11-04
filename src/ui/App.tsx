@@ -675,6 +675,11 @@ export function App() {
 
   function switchFreeReplayTimeframe(nextTimeframe: ReviewTimeframe) {
     setTimeframe(nextTimeframe);
+    // 11/04：切周期不再让焦点单存活。回溯模式的默认视图契约是「光标右缘」，
+    // 保留焦点会留下「行还亮着、视图却在光标」的错位态；再看某单只需再点一次
+    // 行（token 递增重新归位）。清空后退出焦点 effect 接手：活动数据集回游标
+    // 数据集，新周期数据落地后由首锚回到光标右缘。
+    setOrderFocus(null);
     setFreeReplay((current) => current ? {
       ...current,
       dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
@@ -1546,6 +1551,10 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const loadingEarlierRef = useRef(false);
   const lastLoadEarlierRangeRef = useRef<VisibleTimeRange | null>(null);
   const initializedRangeKeyRef = useRef('');
+  // 11/04：`renderedCandles` 里那份数据属于哪个 rangeKey。切周期/切会话后第一个
+  // commit 里 renderedCandles 还是旧周期的数据，若此时消费 initializedRangeKeyRef，
+  // timeToIndex 的索引就来自错误的周期（5m→1h 差 12 倍，回看越多偏得越远）。
+  const renderedRangeKeyRef = useRef('');
   const suppressAutoLoadRef = useRef(false);
   const pointerRef = useRef<{ inside: boolean; x: number; y: number }>({ inside: false, x: 0, y: 0 });
   // 10-30 双数据集整窗替换（对齐交割单复盘语义）：`activeCandlesRef` 是当前
@@ -1557,6 +1566,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const activeCandlesRef = useRef<Candlestick[]>([]);
   /** 游标数据集：锚在 cursorTime 的连续窗口。只有它喂 App（currentCursorCandle/浮盈/开平仓可用性）。 */
   const cursorCandlesRef = useRef<Candlestick[]>([]);
+  /** 游标数据集属于哪个 rangeKey（11/04）。退出焦点时只在它还是本会话/周期时发布。 */
+  const cursorCandlesRangeKeyRef = useRef('');
   /** 焦点窗口：以开仓点为中心的一次 mode=initial，连续。只服务渲染与焦点态翻页。 */
   const focusCandlesRef = useRef<Candlestick[]>([]);
   const focusActiveRef = useRef(false);
@@ -1806,7 +1817,10 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     historyBackfillVisibleBarsRef.current = null;
     historyBackfillKeyRef.current = '';
     const cursorCandles = cursorCandlesRef.current;
-    if (cursorCandles.length && cursorCandles[0].timeframe === timeframe) {
+    // 11/04：同周期不同会话的游标数据集也属于旧 rangeKey —— 旧数据发布会把
+    // 首锚标记误盖成新 key（首锚又落到错的数据上），所以按 rangeKey 比而不是
+    // 只比 timeframe。不匹配时重取游标初始窗（与 rangeKey effect 在飞去重）。
+    if (cursorCandles.length && cursorCandlesRangeKeyRef.current === rangeKey) {
       publishActive(cursorCandles, { publishToApp: true });
       setStatus('');
     } else {
@@ -1860,7 +1874,11 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     // 喂给 primitive 的蜡烛与 setData 同一份已揭示蜡烛：点价锚（高低点）与
     // 横坐标来自同一根K线（点集在纯函数层已按已加载蜡烛对齐并过滤未来）。
     markerPrimitiveRef.current?.setPoints(markersVisible ? paperPoints : focusPoints, visibleCandles);
-    if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey) {
+    // 11/04 首锚守卫：只认【本 rangeKey】的数据。切周期/会话后的过渡 commit 里
+    // renderedCandles 仍是旧周期的数据（加载不会先清空它，避免空白闪变），此时
+    // 不消费 initializedRangeKeyRef —— 等新周期数据落地那一帧才锚定，索引口径
+    // 与 series 里的数据一致。
+    if (visibleCandles.length && initializedRangeKeyRef.current !== rangeKey && renderedRangeKeyRef.current === rangeKey) {
       initializedRangeKeyRef.current = rangeKey;
       pendingSwitchVisibleBarsRef.current = null;
       // 10/29: 有焦点单时跳过光标锚定 —— 首次定位让给下方的焦点 effect（它声明
@@ -1979,8 +1997,9 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   // 保证窗内连续）→【替换】活动数据集 → 锚到开仓点（entryVisibleRange）。不再
   // merge 进游标窗口，同一渲染数据里永远只有一个连续窗口，结构上不可能拼出
   // 跨空洞的价格缝。每个 rangeKey+token 只定位一次，之后用户可自由平移缩放；
-  // 切周期 rangeKey 变 → 同一 token 在新周期重新取窗重新定位（焦点跨周期存活，
-  // App 在切周期时不清 orderFocus）。取窗失败/空则贴游标数据集最早边缘，不逐页
+  // 11/04 起切周期会清 orderFocus（回溯模式默认回光标右缘），故 rangeKey 变化时
+  // 这里通常已无焦点可定位；App 侧若仍有路径保留焦点，同 token 仍会在新周期重取。
+  // 取窗失败/空则贴游标数据集最早边缘，不逐页
   // 追、不循环。只揭示到 cursorTime 由渲染层 visibleCandlesForFreeReplay 保证。
   useEffect(() => {
     const chart = chartApiRef.current;
@@ -1995,6 +2014,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       // 窗口的加载只写 cursorCandlesRef，不再碰活动数据集。
       if (!focusActiveRef.current) {
         cursorCandlesRef.current = activeCandlesRef.current;
+        cursorCandlesRangeKeyRef.current = rangeKeyRef.current;
         focusActiveRef.current = true;
       }
       const fetchRangeKey = rangeKey;
@@ -2260,6 +2280,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       if (rangeKeyRef.current !== fetchRangeKey) return;
       const merged = mergeCandles(candles);
       cursorCandlesRef.current = merged;
+      cursorCandlesRangeKeyRef.current = fetchRangeKey;
       if (focusActiveRef.current) {
         onCandlesLoaded(merged);
       } else {
@@ -2300,7 +2321,13 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   function publishActive(candles: Candlestick[], { publishToApp, render = true }: { publishToApp: boolean; render?: boolean }) {
     activeCandlesRef.current = candles;
     setLoadedCandles(candles);
-    if (render) setRenderedCandles(candles);
+    if (render) {
+      // 11/04：标记这份渲染数据属于哪个 rangeKey（首锚守卫读它）。取数入口都已
+      // 用 rangeKeyRef 丢弃过期响应，所以这里写入的必然是当前周期；`render: 'defer'`
+      // 的推迟渲染不算发布（数据层同 rangeKey 生长，标记本就已经是该 key）。
+      renderedRangeKeyRef.current = rangeKeyRef.current;
+      setRenderedCandles(candles);
+    }
     if (publishToApp) onCandlesLoaded(candles);
   }
 
@@ -2326,6 +2353,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     const ownerRef = dataset === 'focus' ? focusCandlesRef : cursorCandlesRef;
     const merged = mergeCandles([...ownerRef.current, ...candles]);
     ownerRef.current = merged;
+    if (dataset === 'cursor') cursorCandlesRangeKeyRef.current = rangeKeyRef.current;
     const isActive = (dataset === 'focus') === focusActiveRef.current;
     if (isActive) {
       // `render: 'defer'` = 追加型安装（焦点右缘翻页/补洞自愈）：拖动进行中
