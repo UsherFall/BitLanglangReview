@@ -3,7 +3,7 @@
   "name": "replay-timeframe-switch-viewport",
   "title": "回溯复盘切周期视图回右缘：锚定时机修复 + 焦点单不跨周期",
   "description": "修复回溯复盘切换周期后视图不落在光标右缘的问题：首锚必须等当前周期数据落地（修旧数据锚定缺陷），且切周期时清焦点单回到光标默认视图",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "Fuzz",
   "assignee": "Fuzz",
   "createdAt": "2026-11-04",
-  "completedAt": null,
+  "completedAt": "2026-11-04",
   "branch": "master",
   "base_branch": "master",
   "worktree_path": null,
@@ -22,5 +22,7 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {
+    "commit": "f31793d"
+  }
 }
