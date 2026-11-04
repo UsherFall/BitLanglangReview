@@ -14,7 +14,7 @@
 ### 2. R3 顶部面板重叠（先做，独立且小）
 
 - [x] `styles.css`：`.hover-price-percentage` `left: 252px` → `right: 10px`；`.candlestick-readout` `left: 252px` → `left: auto`。
-- [ ] 手查 `npm run dev`：回溯图 hover 百分比、复盘图 OHLC 读数条均不再压工具栏（交用户验收）。
+- [x] 手查 `npm run dev`：回溯图 hover 百分比、复盘图 OHLC 读数条均不再压工具栏（用户 11-03 验收后归档）。
 
 ### 3. R2 开仓点前视图
 
@@ -31,7 +31,7 @@
 
 - [x] `npm test` 全量通过（647 用例；level-alert-parity 为本机缺 gitignored 研究数据的既有失败，干净检出同样挂）。
 - [x] 对照 spec：`component-guidelines.md` 焦点单锚定契约逐条未破（整窗替换/R2 数据集专线/翻页闸/揭示边界）。
-- [ ] 手查 `npm run dev`：三项交互实机走一遍（R1 置灰、R2 隐藏/恢复/复位、R3 不重叠）——交用户验收。
+- [x] 手查 `npm run dev`：三项交互实机走一遍（R1 置灰、R2 隐藏/恢复/复位、R3 不重叠）——用户 11-03 验收后归档。
 
 ## 验证命令
 
