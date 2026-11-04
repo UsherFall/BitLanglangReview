@@ -1395,3 +1395,25 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+## Session 33: 回溯复盘拖动乱飘根因修复 + 换单复位开仓点前视图
+<!-- trellis-session: v=2 fp=b4a17c9d2e5f3081 -->
+
+**Date**: 2026-11-04
+**Task**: 11-04-replay-focus-drag-prepend-jump
+**Branch**: `master`
+
+### Summary
+
+11/03 关掉 shift-on-new-bar 后用户仍报「点单后拖动乱飘」。headless Edge + 独立 LWC harness（复刻 chartDataWithWhitespace 数据形状，随任务归档在 research/）实证出真正根因：LWC 5.2.0 拖动启动时给 rightOffset 拍快照、每个拖动帧从快照重导出，而追加页的视口补偿不更新快照 —— 焦点右缘翻页/补洞窗在指针按住时落地（触发翻页的手势必然如此），下一次拖动帧把补偿整笔撤销，视口甩一整页（实测 +151.8 根）；前插与释放后追加实证安全（11/03 修复的有效面没白做）。修法 = 对齐 TradeChart 的既有语义：拖动进行中追加型安装只更新数据层（闸门/去重/预载不变），渲染推迟到 pointerup 后 setTimeout(0) flush（endScroll 已清快照，补偿保视口；连续拖多页松手一次渲染）。追加用户报障修复：剪刀「开仓点前」视图换焦点单即复位（反转 11/03「连续审单」决策），同单重复点击不清，focusRequest 补传 id。中途 harness 排查经验：LWC pane 拖动需 mousedown→move×2 才启动滚动。新增 5 用例（推迟/flush/非拖动对照/补洞/换单复位+同单保留），654 全绿。spec 补「追加型 setData 不得在拖动进行中发生」不变式与换单复位契约。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f7460cd` | fix(replay): 焦点单拖动乱飘根因修复 —— 拖动中追加页推迟到松手渲染；换单复位开仓点前视图 |
+| `7968df6` | chore(task): archive 11-04-replay-focus-drag-prepend-jump |
+
+### Status
+
+[OK] **Completed**
