@@ -870,7 +870,7 @@ export function App() {
               </div>
             </header>
             <div className="free-replay-workspace">
-              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperPoints={paperMarkerPoints} focusPoints={focusPaperMarkerPoints} futureRetryToken={futureRetryToken} focusRequest={orderFocus ? { timeMs: orderFocus.timeMs, token: orderFocus.token } : null} cursorRequest={cursorReturnToken} onCandlesLoaded={setFreeReplayCandles} onActiveCandlesLoaded={setFreeReplayActiveCandles} />
+              <FreeReplayChart replay={freeReplay} timeframe={timeframe} paperPoints={paperMarkerPoints} focusPoints={focusPaperMarkerPoints} futureRetryToken={futureRetryToken} focusRequest={orderFocus ? { id: orderFocus.id, timeMs: orderFocus.timeMs, token: orderFocus.token } : null} cursorRequest={cursorReturnToken} onCandlesLoaded={setFreeReplayCandles} onActiveCandlesLoaded={setFreeReplayActiveCandles} />
               {/* 11/02：按会话身份重挂面板 —— 单子/持仓随 props 更新，但本地状态
                   （Tab、方向、限价输入、平仓比例）不得跨会话残留。 */}
               <FreeReplayPaperTradingPanel
@@ -1282,7 +1282,7 @@ function stopLossDirectionHint(direction: PaperDirection, currentPrice: number):
   return direction === 'long' ? `低于当前价 ${currentPrice}` : `高于当前价 ${currentPrice}`;
 }
 
-function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRetryToken, focusRequest, cursorRequest, onCandlesLoaded, onActiveCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperPoints: MarkerPoint[]; focusPoints: MarkerPoint[]; futureRetryToken: number; focusRequest: { timeMs: number; token: number } | null; cursorRequest: number; onCandlesLoaded: (candles: Candlestick[]) => void; onActiveCandlesLoaded: (candles: Candlestick[]) => void }) {
+function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRetryToken, focusRequest, cursorRequest, onCandlesLoaded, onActiveCandlesLoaded }: { replay: FreeReplayStart; timeframe: ReviewTimeframe; paperPoints: MarkerPoint[]; focusPoints: MarkerPoint[]; futureRetryToken: number; focusRequest: { id: string; timeMs: number; token: number } | null; cursorRequest: number; onCandlesLoaded: (candles: Candlestick[]) => void; onActiveCandlesLoaded: (candles: Candlestick[]) => void }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   // 11/02：回溯复盘标记层改用交割单复盘同一套 TradeMarkerPrimitive 画布圆点
@@ -1322,6 +1322,18 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const cursorTimeRef = useRef(0);
   const loadingLaterRef = useRef(false);
   const lastLoadLaterRangeRef = useRef<VisibleTimeRange | null>(null);
+  // 11/04 拖动中追加型 setData 修复：LWC 在拖动启动时给 rightOffset 拍快照
+  // （_internal_startScroll → commonTransitionStartState），之后每个 move 都从
+  // 快照重导出 rightOffset；而追加补偿 setRightOffset(-Δ) 不更新快照 —— 拖动
+  // 进行中 setData 追加一页，下一次 mousemove 就把补偿撤销，视口前甩整页
+  // （research/findings.md 实证 +151.8 根）。所以只要指针按住，追加型安装
+  // （焦点右缘翻页 / 补洞自愈）只更新数据层，渲染推迟到 pointerup（此时
+  // endScroll 已同步清掉快照，setData 走补偿分支保视口）。
+  const pointerDownRef = useRef(false);
+  /** 有追加型安装因拖动被推迟渲染 —— pointerup 时按活动数据集 flush 一次。 */
+  const pendingInstallRenderRef = useRef(false);
+  /** 11/04 换单复位剪刀：上一次「开仓点前」视图所属的焦点单 id（同单重复点击不清）。 */
+  const scissorsOrderRef = useRef<string | null>(null);
   const cursorFollowRangeKeyRef = useRef('');
   // 10/29 焦点单定位：去重键 `rangeKey:token`（切周期 token 不变但 rangeKey
   // 变 → 新周期重新取窗重新锚定；重复点同一行 token 递增 → 重新取窗归位）。
@@ -1346,9 +1358,9 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const [markersVisible, setMarkersVisible] = useState(true);
   // 11/03 焦点单「开仓点前」视图：hideAfterFocus 开启时揭示边界临时换轨到焦点
   // 单的开仓点（focusRequest.timeMs = positionOpenTime）—— 开仓点及之前的 K 线
-  // 可见，之后隐藏。图表本地 ephemeral UI 态：退出焦点即复位（见下方 effect），
-  // 不进会话保存；换焦点单不清（cutoff 跟随新单，连续审单）。残留 true 也
-  // 无害 —— focusRequest 为 null 时 cutoff 派生即 null，边界回到游标。
+  // 可见，之后隐藏。图表本地 ephemeral UI 态：退出焦点或换焦点单都复位
+  //（见下方 effect），不进会话保存。同单重复点击（token 递增重定位）不清。
+  // 残留 true 也无害 —— focusRequest 为 null 时 cutoff 派生即 null，边界回到游标。
   const [hideAfterFocus, setHideAfterFocus] = useState(false);
   const focusCutoffMs = hideAfterFocus && focusRequest ? focusRequest.timeMs : null;
   /** 渲染/磁吸揭示边界（秒）：焦点隐藏态 = 开仓点前一根毫秒（严格小于
@@ -1478,6 +1490,9 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       tooltip.destroy();
       markerTooltipRef.current = null;
       markerPrimitiveRef.current = null;
+      // 11/04：卸载后不再有 pointerup 来 flush，清掉待渲染标记以免泄漏。
+      pendingInstallRenderRef.current = false;
+      pointerDownRef.current = false;
       chart.remove();
     };
   }, []);
@@ -1501,6 +1516,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     }
     historyBackfillKeyRef.current = '';
     previousRangeKeyRef.current = rangeKey;
+    // 11/04：切周期/会话后旧的推迟渲染不能跨会话落地。
+    pendingInstallRenderRef.current = false;
     if (chart) resetChartPriceScale(chart);
     setPriceScaleMode(PriceScaleMode.Logarithmic);
     setStatus('加载 K 线');
@@ -1552,6 +1569,30 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     updateHoverPercentage(pointerRef.current.y);
   }, [replay.cursorTime, renderedCandles]);
 
+  // 11/04：拖动跟踪 + 推迟渲染 flush。pointerup 挂在 window（拖出图表元素外
+  // 释放也要生效）；LWC 自身 mouseup → endScroll 同步清拖动快照，所以 flush
+  // 再 setState 让渲染 effect 在下一 commit 跑，快照必已清空。pointercancel /
+  // window blur 兜底浏览器打断（不留下永久滞后的 pending）。
+  useEffect(() => {
+    const handleRelease = () => {
+      if (!pointerDownRef.current) return;
+      pointerDownRef.current = false;
+      window.setTimeout(() => flushPendingInstallRender(), 0);
+    };
+    const handleBlur = () => {
+      pointerDownRef.current = false;
+      flushPendingInstallRender();
+    };
+    window.addEventListener('pointerup', handleRelease);
+    window.addEventListener('pointercancel', handleRelease);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('pointerup', handleRelease);
+      window.removeEventListener('pointercancel', handleRelease);
+      window.removeEventListener('blur', handleBlur);
+    };
+  }, []);
+
   useEffect(() => {
     const series = seriesRef.current;
     const chart = chartApiRef.current;
@@ -1600,9 +1641,12 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }, [focusCutoffMs, timeframe]);
 
   // 11/03 焦点单退出即复位「开仓点前」视图：焦点是 ephemeral 态，步进/开平仓/
-  // 点持仓行/切会话/离开模式都清 orderFocus 走到这。
+  // 点持仓行/切会话/离开模式都清 orderFocus 走到这。11/04 换焦点单同样复位
+  // —— 剪刀是单笔单子的审读工具，不是跨单粘性模式（报障：点亮剪刀切单，
+  // 新单也被隐藏）；同单重复点击（token 递增）不清：视图意图未变。
   useEffect(() => {
-    if (!focusRequest) setHideAfterFocus(false);
+    if (!focusRequest || focusRequest.id !== scissorsOrderRef.current) setHideAfterFocus(false);
+    scissorsOrderRef.current = focusRequest?.id ?? null;
   }, [focusRequest]);
 
   useEffect(() => {
@@ -1905,7 +1949,9 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     });
     try {
       const candles = await fetchCandles(params);
-      if (candles.length) installIntoDataset(candles, dataset);
+      // 11/04：追加型（右端）—— 触发手势本身就是「按住拖向右缘」，落地时多半
+      // 仍在拖动中，必须推迟渲染（render: 'defer'）。
+      if (candles.length) installIntoDataset(candles, dataset, { render: 'defer' });
       setStatus('');
     } catch (error) {
       setStatus(error instanceof ServerCandleError ? error.message : '更晚 K 线加载失败');
@@ -1925,7 +1971,9 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     setStatus(statusText);
     try {
       const candles = await fetchInitialWindow(new Date(timeMs).toISOString());
-      if (candles.length) installIntoDataset(candles, focusActiveRef.current ? 'focus' : 'cursor');
+      // 11/04：补洞窗合进的是数据集「中段」，LWC 走与右端追加相同的补偿分支
+      // （首点未变），拖动中落地同样会甩页 —— 一律按追加型推迟渲染。
+      if (candles.length) installIntoDataset(candles, focusActiveRef.current ? 'focus' : 'cursor', { render: 'defer' });
       setStatus('');
     } catch (error) {
       setStatus(error instanceof ServerCandleError ? error.message : 'K 线加载失败');
@@ -2006,17 +2054,41 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }
 
   /**
+   * 11/04：拖动结束后的推迟渲染落地。数据层早已合并（installIntoDataset 立即
+   * 写 owner/active/loaded 并喂闸门），这里只把最新活动数据集交给渲染 effect。
+   * 连续拖多页时每一页都进同一个 pending 标记，松手一次渲染最终合并结果 ——
+   * 一次补偿生效，中间无跳动。
+   */
+  function flushPendingInstallRender() {
+    if (!pendingInstallRenderRef.current) return;
+    pendingInstallRenderRef.current = false;
+    if (!chartApiRef.current) return;
+    setRenderedCandles(activeCandlesRef.current);
+  }
+
+  /**
    * 把一页取数合进【属主数据集】（10-30 双数据集）：属主仍是活动数据集时发布
    * （游标数据集发布时喂 App）；焦点态下游标窗口在后台生长（在飞的翻页/预取
    * 跨越了进入焦点的瞬间）时只喂 App，不碰渲染。
    */
-  function installIntoDataset(candles: Candlestick[], dataset: 'cursor' | 'focus', options: { render?: boolean } = {}) {
+  function installIntoDataset(candles: Candlestick[], dataset: 'cursor' | 'focus', options: { render?: boolean | 'defer' } = {}) {
     const ownerRef = dataset === 'focus' ? focusCandlesRef : cursorCandlesRef;
     const merged = mergeCandles([...ownerRef.current, ...candles]);
     ownerRef.current = merged;
     const isActive = (dataset === 'focus') === focusActiveRef.current;
     if (isActive) {
-      publishActive(merged, { publishToApp: dataset === 'cursor', render: options.render });
+      // `render: 'defer'` = 追加型安装（焦点右缘翻页/补洞自愈）：拖动进行中
+      // 不得 setData（见 pointerDownRef 注释的 LWC 快照机制）。数据层照常
+      // 立即更新 —— 属主 ref、活动数据集、loaded 状态、翻页闸与游标 App
+      // 供给都读数据层，闸门/去重语义不变（连续拖仍可继续预载下一页）。
+      if (options.render === 'defer' && pointerDownRef.current) {
+        activeCandlesRef.current = merged;
+        setLoadedCandles(merged);
+        if (dataset === 'cursor') onCandlesLoaded(merged);
+        pendingInstallRenderRef.current = true;
+      } else {
+        publishActive(merged, { publishToApp: dataset === 'cursor', render: options.render !== false });
+      }
     } else if (dataset === 'cursor') {
       onCandlesLoaded(merged);
     }
@@ -2055,7 +2127,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }
 
   return (
-    <div className="chart-wrap" onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
+    <div className="chart-wrap" onPointerDown={() => { pointerDownRef.current = true; }} onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
       {drawings.toolbar}
       {hoverPercentage !== null && <div className="hover-price-percentage">{formatHoverPricePercentage(hoverPercentage)}</div>}
       <div ref={chartRef} className="chart" />

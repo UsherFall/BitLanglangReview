@@ -640,6 +640,99 @@ describe('App Free Replay', () => {
     expect(candleRequests.filter((url) => url.includes('mode=later')).length).toBe(1);
   });
 
+  // 11/04：拖动进行中的追加型 setData 会让 LWC 的拖动快照撤销视口补偿（见
+  // research/findings.md）—— 指针按住期间的右缘翻页/补洞只更新数据层，渲染
+  // 推迟到 pointerup。以下三例覆盖推迟/释放 flush/补洞/非拖动对照。
+  it('defers the focused later page render while the pointer is down, then flushes on release', async () => {
+    const laterCandles = [makeCandle('2024-05-21T09:15:00+08:00'), makeCandle('2024-05-21T09:20:00+08:00')];
+    stubFocusPagingFetch(laterCandles);
+
+    await startReplayCloseTradeAndFocus();
+    expect(lastSetDataRealTimes()).toEqual(focusPageTimes());
+
+    const chartWrap = document.querySelector('.free-replay-workspace .chart-wrap') as HTMLElement;
+    // 指针按住（拖动中）→ 右缘翻页落地。
+    fireEvent.pointerDown(chartWrap);
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 5 });
+    triggerLaterLoad({ from: 0, to: 160 });
+    await waitFor(() => expect(laterRequests().length).toBe(1));
+    await new Promise((resolve) => window.setTimeout(resolve, 30));
+    // 渲染未发生：仍是焦点窗口那一页（本次拖动中零 setData）。
+    expect(lastSetDataRealTimes()).toEqual(focusPageTimes());
+
+    // 松手 → flush → 渲染追加后的合并结果（相邻恒等于一个 5m step）。
+    fireEvent.pointerUp(window);
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([...focusPageTimes(), ...laterCandles.map((candle) => candle.timestamp / 1000)]));
+
+    // R4：翻页闸读的是数据层（指针按住时已合并），拖到新位置能继续预载下一页
+    // —— 锚点就是刚落地那页的最后一根，不重演旧锚请求风暴。
+    triggerLaterLoad({ from: 40, to: 200 });
+    await waitFor(() => expect(laterRequests().length).toBe(2));
+    expect(laterRequests().at(-1) ?? '').toContain(`anchor=${laterCandles[laterCandles.length - 1].timestamp}`);
+  });
+
+  it('renders the focused later page immediately when the pointer is not down', async () => {
+    const laterCandles = [makeCandle('2024-05-21T09:15:00+08:00'), makeCandle('2024-05-21T09:20:00+08:00')];
+    stubFocusPagingFetch(laterCandles);
+
+    await startReplayCloseTradeAndFocus();
+    expect(lastSetDataRealTimes()).toEqual(focusPageTimes());
+
+    // 对照：无 pointerdown（滑鼠滚轮/键盘/程序化平移）→ 照常立即渲染（11/03 语义）。
+    chartMocks.barsInLogicalRange.mockReturnValue({ barsBefore: 100, barsAfter: 5 });
+    triggerLaterLoad({ from: 0, to: 160 });
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([...focusPageTimes(), ...laterCandles.map((candle) => candle.timestamp / 1000)]));
+  });
+
+  it('defers the gap-heal window render while the pointer is down, then flushes on release', async () => {
+    // 游标窗口自带中段洞（09:15 → 09:45 缺 6 根 5m），洞在光标（10:00）之前，
+    // 补上的蜡烛会真的进渲染。洞补齐窗的响应由本用例手动放行，以便在它
+    // 落在「指针按住」窗口时观察推迟。
+    let releaseHeal: (() => void) | null = null;
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        if (String(url).includes('entryTime=2024-05-21+10%3A00')) {
+          return Response.json({ candles: ['09:00', '09:05', '09:10', '09:15', '09:45', '09:50', '09:55']
+            .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`)) });
+        }
+        // 洞补齐窗（ISO entryTime，中心在缺口内 = UTC 01:3x）。
+        if (String(url).includes('entryTime=2024-05-21T01%3A')) {
+          return new Promise<Response>((resolve) => {
+            releaseHeal = () => resolve(Response.json({ candles: ['09:20', '09:25', '09:30', '09:35', '09:40']
+              .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`)) }));
+          });
+        }
+        return Response.json({ candles: [] });
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    // 首屏（含洞）渲染完成。
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:00', '09:05', '09:10', '09:15', '09:45', '09:50', '09:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+    // 洞自愈请求已发出（响应被本用例暂扣）。
+    await waitFor(() => expect(releaseHeal).not.toBeNull());
+    chartMocks.setData.mockClear();
+
+    // 指针按住时洞窗落地：数据层合并、渲染推迟 → 本次没有任何 setData。
+    const chartWrap = document.querySelector('.free-replay-workspace .chart-wrap') as HTMLElement;
+    fireEvent.pointerDown(chartWrap);
+    releaseHeal!();
+    await new Promise((resolve) => window.setTimeout(resolve, 50));
+    // 渲染载荷仍是「洞还开着」的那份：合并后的补洞蜡烛一根都没进 series。
+    expect(lastSetDataRealTimes()).toEqual(['09:00', '09:05', '09:10', '09:15', '09:45', '09:50', '09:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000));
+
+    // 松手 → flush 渲染补洞后的连续数据。
+    fireEvent.pointerUp(window);
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:00', '09:05', '09:10', '09:15', '09:20', '09:25', '09:30', '09:35', '09:40', '09:45', '09:50', '09:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+  });
+
   it('sets a stop loss and closes automatically when the next revealed candle touches it', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
@@ -2117,6 +2210,90 @@ describe('App Free Replay', () => {
     expect(row.className).not.toContain('active');
   });
 
+  // 11/04 R7：剪刀是单笔单子的审读工具，非跨单粘性模式 —— 点亮剪刀后切到
+  // 另一笔单，新单回到揭示内完整窗口且剪刀复位为关；同单重复点击（重定位）
+  // 剪刀态保留。反转 11/03「换焦点单不清，连续审单」决策（用户报障）。
+  it('resets the pre-entry view when switching to a different order', async () => {
+    // 两笔单：单 1 开在游标 10:00（02:00Z），步进三根后单 2 开在 10:20（02:20Z），
+  // 平仓时游标 10:25。焦点窗按 entryTime ISO 分支，单 2 的窗含开仓点之后的
+  // 蜡烛（用来区分「复位后按游标渲染」与「未复位仍按开仓点截断」）。
+    const cursorWindow = ['09:55', '10:00', '10:05', '10:10', '10:15', '10:20', '10:25', '10:30']
+      .map((clock, index) => makeCandle(`2024-05-21T${clock}:00+08:00`, index === 0 ? { close: 100 } : index === 1 ? { close: 110 } : {}));
+    const focusWindowTrade1 = ['09:45', '09:50', '09:55', '10:00', '10:05', '10:10']
+      .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+    const focusWindowTrade2 = ['10:05', '10:10', '10:15', '10:20', '10:25', '10:30']
+      .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode !== 'initial') return new Response(JSON.stringify({ candles: [] }));
+        const entryTime = String(new URL(`http://localhost${url}`).searchParams.get('entryTime'));
+        if (entryTime.includes('T02:00')) return new Response(JSON.stringify({ candles: focusWindowTrade1 }));
+        if (entryTime.includes('T02:20')) return new Response(JSON.stringify({ candles: focusWindowTrade2 }));
+        return new Response(JSON.stringify({ candles: cursorWindow }));
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    // 单 2：步进到 10:20 开仓 → 步进到 10:25 平仓（游标窗已含足够蜡烛可推进）。
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:45', '09:50', '09:55', '10:00', '10:05', '10:10']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:45', '09:50', '09:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+
+    // 换单：剪刀必须复位（按钮文案回到「隐藏…」），新单按游标 10:20 渲染完整窗口
+    //（10:25/10:30 在揭示边界外被滤）；未修复时按钮是「显示…」且数据只剩 [10:05,10:10,10:15]。
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:20/ }));
+    expect(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '显示开仓点后的 K 线' })).not.toBeInTheDocument();
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['10:05', '10:10', '10:15', '10:20']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+  });
+
+  it('keeps the pre-entry view when re-clicking the same order', async () => {
+    const cursorWindow = ['09:55', '10:00', '10:05', '10:10']
+      .map((clock, index) => makeCandle(`2024-05-21T${clock}:00+08:00`, index === 0 ? { close: 100 } : index === 1 ? { close: 110 } : {}));
+    const focusWindow = ['09:45', '09:50', '09:55', '10:00', '10:05', '10:10']
+      .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+        if (mode !== 'initial') return new Response(JSON.stringify({ candles: [] }));
+        const entryTime = String(new URL(`http://localhost${url}`).searchParams.get('entryTime'));
+        if (entryTime.includes('T')) return new Response(JSON.stringify({ candles: focusWindow }));
+        return new Response(JSON.stringify({ candles: cursorWindow }));
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+    // 开始 10:00 → 初始游标 09:55；helper 内一次步进 → 游标 10:00。
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:45', '09:50', '09:55', '10:00']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:45', '09:50', '09:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+
+    // 同单重复点击（token 递增重定位）：剪刀态保留，重取窗后仍按开仓点截断。
+    fireEvent.click(screen.getByRole('button', { name: /开 05-21 10:00/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '显示开仓点后的 K 线' })).toBeInTheDocument());
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['09:45', '09:50', '09:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+  });
+
   // 10/29 解除条款：点当前持仓行 → 回到光标（清除焦点）。
   it('returns to the cursor when clicking the open position row', async () => {
     stubFreeReplayFetch({
@@ -2524,6 +2701,67 @@ function sessionPutBodies(): Array<Record<string, unknown>> {
     .map(([, callInit]) => JSON.parse(String(callInit?.body)) as Record<string, unknown>);
 }
 
+/** 11/04 焦点翻页用例的共享 fetch 桩：游标窗口 24 根 + 焦点窗口 [09:00, 09:05, 09:10]。 */
+function stubFocusPagingFetch(laterCandles: ReturnType<typeof makeCandle>[]) {
+  stubFreeReplayFetch({
+    onCandles: (url) => {
+      const mode = new URL(`http://localhost${url}`).searchParams.get('mode');
+      if (mode === 'initial') return Response.json({ candles: focusPageStubCandles(url) });
+      if (mode === 'later') return Response.json({ candles: laterCandles });
+      return Response.json({ candles: [] });
+    },
+  });
+}
+
+/** 5m 会话焦点窗口：主题标 [09:00, 09:05, 09:10]（老单，整体早于光标）。 */
+function focusPageStubCandles(url: string): ReturnType<typeof makeCandle>[] {
+  // 焦点取窗的 entryTime 是 ISO（`2024-05-21T02:00:00.000Z`），游标初始加载是
+  // 原始开始串（`2024-05-21 10:00`）—— 用大写 T 区分两者。
+  const isFocusWindow = new URL(`http://localhost${url}`).searchParams.get('entryTime')?.includes('T');
+  if (isFocusWindow) {
+    return ['09:00', '09:05', '09:10'].map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+  }
+  return ['09:55', '10:00', '10:05', '10:10', '10:15', '10:20', '10:25', '10:30', '10:35', '10:40', '10:45', '10:50', '10:55', '11:00', '11:05', '11:10', '11:15', '11:20', '11:25', '11:30', '11:35', '11:40', '11:45', '11:50', '11:55']
+    .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`));
+}
+
+function focusPageTimes(): number[] {
+  return ['09:00', '09:05', '09:10'].map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000);
+}
+
+/** 11/04：开仓 → 下一根 → 平仓 → 点成交行进焦点态，等到焦点窗口渲染完成。 */
+async function startReplayCloseTradeAndFocus() {
+  render(<App />);
+  fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+  await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+  fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+  fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+  fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+  fireEvent.click(screen.getByRole('button', { name: '市价平仓' }));
+  fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+  fireEvent.click(screen.getAllByTitle('跳到开仓点')[0]);
+  await waitFor(() => expect(lastSetDataRealTimes()).toEqual(focusPageTimes()));
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+/** 触发已订阅的右缘翻页 handler（拖动一帧）。 */
+function triggerLaterLoad(range: { from: number; to: number } = { from: 0, to: 160 }) {
+  const handler = chartMocks.subscribeVisibleLogicalRangeChange.mock.calls.at(-1)?.[0];
+  expect(handler).toBeTypeOf('function');
+  handler?.(range);
+}
+
+function laterRequests(): string[] {
+  const fetchMock = fetch as unknown as { mock: { calls: Array<[unknown, RequestInit | undefined]> } };
+  return fetchMock.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.includes('/api/candles') && url.includes('mode=later'));
+}
+
 /** 最后一次 series.setData 载荷里的真实蜡烛时间（秒；过滤两端各 200 根补白）。 */
 function lastSetDataRealTimes(): number[] {
   const calls = chartMocks.setData.mock.calls;
@@ -2532,7 +2770,7 @@ function lastSetDataRealTimes(): number[] {
 }
 
 /** 10/29 新用例的共享 fetch 桩：基线路由 + 调用方给 candles 应答。 */
-function stubFreeReplayFetch(options: { sessions?: unknown[]; onCandles: (url: string) => Response }) {
+function stubFreeReplayFetch(options: { sessions?: unknown[]; onCandles: (url: string) => Response | Promise<Response> }) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
     if (url.startsWith('/api/free-replay/instruments')) return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
