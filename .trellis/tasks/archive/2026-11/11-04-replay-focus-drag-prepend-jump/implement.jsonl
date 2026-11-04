@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Free Replay Order Focus Anchor 契约节（焦点单锚定/双数据集/翻页/揭示边界闸）——本修复在其上扩展渲染推迟契约，实现前必须读"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "FreeReplayChart 内将新增 pointerDownRef/pendingInstallRef 与 setState 分层（数据层立即、渲染层推迟），需遵循本层 ref vs state 的既有约定"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI 行为改动的必查清单与测试期望，组件级回归用例按此验收"}
+{"file": ".trellis/tasks/11-04-replay-focus-drag-prepend-jump/research/findings.md", "reason": "根因实证（LWC 拖动快照撤销追加补偿）与 harness 复现方法、场景数字，实现与自验的依据"}

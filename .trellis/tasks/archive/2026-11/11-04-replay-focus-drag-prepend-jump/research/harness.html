@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>lwc-viewport-drift-harness</title></head>
+<body>
+<div id="chart" style="width:1200px;height:600px"></div>
+<pre id="out">PENDING</pre>
+<script src="/lwc.js"></script>
+<script>
+/**
+ * 11-04 复现 harness：验证 lightweight-charts 5.2.0 下，
+ * 「追加一页 K 线（填充右侧 200 根 whitespace pad）在拖动进行中 setData 落地」
+ * 是否让视口向前甩一整页（FreeReplayChart 焦点态右缘翻页乱飘的疑凶）。
+ *
+ * 数据形状复刻 src/ui/App.tsx 的 chartDataWithWhitespace：
+ * 真实蜡烛 + 两侧各 200 根 whitespace + 去重排序。
+ */
+(async () => {
+  const out = [];
+  const el = document.getElementById('out');
+  const report = (text) => { el.textContent = text + ' ' + JSON.stringify(out); };
+  window.addEventListener('error', (e) => { report('PAGE-ERROR ' + e.message); });
+  try {
+    const STEP = 300; // 5m 蜡烛（秒）
+    const BASE = 1600000000 - (1600000000 % STEP);
+    const PAD = 200;
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // rAF 正常推进时用它；推进不了时用 timer 兜底（LWC 的可见范围在模型层同步重算，不依赖渲染帧）
+    const tick = () => Promise.race([new Promise((r) => requestAnimationFrame(r)), sleep(100)]);
+    const r1 = (x) => Math.round(x * 10) / 10;
+
+    function candle(t) { return { time: t, open: 100, high: 110, low: 90, close: 105 }; }
+
+    /** realCount 根真实蜡烛，从 firstIndex*STEP 开始；两侧 PAD 根 whitespace（复刻 chartDataWithWhitespace） */
+    function build(realCount, firstIndex) {
+      const first = BASE + firstIndex * STEP;
+      const real = Array.from({ length: realCount }, (_, i) => candle(first + i * STEP));
+      const last = first + (realCount - 1) * STEP;
+      const left = Array.from({ length: PAD }, (_, i) => ({ time: first - (PAD - i) * STEP }));
+      const right = Array.from({ length: PAD }, (_, i) => ({ time: last + (i + 1) * STEP }));
+      const all = [...left, ...real, ...right];
+      const map = new Map(all.map((item) => [Number(item.time), item]));
+      return [...map.values()].sort((a, b) => a.time - b.time);
+    }
+
+    /** 中段有洞的数据（复刻跨空洞拼接）：[0..149] + [300..449] 索引段，中段 150 根缺失（无 whitespace） */
+    function buildWithHole() {
+      const real = [
+        ...Array.from({ length: 150 }, (_, i) => candle(BASE + i * STEP)),
+        ...Array.from({ length: 150 }, (_, i) => candle(BASE + (300 + i) * STEP)),
+      ];
+      const last = BASE + 449 * STEP;
+      const left = Array.from({ length: PAD }, (_, i) => ({ time: BASE - (PAD - i) * STEP }));
+      const right = Array.from({ length: PAD }, (_, i) => ({ time: last + (i + 1) * STEP }));
+      const all = [...left, ...real, ...right];
+      const map = new Map(all.map((item) => [Number(item.time), item]));
+      return [...map.values()].sort((a, b) => a.time - b.time);
+    }
+
+    let seq = 0;
+    /** 找到 pane 交互层：全尺寸 canvas 中最末一个（价格轴 canvas 窄、时间轴 canvas 矮，都被尺寸过滤掉） */
+    function findPaneOverlay() {
+      const canvases = Array.from(document.getElementById('chart').querySelectorAll('canvas'));
+      const big = canvases.filter((c) => {
+        const r = c.getBoundingClientRect();
+        return r.width > 500 && r.height > 100;
+      });
+      return big[big.length - 1] ?? document.getElementById('chart');
+    }
+    function makeChart(shiftOnNewBar) {
+      const container = document.getElementById('chart');
+      container.innerHTML = '';
+      const chart = LightweightCharts.createChart(container, {
+        width: 1200,
+        height: 600,
+        timeScale: { shiftVisibleRangeOnNewBar: shiftOnNewBar },
+      });
+      const series = chart.addSeries(LightweightCharts.CandlestickSeries, {});
+      seq += 1;
+      const target = findPaneOverlay();
+      return { chart, series, target, seq };
+    }
+
+    function visible(chart) {
+      const lr = chart.timeScale().getVisibleLogicalRange();
+      const tr = chart.timeScale().getVisibleRange();
+      return {
+        logical: lr ? [r1(lr.from), r1(lr.to)] : null,
+        time: tr ? [Number(tr.from), Number(tr.to)] : null,
+      };
+    }
+
+    function mouse(t, type, dx, dy) {
+      const rect = t.getBoundingClientRect();
+      t.dispatchEvent(new MouseEvent(type, {
+        clientX: rect.left + dx,
+        clientY: rect.top + dy,
+        button: 0,
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      }));
+    }
+
+    // ---------- S9 拖动灵敏度：overlay canvas 上纯拖动能否平移视图（5 次 move 逐步测量） ----------
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 100, to: 300 });
+      await tick();
+      const v0 = visible(chart);
+      const steps = [v0];
+      mouse(target, 'mousedown', 900, 300);
+      for (let i = 1; i <= 5; i += 1) {
+        mouse(target, 'mousemove', 900 - i * 10, 300);
+        await tick();
+        steps.push(visible(chart));
+      }
+      mouse(target, 'mouseup', 850, 300);
+      await tick();
+      out.push({ name: 'S9 drag-only sensitivity (5 moves)', before: v0, steps, afterRelease: visible(chart) });
+      report('STAGE S9 done');
+    }
+
+    /** 启动一次拖动：down + 2 次 move（LWC 需 mousedown→move 捕获→move 启动滚动） */
+    async function dragStart(t, x0) {
+      mouse(t, 'mousedown', x0, 300);
+      mouse(t, 'mousemove', x0 - 10, 300);
+      await tick();
+      mouse(t, 'mousemove', x0 - 20, 300);
+      await tick();
+    }
+
+    // ---------- S2 疑凶（中段视图）：拖动启动并平移后追加落地，再继续拖 → 预测：下次 move 视口甩 +150 ----------
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 100, to: 300 });
+      await tick();
+      const v0 = visible(chart);
+      await dragStart(target, 900); // 滚动已启动，快照已建立，已平移 ~2 bars
+      const v1 = visible(chart);
+      series.setData(build(450, 0)); // 模拟 mode=later 一页在拖动进行中落地
+      await tick();
+      const v2 = visible(chart);
+      mouse(target, 'mousemove', 870, 300); // 继续拖 10px ≈ 1.75 bars
+      await tick();
+      const v3 = visible(chart);
+      mouse(target, 'mouseup', 870, 300);
+      await tick();
+      out.push({ name: 'S2 mid-data append MID-DRAG', before: v0, afterDragStart: v1, afterAppend: v2, afterContinueDrag: v3, afterRelease: visible(chart) });
+      report('STAGE S2-mid done');
+    }
+
+    // ---------- S2b 疑凶（贴边视图，复刻 app 焦点右缘拖动场景）----------
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 300, to: 500 });
+      await tick();
+      const v0 = visible(chart);
+      await dragStart(target, 900);
+      const v1 = visible(chart);
+      series.setData(build(450, 0));
+      await tick();
+      const v2 = visible(chart);
+      mouse(target, 'mousemove', 870, 300);
+      await tick();
+      const v3 = visible(chart);
+      mouse(target, 'mouseup', 870, 300);
+      await tick();
+      out.push({ name: 'S2 edge-view append MID-DRAG', before: v0, afterDragStart: v1, afterAppend: v2, afterContinueDrag: v3, afterRelease: visible(chart) });
+      report('STAGE S2-edge done');
+    }
+
+    // ---------- S0 敏感性对照：shift=true，释放后追加 → 期待视口甩 +150（证明 harness 能测到漂移） ----------
+    {
+      const { chart, series, target } = makeChart(true);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 300, to: 500 });
+      await tick();
+      const v0 = visible(chart);
+      mouse(target, 'mousedown', 900, 300);
+      mouse(target, 'mousemove', 880, 300);
+      await tick();
+      mouse(target, 'mouseup', 880, 300);
+      await tick();
+      series.setData(build(450, 0));
+      await tick();
+      out.push({ name: 'S0 shift=true release-then-append', before: v0, after: visible(chart) });
+      report('STAGE S0 done');
+    }
+
+    // ---------- S1 对照：shift=false（app 现配置），释放后追加 → 期待视口保持（11/03 修复生效面） ----------
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 300, to: 500 });
+      await tick();
+      const v0 = visible(chart);
+      mouse(target, 'mousedown', 900, 300);
+      mouse(target, 'mousemove', 880, 300);
+      await tick();
+      mouse(target, 'mouseup', 880, 300);
+      await tick();
+      series.setData(build(450, 0));
+      await tick();
+      out.push({ name: 'S1 shift=false release-then-append', before: v0, after: visible(chart) });
+      report('STAGE S1 done');
+    }
+
+    // ---------- S3 对照：拖动进行中前插 → 预测：视口保持（左缘翻页安全） ----------
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 190, to: 390 }); // 视口左缘贴近数据左缘
+      await tick();
+      const v0 = visible(chart);
+      // 向右拖（鼠标右移 → 视图向更早方向），滚动启动 + 快照建立
+      mouse(target, 'mousedown', 900, 300);
+      mouse(target, 'mousemove', 910, 300);
+      await tick();
+      mouse(target, 'mousemove', 920, 300);
+      await tick();
+      const v1 = visible(chart);
+      series.setData(build(450, -150)); // 模拟 mode=earlier 一页在拖动进行中落地
+      await tick();
+      const v2 = visible(chart);
+      mouse(target, 'mousemove', 930, 300);
+      await tick();
+      const v3 = visible(chart);
+      mouse(target, 'mouseup', 930, 300);
+      await tick();
+      out.push({ name: 'S3 prepend MID-DRAG', before: v0, afterDragStart: v1, afterPrepend: v2, afterContinueDrag: v3 });
+      report('STAGE S3 done');
+    }
+
+    // ---------- S4 中段洞自愈在拖动中落地 → 预测：补偿走 rightOffset -= M，被拖动快照撤销 → 甩 M 根 ----------
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(buildWithHole());
+      chart.timeScale().setVisibleLogicalRange({ from: 300, to: 500 }); // 视口横跨洞
+      await tick();
+      const v0 = visible(chart);
+      await dragStart(target, 900);
+      const v1 = visible(chart);
+      series.setData(build(450, 0)); // 模拟补洞窗落地（洞被填上，后续索引 +150）
+      await tick();
+      const v2 = visible(chart);
+      mouse(target, 'mousemove', 870, 300);
+      await tick();
+      const v3 = visible(chart);
+      mouse(target, 'mouseup', 870, 300);
+      await tick();
+      out.push({ name: 'S4 gap-heal MID-DRAG', before: v0, afterDragStart: v1, afterHeal: v2, afterContinueDrag: v3 });
+      report('STAGE S4 done');
+    }
+
+    // ---------- S5 修复策略（11/04）：拖动中追加型落茟不 setData，推迟到释放后 ----------
+    // 预测：拖动中零 setData → 继续拖只有纯拖动增量（无 +150 甩页）；释放后再
+    // setData 走 LWC 补偿分支（快照已清）→ 视口保持。
+    {
+      const { chart, series, target } = makeChart(false);
+      series.setData(build(300, 0));
+      chart.timeScale().setVisibleLogicalRange({ from: 300, to: 500 });
+      await tick();
+      const v0 = visible(chart);
+      await dragStart(target, 900);
+      const v1 = visible(chart);
+      // 拖动中追加一页落地 —— 修复后此时代码不 setData（数据层只合并）
+      const deferredPayload = build(450, 0);
+      mouse(target, 'mousemove', 870, 300);
+      await tick();
+      const v2 = visible(chart);
+      mouse(target, 'mouseup', 870, 300);
+      await tick();
+      const vAfterRelease = visible(chart);
+      series.setData(deferredPayload);
+      await tick();
+      out.push({ name: 'S5 defer-render MID-DRAG', before: v0, afterDragStart: v1, afterContinueDrag: v2, afterRelease: vAfterRelease, afterDeferredRender: visible(chart) });
+      report('STAGE S5 done');
+    }
+
+    report('RESULT');
+    el.textContent = 'RESULT ' + JSON.stringify(out);
+    await fetch('/result', { method: 'POST', body: JSON.stringify(out) });
+  } catch (err) {
+    report('CAUGHT ' + (err && err.stack ? err.stack : String(err)));
+    await fetch('/result', { method: 'POST', body: JSON.stringify({ error: String(err && err.stack ? err.stack : err) }) }).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
