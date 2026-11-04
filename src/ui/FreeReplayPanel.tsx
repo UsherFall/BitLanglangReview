@@ -288,7 +288,7 @@ export function FreeReplayPanel({
       </div>
       {/* 11/04 sim 单库：与「历史会话」并列，不设新导航。行数据是跨会话聚的
           已完结合回，批注与回放内单子行共享同一份 `paper:` 批注。 */}
-      <div className="free-replay-history paper-round-library" data-testid="paper-round-library">
+      <div className={`free-replay-history paper-round-library${libraryCollapsed ? ' collapsed' : ''}`} data-testid="paper-round-library">
         <button type="button" className="history-header" aria-expanded={!libraryCollapsed} onClick={() => setLibraryCollapsed((current) => !current)}>
           <span>模拟单库{roundList.length ? ` (${roundList.length})` : ''}</span>
           {libraryCollapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

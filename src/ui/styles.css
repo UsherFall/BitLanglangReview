@@ -225,16 +225,15 @@ body.sidebar-resizing {
 }
 
 .free-replay-panel {
-  display: grid;
+  /* 11/04：改 flex 列 —— 模拟单库块 flex:1 填满剩余空间，列表铺到页面底部；
+     矮屏内容放不下时面板自身可滚，不再被 sidebar 的 overflow:hidden 裁底。 */
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   padding: 12px;
-  /* 11/04：面板吃满侧栏剩余高度 —— 列表变长后内容超出时面板自身可滚，
-     不再被 sidebar 的 overflow: hidden 裁底。align-content:start 防 grid
-     默认 stretch 把表单行拉高。 */
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  align-content: start;
 }
 
 .replay-controls {
@@ -301,10 +300,30 @@ body.sidebar-resizing {
 .history-list {
   display: grid;
   gap: 4px;
-  /* 11/04：写死 260px 不随分辨率伸缩 —— 改为视口相对 + 上下限钳制
-     （1080p≈281px，1440p≈374px，4K 封顶 560px；矮屏最低 160px）。 */
+  /* 11/04：max-height 仅约束「历史会话」（会话切换器）：视口相对 + 钳制
+     （1080p≈281px，1440p≈374px）。模拟单库不走 max-height，见下。 */
   max-height: clamp(160px, 26vh, 560px);
   overflow-y: auto;
+}
+
+/* 11/04：模拟单库填满面板剩余空间 —— 展开时列表直接铺到页面底部，
+   不再随 26vh 上限伸缩。grid 末行 minmax(0,1fr) + 列表 max-height:none
+   让滚动发生在列表内部，而不是把面板撑高；align-content:start 防 grid
+   默认 stretch 把筛选行/单行拉稀。收起时退回内容高度，标题下不留空白。 */
+.paper-round-library {
+  flex: 1;
+  min-height: 160px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.paper-round-library.collapsed {
+  flex: 0 0 auto;
+  min-height: auto;
+}
+
+.paper-round-library .history-list {
+  max-height: none;
+  align-content: start;
 }
 
 .history-empty {
