@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 34
+- **Total Sessions**: 35
 - **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1462 | Active |
+| `journal-1.md` | ~1502 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 35 | 2026-11-05 | Free Replay Dataset 收拢双数据集协议 | `665ad0d`, `f50667b` | `feat/free-replay-dataset` |
 | 34 | 2026-11-05 | 统一复盘行情源与 Candle Grid | `9e627a6f45f29a432cb6cc3f24522b77ba2b6233` | `feat/replay-market-context` |
 | 32 | 2026-11-03 | 回溯复盘焦点单整窗替换：消除跨空洞价格跨越与标记挤压 | `3a5e433`, `aa16d80` | `master` |
 | 31 | 2026-10-26 | Trellis 仓库卫生治理：研究数据出 git、孤儿任务补档、根目录与 data 清理 | `0300a89`, `34098e4`, `99d61e9`, `da72cf5`, `54be873` | `master` |

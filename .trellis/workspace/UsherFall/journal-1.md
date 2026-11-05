@@ -1460,3 +1460,43 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: Free Replay Dataset 收拢双数据集协议
+<!-- trellis-session: v=2 fp=eab5e487fdf92131 -->
+
+**Date**: 2026-11-05
+**Task**: Free Replay Dataset 收拢双数据集协议
+**Branch**: `feat/free-replay-dataset`
+
+### Summary
+
+新增框架无关 FreeReplayDataset，拥有 Cursor/Focus/Active/Rendered 与全部 Candlestick 加载；generation + focusKey 过期保护；迁移 FreeReplayChart 并保留视口/焦点/预取/延迟渲染行为。
+
+### Main Changes
+
+- 新增 src/ui/free-replay-dataset.ts（快照、订阅、syncRange/syncFocus/syncCursor、earlier/later/prefetch/gap、pointer defer、dispose）
+- App FreeReplayChart 删除 publishActive/installIntoDataset/本地 loader 与平行 refs，改读 Dataset 快照（3074→2775 行）
+- mergeCandles 移入 free-replay-chart 共用；CONTEXT.md 增加 Free Replay Dataset 术语；新增 frontend/free-replay-dataset.md spec
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `665ad0d` | refactor(replay): 收拢 Cursor 与 Focus 双数据集协议 |
+| `f50667b` | docs(task): 双数据集子任务规划与验收记录 |
+
+### Testing
+
+- [OK] tests/free-replay-dataset.test.ts 13 tests（deferred loader，无 React/jsdom）
+- [OK] focused 8 files / 139 tests；npm test 77 files / 707 tests；tsc --noEmit 通过；git diff HEAD --check exit 0
+- [OK] mutation 验证：去掉 focusKey / earlier generation 校验对应用例变红
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 父任务 11-05-architecture-deepening 已 2/2 done（planning），确认是否归档
+- 后续子任务：Session 生命周期、SQLite 原子删除、OtherCoinChart merge 去重等
