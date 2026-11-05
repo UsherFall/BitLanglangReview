@@ -211,3 +211,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: 修复回溯复盘 StrictMode K 线空白
+<!-- trellis-session: v=2 fp=7bb89d9ae2e6d11f -->
+
+**Date**: 2026-11-05
+**Task**: 修复回溯复盘 StrictMode K 线空白
+**Branch**: `fix/replay-candlestick-regression`
+
+### Summary
+
+定位并修复 Free Replay 在生产 React.StrictMode 下无 K 线：effect 重放复用了已 dispose 的 render-scope Dataset，首次有效响应被丢弃且二次 syncRange 空转。改为订阅 effect 每次 setup 创建实例、cleanup 对称 dispose，所有命令读当前 ref，latest callback refs 保持 mount-only；新增生产包装 StrictMode 红绿回归。focused 76 通过、全量可运行 77 文件/707 测试通过、tsc 与 diff check 通过；原始 npm test 仅既有 level-alert-parity 缺 gitignored pool 数据失败，按历史既定口径单独记录。更新 hook/Dataset/quality specs，归档缺陷子任务，父架构任务继续。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d4e55a1` | fix(replay): 修复 StrictMode 下 K 线空白 |
+| `52d4748` | docs(task): 记录回溯复盘 K 线回归验收 |
+
+### Status
+
+[OK] **Completed**

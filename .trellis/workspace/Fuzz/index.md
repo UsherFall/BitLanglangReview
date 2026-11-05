@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
-- **Last Active**: 2026-11-04
+- **Total Sessions**: 10
+- **Last Active**: 2026-11-05
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~213 | Active |
+| `journal-1.md` | ~236 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-11-05 | 修复回溯复盘 StrictMode K 线空白 | `d4e55a1`, `52d4748` | `fix/replay-candlestick-regression` |
 | 9 | 2026-11-04 | 回溯复盘侧栏列表自适应 + 模拟单库交互 + 切周期视图回右缘 | `9c3cbce`, `5813069`, `16ea543`, `f31793d` | `master` |
 | 7 | 2026-11-03 | 回溯复盘行情源可选 + K线缓存洞回填与自愈 + 模拟交易权益制 | `cde0c3d`, `4f2ced8` | `master` |
 | 6 | 2026-11-02 | 回溯复盘标记层对齐交割单复盘 + 会话切换面板跟随 | `84b48f1`, `1fd7cff` | `master` |
