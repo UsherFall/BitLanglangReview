@@ -20,7 +20,7 @@
 | 1 | 统一 Market Data Source、requestSource 与 Candle Grid 映射，修复 Free Replay Other Coin Panel 跨源风险 | `archive/2026-11/11-05-replay-market-context` | Completed（commit `9e627a6`） |
 | 2 | 把 Free Replay Cursor / Focus 双数据集及加载协议收进独立 Module | `archive/2026-11/11-05-free-replay-dataset` | Completed（commit `665ad0d`） |
 | 3 | 优先复现并修复回溯复盘主图看不到 K 线的回归 | `archive/2026-11/11-05-replay-candlestick-regression` | Completed（commit `d4e55a1`；全量可运行测试通过，既有 parity fixture 失败单独记录） |
-| 4 | 把 Free Replay Session 生命周期从 App 中深化为独立 Module | 待子任务 3 验收后创建 | Deferred by defect |
+| 4 | 把 Free Replay Session 生命周期从 App 中深化为独立 Module | `archive/2026-11/11-05-replay-session-lifecycle` | Completed（commit `81896b4`） |
 | 5 | 让 Free Replay Session 与 Paper Round Review 的级联删除具备事务性 | 待子任务 4 验收后创建 | Not created |
 | 6 | 按领域工作流提取可独立测试的路由 Module，保留 Vite 组装根 | 待子任务 5 验收后创建 | Not created |
 | 7 | 把共享响应类型、nominal timeframe duration 与 Candlestick 合并规则移到中性纯 Module | 待子任务 6 验收后创建 | Not created |

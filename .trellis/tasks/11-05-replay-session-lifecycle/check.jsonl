@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Free Replay 全量行为质量门。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"检查 effect 生命周期、ref 和依赖。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"检查 Session/Paper 状态唯一所有权与保存行为。"}
+{"file":".trellis/spec/frontend/free-replay-dataset.md","reason":"确认 Candlestick Dataset 边界未被侵入。"}
+{"file":".trellis/tasks/11-05-replay-session-lifecycle/research/current-state.md","reason":"逐项对照兼容契约与测试覆盖。"}

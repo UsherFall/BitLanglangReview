@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"前端边界与验证入口。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"hook effect/ref 生命周期与 StrictMode 约束。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"App、Replay、Paper 状态归属和自动保存规则。"}
+{"file":".trellis/spec/frontend/free-replay-dataset.md","reason":"禁止把 Chart Dataset 窗口混入 Session 生命周期。"}
+{"file":".trellis/tasks/11-05-replay-session-lifecycle/research/current-state.md","reason":"当前调用链、行为契约、边界与直接测试策略。"}
