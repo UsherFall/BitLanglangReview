@@ -11,7 +11,7 @@ This project uses React local state only. There is no global store. Persistent s
 - Review mode: `trade`, `bitget`, `freeReplay`, or `scan`.
 
 `trade` (交割单复盘, xlsx source) and `bitget` (Bitget复盘) share ONE queue/detail code path: both render the same filters/progress/list/detail/chart/editor and differ only by the data-source endpoint. `App.tsx` picks the endpoint with `tradeReviewEndpoint(mode)` (`/api/trades` vs `/api/bitget/trades`) and re-fetches when the mode or a `tradeRefreshToken` bump changes; `BitgetControlBar` bumps that token after a successful sync. Review tags/notes/star are shared across both sources because reviews key on `trade.id` and Bitget ids carry a `bg-` prefix.
-- Free Replay session: selected instrument/start time/cursor and currently loaded candles.
+- Free Replay session: selected instrument/start time/cursor. Its loaded candles are owned by `src/ui/free-replay-dataset.ts` (Cursor / Focus / Active / Rendered + all loads), not by component refs; see `free-replay-dataset.md`.
 
 `src/ui/ReviewEditor.tsx` owns draft tags, draft note, and save status until `/api/reviews` persists them. `src/ui/FreeReplayPanel.tsx` owns instrument search, selected instrument, start time, status text, and the `flatpickr` instance.
 
@@ -48,7 +48,7 @@ Keep derived state close to the consumer and prefer pure helpers:
 
 - `selectedTrade`, `progress`, and `nextUnreviewedTrade` are derived in `App.tsx` from fetched queue data.
 - `reviewProgress` and `firstUnreviewedTrade` live in `src/ui/review-progress.ts` and are covered by `tests/review-progress.test.ts`.
-- Free Replay visibility and cursor movement live in `src/ui/free-replay-chart.ts` and are covered by `tests/free-replay-chart.test.ts`.
+- Free Replay visibility and cursor movement live in `src/ui/free-replay-chart.ts` and are covered by `tests/free-replay-chart.test.ts`; the four candlestick windows, stale-response guards and deferred render are owned by `FreeReplayDataset` (`src/ui/free-replay-dataset.ts`, `tests/free-replay-dataset.test.ts`).
 
 ## Domain Rules
 

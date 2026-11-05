@@ -10,6 +10,7 @@ Guidance for `src/ui`, the React application, chart integration, and UI-facing h
 | [Component Guidelines](./component-guidelines.md) | Building React components or chart overlays |
 | [Hook Guidelines](./hook-guidelines.md) | Adding effects, refs, or shared stateful logic |
 | [State Management](./state-management.md) | Changing trade review, free replay, chart, or drawing state |
+| [Free Replay Dataset](./free-replay-dataset.md) | Changing Free Replay candlestick loading, Cursor/Focus windows, stale responses, or deferred render |
 | [Quality Guidelines](./quality-guidelines.md) | Verifying UI behavior and tests |
 | [Type Safety](./type-safety.md) | Defining UI-local types or API payload shapes |
 
@@ -22,7 +23,7 @@ Representative files:
 - `src/ui/App.tsx` coordinates trade review, free replay, chart rendering, drawing overlays, and API calls.
 - `src/ui/ReviewEditor.tsx` edits review tags and the single review note for a trade.
 - `src/ui/FreeReplayPanel.tsx` chooses an OKX swap instrument and local start time.
-- `src/ui/chart-time.ts`, `src/ui/chart-autoload.ts`, `src/ui/chart-navigation-anchor.ts`, and `src/ui/free-replay-chart.ts` keep chart math testable outside React.
+- `src/ui/chart-time.ts`, `src/ui/chart-autoload.ts`, `src/ui/chart-navigation-anchor.ts`, `src/ui/free-replay-chart.ts`, and `src/ui/free-replay-dataset.ts` keep chart math and Free Replay data ownership testable outside React.
 
 ## Verification
 
