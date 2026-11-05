@@ -11,6 +11,7 @@ Guidance for `src/ui`, the React application, chart integration, and UI-facing h
 | [Hook Guidelines](./hook-guidelines.md) | Adding effects, refs, or shared stateful logic |
 | [State Management](./state-management.md) | Changing trade review, free replay, chart, or drawing state |
 | [Free Replay Dataset](./free-replay-dataset.md) | Changing Free Replay candlestick loading, Cursor/Focus windows, stale responses, or deferred render |
+| [Free Replay Session Lifecycle](./free-replay-session-lifecycle.md) | Changing Replay session restore/start, auto-save, deletion, timeframe or cursor commands |
 | [Quality Guidelines](./quality-guidelines.md) | Verifying UI behavior and tests |
 | [Type Safety](./type-safety.md) | Defining UI-local types or API payload shapes |
 

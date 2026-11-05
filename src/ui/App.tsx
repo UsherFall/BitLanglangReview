@@ -12,7 +12,7 @@ import { isSameVisibleRange, shouldLoadLater, type VisibleTimeRange } from './ch
 import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
-import { containingCandleTimestamp, entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { containingCandleTimestamp, entryVisibleRange, formatChartTime, timeframeMs, timeframeTimeForPoint } from './chart-time';
 import { chartMarketContext } from './chart-market-context';
 import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
@@ -23,12 +23,13 @@ import { useChartDrawings } from './chart-drawing';
 import { HeatScanResults } from './HeatScanResults';
 import { BoxScanResults } from './BoxScanResults';
 import { BitgetControlBar } from './BitgetControlBar';
-import { FreeReplayPanel, type FreeReplaySession, type FreeReplaySessionPayload, type FreeReplayStart } from './FreeReplayPanel';
+import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
-import { nextFreeReplayProgress, previousFreeReplayProgress, shouldBackfillFreeReplayHistory, visibleCandlesForFreeReplay, mergeCandles, replayCandleGrid, replayCandleSource, replayRequestInstrument, firstGapInRange, shouldLoadLaterFocusCandles, LEGACY_REPLAY_CANDLE_SOURCE } from './free-replay-chart';
+import { shouldBackfillFreeReplayHistory, visibleCandlesForFreeReplay, mergeCandles, replayCandleGrid, replayCandleSource, replayRequestInstrument, firstGapInRange, shouldLoadLaterFocusCandles } from './free-replay-chart';
 import { FreeReplayDataset } from './free-replay-dataset';
+import { useFreeReplaySessionLifecycle } from './use-free-replay-session-lifecycle';
 import {
   availableMargin,
   cancelPendingOrder,
@@ -36,7 +37,6 @@ import {
   closeMarket,
   currentCursorCandle,
   initialPaperTradingSession,
-  normalizePaperTradingSession,
   openMarket,
   PAPER_ACCOUNT_EQUITY,
   paperTradeChartPoints,
@@ -45,7 +45,6 @@ import {
   placeEntryLimit,
   placeExitLimit,
   placeStopLoss,
-  processRevealedCandle,
   startPaperTrading,
   type PaperDirection,
   type PaperLeg,
@@ -200,15 +199,6 @@ function isNarrowLayout(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(NARROW_LAYOUT_QUERY).matches;
 }
 
-function upsertSession(sessions: FreeReplaySession[], saved: FreeReplaySession): FreeReplaySession[] {
-  return [...sessions.filter((session) => !(session.instrument === saved.instrument && session.startTime === saved.startTime)), saved]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
-function sessionKey(instrument: string, startTime: string): string {
-  return `${instrument}:${startTime}`;
-}
-
 /** Default (unfiltered) Paper Round library payload. */
 const emptyPaperLibrary: PaperRoundLibraryResponse = { rounds: [], sessions: [], tags: [], tagCounts: {} };
 
@@ -218,7 +208,6 @@ export function App() {
   const [selectedId, setSelectedId] = useState<string>('');
   const selectedTradeRowRef = useRef<HTMLDivElement | null>(null);
   const sidebarDragRef = useRef<SidebarDrag | null>(null);
-  const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [otherCoinOpen, setOtherCoinOpen] = useState(false);
   const [leaderCoinOpen, setLeaderCoinOpen] = useState(false);
   const [heatOpen, setHeatOpen] = useState(false);
@@ -244,7 +233,6 @@ export function App() {
     setDrawTarget(instrument);
   }
   const [sidebarConfig, setSidebarConfig] = useState<SidebarConfig>(() => loadSidebarConfig());
-  const [freeReplay, setFreeReplay] = useState<FreeReplayStart | null>(null);
   const [freeReplayCandles, setFreeReplayCandles] = useState<Candlestick[]>([]);
   /**
    * 图表的【活动数据集】（10-30）：焦点态 = 焦点窗口，否则 = 游标窗口。只用于
@@ -252,14 +240,12 @@ export function App() {
    * 用 freeReplayCandles（游标数据集，R2 不变）。
    */
   const [freeReplayActiveCandles, setFreeReplayActiveCandles] = useState<Candlestick[]>([]);
-  const [paperTrading, setPaperTrading] = useState<PaperTradingSession>(() => initialPaperTradingSession());
   // 10/29: 焦点单（点已完成交易行锚定开仓点）。token 递增使重复点同一行重新归位；
   // 步进/开平仓/点持仓行清除（详见 design.md 的解除条款）。临时状态，不进会话存盘。
   const [orderFocus, setOrderFocus] = useState<{ id: string; timeMs: number; token: number } | null>(null);
   // 10/30: 回到光标令牌 —— 开平仓提交/点持仓行时递增，图表据此把视口跳回光标
   // （步进不走这里，10/28 舒适区契约不变）。
   const [cursorReturnToken, setCursorReturnToken] = useState(0);
-  const [freeReplaySessions, setFreeReplaySessions] = useState<FreeReplaySession[]>([]);
   // 11/04 模拟单库：跨会话聚合的已完结回合 + paper 作用域的标签与批注。
   // `paperReviews` 是回放内单子行与库行共享的那一份数据（回合 ID 索引）。
   const [paperLibrary, setPaperLibrary] = useState<PaperRoundLibraryResponse>(emptyPaperLibrary);
@@ -281,12 +267,42 @@ export function App() {
   const [scanSource, setScanSource] = useState<MarketDataSource>(DEFAULT_MARKET_DATA_SOURCE);
   // Bumped by the Bitget sync bar so the trade queue refetches after a sync.
   const [tradeRefreshToken, setTradeRefreshToken] = useState(0);
-  const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
-  const saveTimerRef = useRef<number | null>(null);
-  // Keys of sessions deleted since the last matching save. Guards against an
-  // already in-flight auto-save PUT response resurrecting a deleted row in the
-  // local list (stale freeReplaySessions).
-  const deletedSessionKeysRef = useRef<Set<string>>(new Set());
+  const {
+    freeReplay,
+    paperTrading,
+    setPaperTrading,
+    timeframe,
+    setTimeframe,
+    sessions: freeReplaySessions,
+    start: handleFreeReplayStart,
+    restore: restoreFreeReplaySession,
+    remove: handleDeleteSession,
+    revealNext: revealNextFreeReplayCandle,
+    rewind: rewindFreeReplayCandle,
+    switchTimeframe: switchFreeReplayTimeframe,
+  } = useFreeReplaySessionLifecycle({
+    active: reviewMode === 'freeReplay',
+    cursorCandles: freeReplayCandles,
+    onFutureRetry: () => setFutureRetryToken((token) => token + 1),
+    onResetView: () => {
+      setOrderFocus(null);
+      setFreeReplayCandles([]);
+      setFreeReplayActiveCandles([]);
+    },
+    onClearFocus: () => setOrderFocus(null),
+    onSessionDeleted: (instrument, startTime) => {
+      // The server cascade and local Paper Round state share the same prefix.
+      setPaperReviews((current) => {
+        const prefix = paperSessionReviewPrefix(instrument, startTime);
+        const next: PaperReviewMap = {};
+        for (const [id, review] of Object.entries(current)) {
+          if (!id.startsWith(prefix)) next[id] = review;
+        }
+        return next;
+      });
+      setPaperLibraryToken((token) => token + 1);
+    },
+  });
 
   function addLeaderCoin(instrument: string) {
     const next = instrument.trim();
@@ -360,12 +376,6 @@ export function App() {
       });
   }, [filters, reviewMode, tradeRefreshToken]);
 
-  useEffect(() => {
-    fetch('/api/free-replay/sessions')
-      .then((response) => response.json())
-      .then(({ sessions }: { sessions?: FreeReplaySession[] }) => setFreeReplaySessions(sessions ?? []));
-  }, []);
-
   // 11/04 模拟单库：单库数据在进入回溯复盘模式时、以及批注/删会话/新增回放
   // 回合后重取（paperLibraryToken）。服务端派生回合行情，客户端不缓存。
   useEffect(() => {
@@ -406,63 +416,6 @@ export function App() {
     if (reviewMode !== 'freeReplay' || freeReplay) return;
     setPaperLibraryToken((token) => token + 1);
   }, [reviewMode, freeReplay]);
-
-  // Trailing-debounced auto-save: any reveal, rewind, timeframe switch, or
-  // paper trading change persists the active Free Replay session.
-  useEffect(() => {
-    if (reviewMode !== 'freeReplay' || !freeReplay) {
-      // Leaving Free Replay (or stopping it) flushes any still-pending save so
-      // a quick mode switch does not drop the latest action.
-      const pending = pendingSaveRef.current;
-      if (pending) {
-        pendingSaveRef.current = null;
-        if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-        void persistFreeReplaySession(pending);
-      }
-      return;
-    }
-    const payload: FreeReplaySessionPayload = {
-      instrument: freeReplay.instrument,
-      // 11/02 修复：自动保存必须带回会话的行情源。此前 payload 漏了它，服务端按
-      // `?? null` 落盘 —— 10/21 后新建的 Bitget 会话第一次落盘就丢源，恢复时被
-      // `?? LEGACY` 兜底静默切回 Binance（库里全部会话 candle_source 为 null 即其实锤）。
-      candleSource: freeReplay.candleSource,
-      startTime: freeReplay.startTime,
-      dataAnchorTime: freeReplay.dataAnchorTime,
-      startCursorTime: freeReplay.startCursorTime,
-      startProgressTime: freeReplay.startProgressTime,
-      progressTime: freeReplay.progressTime,
-      cursorTime: freeReplay.cursorTime,
-      timeframe,
-      paperTrading,
-    };
-    pendingSaveRef.current = payload;
-    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = window.setTimeout(() => {
-      saveTimerRef.current = null;
-      void persistFreeReplaySession(payload);
-    }, 500);
-    return () => {
-      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    };
-  }, [freeReplay, paperTrading, timeframe, reviewMode]);
-
-  useEffect(() => {
-    const flush = () => {
-      const payload = pendingSaveRef.current;
-      if (!payload) return;
-      fetch('/api/free-replay/sessions', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-        keepalive: true,
-      });
-    };
-    window.addEventListener('pagehide', flush);
-    return () => window.removeEventListener('pagehide', flush);
-  }, []);
 
   function requestTradeRefresh() {
     setTradeRefreshToken((token) => token + 1);
@@ -649,142 +602,6 @@ export function App() {
   function returnFreeReplayViewToCursor() {
     setOrderFocus(null);
     setCursorReturnToken((token) => token + 1);
-  }
-
-  function revealNextFreeReplayCandle() {
-    if (!freeReplay) return;
-    setOrderFocus(null);
-    const nextReplay = nextFreeReplayProgress(freeReplayCandles, freeReplay.cursorTime, freeReplay.progressTime, timeframe);
-    if (nextReplay.cursorTime !== freeReplay.cursorTime) {
-      const revealedCandle = currentCursorCandle(freeReplayCandles, nextReplay.cursorTime);
-      if (revealedCandle) setPaperTrading((current) => processRevealedCandle(current, revealedCandle, nextReplay.progressTime));
-    } else {
-      setFutureRetryToken((token) => token + 1);
-    }
-    setFreeReplay({ ...freeReplay, ...nextReplay });
-  }
-
-  function rewindFreeReplayCandle() {
-    if (!freeReplay || paperTrading.active) return;
-    setOrderFocus(null);
-    const progressTime = Math.max(previousFreeReplayProgress(freeReplay.cursorTime), freeReplay.startProgressTime);
-    setFreeReplay({
-      ...freeReplay,
-      progressTime,
-      cursorTime: freeReplayCursorTimeForProgress(progressTime, timeframe, replayCandleGrid(freeReplay)),
-    });
-  }
-
-  function switchFreeReplayTimeframe(nextTimeframe: ReviewTimeframe) {
-    setTimeframe(nextTimeframe);
-    // 11/04：切周期不再让焦点单存活。回溯模式的默认视图契约是「光标右缘」，
-    // 保留焦点会留下「行还亮着、视图却在光标」的错位态；再看某单只需再点一次
-    // 行（token 递增重新归位）。清空后退出焦点 effect 接手：活动数据集回游标
-    // 数据集，新周期数据落地后由首锚回到光标右缘。
-    setOrderFocus(null);
-    setFreeReplay((current) => current ? {
-      ...current,
-      dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
-      startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe, replayCandleGrid(current)),
-      cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe, replayCandleGrid(current)),
-    } : current);
-  }
-
-  async function persistFreeReplaySession(payload: FreeReplaySessionPayload) {
-    const key = sessionKey(payload.instrument, payload.startTime);
-    if (deletedSessionKeysRef.current.has(key)) return;
-    const saved = (await fetch('/api/free-replay/sessions', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    }).then((response) => response.json())) as FreeReplaySession;
-    if (deletedSessionKeysRef.current.has(key)) return;
-    setFreeReplaySessions((current) => upsertSession(current, saved));
-  }
-
-  function restoreFreeReplaySession(payload: FreeReplaySessionPayload) {
-    // Flush the outgoing session's still-pending save before switching so its
-    // last reveal/rewind/paper-trading action is not dropped by the debounce.
-    const pending = pendingSaveRef.current;
-    if (pending) {
-      pendingSaveRef.current = null;
-      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-      void persistFreeReplaySession(pending);
-    }
-    setFreeReplay({
-      instrument: payload.instrument,
-      // 10/21: a session recorded before the move has no `candleSource` and
-      // keeps replaying against Binance; a new one replays against its own.
-      candleSource: payload.candleSource ?? LEGACY_REPLAY_CANDLE_SOURCE,
-      startTime: payload.startTime,
-      // Anchor the data window on the restored cursor rather than the session
-      // start: a replay that advanced past the initial window would otherwise
-      // load candlesticks that all sit before the cursor.
-      dataAnchorTime: new Date(payload.cursorTime * 1000).toISOString(),
-      startCursorTime: payload.startCursorTime,
-      startProgressTime: payload.startProgressTime,
-      progressTime: payload.progressTime,
-      cursorTime: payload.cursorTime,
-    });
-    setTimeframe(payload.timeframe);
-    setPaperTrading(normalizePaperTradingSession(payload.paperTrading));
-    setOrderFocus(null);
-    setFreeReplayCandles([]);
-    setFreeReplayActiveCandles([]);
-  }
-
-  function handleFreeReplayStart(next: FreeReplayStart) {
-    const existing = freeReplaySessions.find((session) => session.instrument === next.instrument && session.startTime === next.startTime);
-    if (existing) {
-      restoreFreeReplaySession(existing);
-      return;
-    }
-    // A deleted key can be legitimately re-created by a fresh start; clear the
-    // deleted marker so the auto-save PUT for the new session is not dropped.
-    deletedSessionKeysRef.current.delete(sessionKey(next.instrument, next.startTime));
-    setFreeReplay(next);
-    setOrderFocus(null);
-    setFreeReplayCandles([]);
-    setFreeReplayActiveCandles([]);
-    setPaperTrading(initialPaperTradingSession());
-  }
-
-  async function handleDeleteSession(instrument: string, startTime: string) {
-    const key = sessionKey(instrument, startTime);
-    // Mark the key as deleted before the DELETE resolves so an in-flight PUT
-    // response for the same session cannot resurrect it in the local list.
-    deletedSessionKeysRef.current.add(key);
-    if (pendingSaveRef.current && pendingSaveRef.current.instrument === instrument && pendingSaveRef.current.startTime === startTime) {
-      // Deleting the session that is currently being auto-saved: cancel the
-      // pending PUT so the deleted row is not resurrected.
-      pendingSaveRef.current = null;
-      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-    }
-    try {
-      await fetch(`/api/free-replay/sessions?${new URLSearchParams({ instrument, startTime })}`, { method: 'DELETE' });
-    } catch (error) {
-      deletedSessionKeysRef.current.delete(key);
-      throw error;
-    }
-    // 11/04：服务端级联删除了这个会话的回合批注，本地也要把对应 review 丢掉，
-    // 否则首页单库会留着永远渲染不出来的孤儿行。
-    setPaperReviews((current) => {
-      const prefix = paperSessionReviewPrefix(instrument, startTime);
-      const next: PaperReviewMap = {};
-      for (const [id, review] of Object.entries(current)) {
-        if (!id.startsWith(prefix)) next[id] = review;
-      }
-      return next;
-    });
-    setPaperLibraryToken((token) => token + 1);
-    setFreeReplaySessions((current) => current.filter((session) => !(session.instrument === instrument && session.startTime === startTime)));
-    if (freeReplay && freeReplay.instrument === instrument && freeReplay.startTime === startTime) {
-      setFreeReplay(null);
-      setOrderFocus(null);
-      setPaperTrading(initialPaperTradingSession());
-    }
   }
 
   function setFilterCollapsed(filterCollapsed: boolean) {
