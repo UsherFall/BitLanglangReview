@@ -20,7 +20,8 @@
   "subtasks": [],
   "children": [
     "11-05-replay-market-context",
-    "11-05-free-replay-dataset"
+    "11-05-free-replay-dataset",
+    "11-05-replay-candlestick-regression"
   ],
   "parent": null,
   "relatedFiles": [],

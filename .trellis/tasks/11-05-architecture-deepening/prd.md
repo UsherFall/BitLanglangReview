@@ -18,11 +18,12 @@
 | # | Deliverable | Task | State |
 | --- | --- | --- | --- |
 | 1 | 统一 Market Data Source、requestSource 与 Candle Grid 映射，修复 Free Replay Other Coin Panel 跨源风险 | `archive/2026-11/11-05-replay-market-context` | Completed（commit `9e627a6`） |
-| 2 | 把 Free Replay Cursor / Focus 双数据集及加载协议收进独立 Module | `11-05-free-replay-dataset` | Planning |
-| 3 | 把 Free Replay Session 生命周期从 App 中深化为独立 Module | 待子任务 2 验收后创建 | Not created |
-| 4 | 让 Free Replay Session 与 Paper Round Review 的级联删除具备事务性 | 待子任务 3 验收后创建 | Not created |
-| 5 | 按领域工作流提取可独立测试的路由 Module，保留 Vite 组装根 | 待子任务 4 验收后创建 | Not created |
-| 6 | 把共享响应类型、nominal timeframe duration 与 Candlestick 合并规则移到中性纯 Module | 待子任务 5 验收后创建 | Not created |
+| 2 | 把 Free Replay Cursor / Focus 双数据集及加载协议收进独立 Module | `archive/2026-11/11-05-free-replay-dataset` | Completed（commit `665ad0d`） |
+| 3 | 优先复现并修复回溯复盘主图看不到 K 线的回归 | `11-05-replay-candlestick-regression` | Ready to commit（修复与全量可运行测试通过；既有 parity fixture 失败单独记录） |
+| 4 | 把 Free Replay Session 生命周期从 App 中深化为独立 Module | 待子任务 3 验收后创建 | Deferred by defect |
+| 5 | 让 Free Replay Session 与 Paper Round Review 的级联删除具备事务性 | 待子任务 4 验收后创建 | Not created |
+| 6 | 按领域工作流提取可独立测试的路由 Module，保留 Vite 组装根 | 待子任务 5 验收后创建 | Not created |
+| 7 | 把共享响应类型、nominal timeframe duration 与 Candlestick 合并规则移到中性纯 Module | 待子任务 6 验收后创建 | Not created |
 
 顺序是交付顺序，不表示任务树本身提供依赖。每个子任务必须在自己的 `prd.md` / `implement.md` 中写明真实依赖、兼容约束和独立验收方式。
 
@@ -37,7 +38,7 @@
 
 ## Cross-child Acceptance Criteria
 
-- [ ] 六个交付项分别拥有经过评审的 PRD、技术方案、执行步骤和独立验证证据。
+- [ ] 所有交付项分别拥有经过评审的 PRD、技术方案、执行步骤和独立验证证据。
 - [ ] 每个已完成子任务的 focused tests、完整测试和类型检查均通过，且没有通过删除或放宽旧断言掩盖回归。
 - [ ] Free Replay 主图与 Other Coin Panel 不再因为默认源或空 Session 推导而读取不同 Market Data Source。
 - [ ] 高风险的 Cursor / Focus、自动保存、删除和视口规则拥有比整页 App 挂载更直接的 Interface 测试面。

@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"执行 Free Replay focused/full-suite 行为质量门。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"检查 effect 创建/清理对称、ref 使用与 StrictMode 生命周期。"}
+{"file":".trellis/spec/frontend/free-replay-dataset.md","reason":"核对修复没有改变 Dataset 所有权、发布和 dispose 契约。"}
+{"file":".trellis/tasks/11-05-replay-candlestick-regression/research/strict-mode-reproduction.md","reason":"对照原始红绿复现、根因、验证命令和清理要求验收。"}
