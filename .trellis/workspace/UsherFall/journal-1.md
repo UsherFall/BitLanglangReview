@@ -1438,3 +1438,25 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 统一复盘行情源与 Candle Grid
+<!-- trellis-session: v=2 fp=daabcae156dbdd68 -->
+
+**Date**: 2026-11-05
+**Task**: 统一复盘行情源与 Candle Grid
+**Branch**: `feat/replay-market-context`
+
+### Summary
+
+完成架构子任务 1：新增 chartMarketContext 统一 venue/requestSource/grid，Free Replay 主图与其他币面板继承同一 Session 源，保留 binance/binance-only 策略与旧 Session 兼容；补 requestSource 数据身份键和动态切换回归，更新 frontend spec。独立验证 focused 115 tests、完整 76 files/694 tests、tsc 与 diff check 全通过，并已归档子任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e627a6f45f29a432cb6cc3f24522b77ba2b6233` | fix(replay): 统一行情源与 Candle Grid 上下文 |
+
+### Status
+
+[OK] **Completed**
