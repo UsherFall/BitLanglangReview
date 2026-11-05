@@ -1,0 +1,4 @@
+{"file":".trellis/spec/domain/index.md","reason":"最终 domain 纯度与共享契约验收。"}
+{"file":".trellis/spec/frontend/index.md","reason":"最终前端 Module 边界验收。"}
+{"file":".trellis/spec/server/index.md","reason":"最终服务端与路由组装验收。"}
+{"file":".trellis/tasks/11-05-architecture-deepening/research/final-integration.md","reason":"全部子任务提交、直接测试 seam、质量证据和禁用项核对。"}

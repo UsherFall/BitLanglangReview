@@ -1,0 +1,5 @@
+{"file":".trellis/spec/domain/shared-contracts.md","reason":"最终共享类型和纯函数契约。"}
+{"file":".trellis/spec/frontend/free-replay-session-lifecycle.md","reason":"最终 Session 生命周期接口验收。"}
+{"file":".trellis/spec/server/api-plugin.md","reason":"最终 15 个路由注册顺序与 HTTP 契约验收。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"最终事务级联和旧存储兼容验收。"}
+{"file":".trellis/tasks/11-05-architecture-deepening/research/final-integration.md","reason":"父任务最终集成验收清单。"}

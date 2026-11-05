@@ -38,12 +38,14 @@
 
 ## Cross-child Acceptance Criteria
 
-- [ ] 所有交付项分别拥有经过评审的 PRD、技术方案、执行步骤和独立验证证据。
-- [ ] 每个已完成子任务的 focused tests、完整测试和类型检查均通过，且没有通过删除或放宽旧断言掩盖回归。
-- [ ] Free Replay 主图与 Other Coin Panel 不再因为默认源或空 Session 推导而读取不同 Market Data Source。
-- [ ] 高风险的 Cursor / Focus、自动保存、删除和视口规则拥有比整页 App 挂载更直接的 Interface 测试面。
-- [ ] 最终集成评审确认没有引入全局状态库、过度抽象、数据迁移或无关产品行为变化。
-- [ ] 最终完整测试与类型检查通过，架构决策和防护规则已写回项目 spec。
+- [x] 所有交付项分别拥有经过评审的 PRD、技术方案、执行步骤和独立验证证据。
+- [x] 每个已完成子任务的 focused tests、完整可运行测试和类型检查均通过，且没有通过删除或放宽旧断言掩盖回归。
+- [x] Free Replay 主图与 Other Coin Panel 不再因为默认源或空 Session 推导而读取不同 Market Data Source。
+- [x] 高风险的 Cursor / Focus、自动保存、删除和视口规则拥有比整页 App 挂载更直接的 Interface 测试面。
+- [x] 最终集成评审确认没有引入全局状态库、过度抽象、数据迁移或无关产品行为变化。
+- [x] 最终全量可运行测试与类型检查通过，架构决策和防护规则已写回项目 spec；原始完整 `npm test` 的既有 parity fixture 失败单独记录。
+
+最终集成证据见 `research/final-integration.md`：七个工作提交均已集成，84 个文件 / 725 个可运行测试通过，类型和 CRLF-aware diff 检查通过；未新增产品代码。
 
 ## Out of Scope
 

@@ -7,7 +7,7 @@
 - [x] 5. Run focused contracts/routes/stores/UI suites and `npx tsc --noEmit`; inspect for duplicate implementations and domain dependency violations.
 - [x] 6. Run raw and established runnable full tests sequentially plus CRLF-aware `git diff --check`.
 - [x] 7. Update domain spec and parent map, commit independently and archive.
-- [ ] 8. Perform parent-level final integration review across #1–#7, update cross-child acceptance and archive the parent after final journal/commit bookkeeping.
+- [x] 8. Perform parent-level final integration review across #1–#7, update cross-child acceptance and archive the parent after final journal/commit bookkeeping.
 
 ## Review gates
 
