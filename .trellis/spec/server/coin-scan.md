@@ -17,7 +17,7 @@ The automatic convergence detector is GONE (10/20): nine attempts failed and the
 
 **Candle series is session-only** (09/16): for a session-gated instrument the detector never sees candles that contain no trading time — closed-market stretches are dropped from the series before any measure runs, and 2× the raw window is requested to compensate. Ungated classes (crypto, commodity) keep every candle. See "Design Decisions".
 
-This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in `src/server/app-plugin.ts`, the pure algorithm in `src/domain/coin-scan.ts` and `src/domain/level-alert.ts`, and the UI in `src/ui/CoinScanPanel.tsx`.
+This contract covers `src/server/coin-scan-service.ts`, the `/api/scan` route in `src/server/scan-routes.ts`, the pure algorithm in `src/domain/coin-scan.ts` and `src/domain/level-alert.ts`, and the UI in `src/ui/CoinScanPanel.tsx`.
 
 ## 2. Signatures
 

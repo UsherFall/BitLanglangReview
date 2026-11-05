@@ -17,7 +17,7 @@ Guidance for `src/ui`, the React application, chart integration, and UI-facing h
 
 ## Layer Shape
 
-The frontend owns the reviewer experience and browser-only state. It imports domain types and pure helpers from `src/domain`, calls Vite middleware routes in `src/server/app-plugin.ts`, and renders charts through `lightweight-charts`.
+The frontend owns the reviewer experience and browser-only state. It imports domain types and pure helpers from `src/domain`, calls Vite middleware routes composed by `src/server/app-plugin.ts` and implemented in the domain `src/server/*-routes.ts` Modules, and renders charts through `lightweight-charts`.
 
 Representative files:
 

@@ -2,7 +2,21 @@
 
 ## Route Ownership
 
-`src/server/app-plugin.ts` registers the local JSON API through a Vite `Plugin` named `trading-review-api`. Keep route parsing and HTTP responses in this file; put reusable persistence or market-data behavior in store/service files.
+`src/server/app-plugin.ts` is the Vite construction/composition root for the `trading-review-api` Plugin. It constructs Stores/Services/Adapters and calls the workflow registration functions below; HTTP handlers live in those Modules, not as shadow handlers in the root. Reusable persistence or market-data behavior stays in store/service files.
+
+| Order | Registration | Workflow file |
+| --- | --- | --- |
+| 1–4 | `registerReviewRoutes` — trades, reviews, tag rename/delete | `review-routes.ts` |
+| 5 | `registerFreeReplayInstrumentRoutes` | `free-replay-routes.ts` |
+| 6 | `registerCandleRoutes` | `chart-routes.ts` |
+| 7 | `registerDrawingRoutes` | `chart-routes.ts` |
+| 8–9 | `registerFreeReplaySessionRoutes` — sessions + Paper Round Library | `free-replay-routes.ts` |
+| 10–12 | `registerScanRoutes` — scan/config, scan, market-heat | `scan-routes.ts` |
+| 13–15 | `registerBitgetRoutes` — config, sync, trades | `bitget-routes.ts` |
+
+Preserve this exact registration order. `/api/scan/config` MUST precede `/api/scan` because Connect matches prefixes. Split Replay/chart registration exists to preserve the old interleaving, not to create a second Router.
+
+`route-support.ts` owns only `send`, `readBody`, `toQueueOptions` and `tagPayload`. Dependencies enter each registration as an explicit object; Bitget key functions and sync-service creation are Adapters injected by the root so route tests never touch real keys or construct a network client.
 
 Current routes:
 
@@ -40,4 +54,6 @@ On server configuration, create `data/`, load trades once from the Source Workbo
 
 ## Tests
 
-App-level route behavior is covered indirectly by React tests and server service tests. When adding a route, prefer focused tests for parsing and behavior rather than broad end-to-end tests unless the route crosses several layers.
+`tests/route-test-utils.ts` captures `middlewares.use` registrations and invokes handlers with `Readable` requests plus a structural response. Use the focused `tests/*-routes.test.ts` suites for registration order, parsing, response composition and dependency wiring without booting Vite, loading a workbook, opening production SQLite or reading real Bitget keys.
+
+Required high-value anchors: review save + scoped tags, atomic Session DELETE cascade args, Candle 400 / Drawing board isolation, scan/config-before-scan + source parsing, and unconfigured Bitget queue / key validation. Existing service/store/domain tests still own deeper business rules; App-level React tests remain additional compatibility coverage, not a replacement for direct route tests.

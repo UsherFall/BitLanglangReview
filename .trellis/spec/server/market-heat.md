@@ -4,7 +4,7 @@
 
 The review detail header「热度」button opens a floating panel that answers "当时市场场子热不热" for a trade's entry/exit anchor. Historical tickers are never persisted, so the reading is computed from **candles around the anchor**, not from live ticker history.
 
-Covers `src/domain/market-heat.ts` (pure types/tier/normalizer/constants), `src/server/market-heat-service.ts`, the `GET /api/market-heat` route in `src/server/app-plugin.ts`, and `src/ui/MarketHeatPanel.tsx` (plus the `热度` toggle in the trade/bitget detail header in `App.tsx`).
+Covers `src/domain/market-heat.ts` (pure types/tier/normalizer/constants), `src/server/market-heat-service.ts`, the `GET /api/market-heat` route in `src/server/scan-routes.ts`, and `src/ui/MarketHeatPanel.tsx` (plus the `热度` toggle in the trade/bitget detail header in `App.tsx`).
 
 ## 2. Signatures
 
