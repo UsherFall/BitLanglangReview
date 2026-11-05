@@ -24,7 +24,8 @@
     "11-05-replay-candlestick-regression",
     "11-05-replay-session-lifecycle",
     "11-05-replay-session-delete-transaction",
-    "11-05-domain-workflow-routes"
+    "11-05-domain-workflow-routes",
+    "11-05-shared-candlestick-contracts"
   ],
   "parent": null,
   "relatedFiles": [],

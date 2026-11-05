@@ -23,7 +23,7 @@
 | 4 | 把 Free Replay Session 生命周期从 App 中深化为独立 Module | `archive/2026-11/11-05-replay-session-lifecycle` | Completed（commit `81896b4`） |
 | 5 | 让 Free Replay Session 与 Paper Round Review 的级联删除具备事务性 | `archive/2026-11/11-05-replay-session-delete-transaction` | Completed（commit `720367d`） |
 | 6 | 按领域工作流提取可独立测试的路由 Module，保留 Vite 组装根 | `archive/2026-11/11-05-domain-workflow-routes` | Completed（commit `9f771a2`） |
-| 7 | 把共享响应类型、nominal timeframe duration 与 Candlestick 合并规则移到中性纯 Module | 待子任务 6 验收后创建 | Not created |
+| 7 | 把共享响应类型、nominal timeframe duration 与 Candlestick 合并规则移到中性纯 Module | `archive/2026-11/11-05-shared-candlestick-contracts` | Completed（commit `4c78c8d`） |
 
 顺序是交付顺序，不表示任务树本身提供依赖。每个子任务必须在自己的 `prd.md` / `implement.md` 中写明真实依赖、兼容约束和独立验收方式。
 
