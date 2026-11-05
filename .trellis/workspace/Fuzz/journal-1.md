@@ -234,3 +234,31 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: 完成架构深化全部七项交付
+<!-- trellis-session: v=2 fp=dd6f9270d633fbd3 -->
+
+**Date**: 2026-11-05
+**Task**: 完成架构深化全部七项交付
+**Branch**: `feat/architecture-deepening`
+
+### Summary
+
+父架构任务 #1–#7 全部提交、验收并归档。新完成：Session 生命周期 hook（状态/自动保存/恢复/删除墓碑与 cursor commands，7 个直接测试）；真实 SQLite 同事务 Session+Paper Review 级联（触发器证明第二步失败会回滚）；15 个路由按工作流提取且保留 Vite 组装根/顺序和 Bitget Adapter 隔离；共享 Session/Trade/Paper 响应类型、nominal timeframeMs 与泛型 mergeCandles 收进纯 domain，Store 以显式泛型保留旧 JSON。此前 StrictMode K 线空白修复一并纳入父验收。最终 84 文件/725 可运行测试通过，tsc 与 CRLF-aware diff check 通过；原始 npm test 仍仅既有 level-alert-parity 缺 pool fixture 失败。无全局 store、通用 Router、ORM、依赖或 schema/data 迁移，相关 domain/frontend/server specs 均已更新，父任务集成证据落盘。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e627a6` | fix(replay): 统一行情源与 Candle Grid 上下文 |
+| `665ad0d` | refactor(replay): 收拢 Cursor 与 Focus 双数据集协议 |
+| `d4e55a1` | fix(replay): 修复 StrictMode 下 K 线空白 |
+| `81896b4` | refactor(replay): 收拢 Session 生命周期 |
+| `720367d` | fix(replay): 事务化会话级联删除 |
+| `9f771a2` | refactor(server): 按工作流收拢路由模块 |
+| `4c78c8d` | refactor(domain): 收拢共享响应与 Candlestick 契约 |
+
+### Status
+
+[OK] **Completed**
