@@ -16,6 +16,17 @@ type ReviewRow = {
   updated_at: string;
 };
 
+/**
+ * Deletes matching review ids on the caller's connection. Sharing this helper
+ * lets the Session cascade use one SQLite transaction without duplicating the
+ * LIKE wildcard / trailing-prefix contract.
+ */
+export function deleteReviewsByPrefix(db: Database.Database, prefix: string): number {
+  const escaped = prefix.replace(/[!%_]/g, (char) => `!${char}`);
+  const result = db.prepare("delete from trade_reviews where trade_id like ? escape '!'").run(`${escaped}%`);
+  return result.changes;
+}
+
 export class ReviewStore {
   private readonly db: Database.Database;
 
@@ -147,9 +158,7 @@ export class ReviewStore {
    * literally; `!` is the escape character (SQLite has no default).
    */
   deleteReviewsByPrefix(prefix: string): number {
-    const escaped = prefix.replace(/[!%_]/g, (char) => `!${char}`);
-    const result = this.db.prepare("delete from trade_reviews where trade_id like ? escape '!'").run(`${escaped}%`);
-    return result.changes;
+    return deleteReviewsByPrefix(this.db, prefix);
   }
 
   close(): void {

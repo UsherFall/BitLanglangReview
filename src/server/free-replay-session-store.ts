@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { deleteReviewsByPrefix } from './review-store';
 
 // The session payload is opaque JSON to the store: the server serializes the
 // frontend's FreeReplayStart + paper trading session without knowing their
@@ -142,6 +143,20 @@ export class FreeReplaySessionStore {
 
   deleteSession(instrument: string, startTime: string): void {
     this.db.prepare('delete from free_replay_sessions where instrument = ? and start_time = ?').run(instrument, startTime);
+  }
+
+  /**
+   * Deletes a Session and its Paper Round annotations atomically. Both stores
+   * normally own separate connections, so the cascade must run on THIS store's
+   * connection rather than calling ReviewStore's public delete method.
+   */
+  deleteSessionWithPaperReviews(instrument: string, startTime: string, paperReviewPrefix: string): { deletedReviews: number } {
+    const cascade = this.db.transaction((): { deletedReviews: number } => {
+      this.db.prepare('delete from free_replay_sessions where instrument = ? and start_time = ?').run(instrument, startTime);
+      const deletedReviews = deleteReviewsByPrefix(this.db, paperReviewPrefix);
+      return { deletedReviews };
+    });
+    return cascade();
   }
 
   close(): void {

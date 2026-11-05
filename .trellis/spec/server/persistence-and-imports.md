@@ -20,6 +20,30 @@ Use `tests/drawing-store.test.ts` when changing drawing save/list/delete behavio
 
 When the product requirement is to save Free Replay state, sessions keyed by the same instrument + start time overwrite rather than duplicate. Use `tests/free-replay-session-store.test.ts` when changing save/list/delete behavior.
 
+### Atomic Session + Paper Review Cascade
+
+`deleteSessionWithPaperReviews(instrument, startTime, paperReviewPrefix)` deletes `free_replay_sessions` and matching `trade_reviews` through the SessionStore's OWN `this.db.transaction`, returning `{ deletedReviews }`. The route must call this one method rather than deleting through two Store connections sequentially. A failure in either statement rolls both back and propagates; no false `{ ok: true }` is produced.
+
+`ReviewStore.deleteReviewsByPrefix(prefix)` delegates to the exported `deleteReviewsByPrefix(db, prefix)` helper. The Session cascade reuses that helper on the same connection, preserving `!` / `%` / `_` escaping and the caller's trailing `:` prefix. Do not copy the LIKE statement into SessionStore or expose the Store's private db for general cross-store transactions.
+
+| Condition | Required result |
+| --- | --- |
+| Both deletes succeed | Session + exactly its Paper Reviews commit; response count is the review changes |
+| Review deletion fails | Session deletion rolls back; all reviews remain |
+| Neighboring prefix / ordinary trade review | Retained |
+| Standalone session deletion | Existing `deleteSession` remains available and does not implicitly touch reviews |
+
+`tests/free-replay-session-delete-transaction.test.ts` uses a file-backed DB and a BEFORE DELETE trigger to force the review statement to fail, then asserts both datasets remain. The success case checks the exact target set and neighboring rows. `tests/review-store.test.ts` remains the wildcard/prefix compatibility gate.
+
+```ts
+// Wrong: two connections cannot provide one transaction.
+sessionStore.deleteSession(instrument, startTime);
+reviewStore.deleteReviewsByPrefix(prefix);
+
+// Correct: one SessionStore transaction, shared prefix SQL on its connection.
+sessionStore.deleteSessionWithPaperReviews(instrument, startTime, prefix);
+```
+
 ## Bitget Position Store And Keys
 
 `src/server/bitget-position-store.ts` caches raw Bitget history-position rows in `bitget_positions` on the same `data/review.sqlite` (own handle, WAL, raw SQL). It is a cache of the user's own account data, not an authoritative market archive.

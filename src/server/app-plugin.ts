@@ -334,13 +334,16 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
           if (!instrument || !startTime) {
             return send(res, 400, { error: 'instrument and startTime are required' });
           }
-          freeReplaySessionStore.deleteSession(instrument, startTime);
           // 11/04 cascade: a Round's market data lives only in the session
           // blob, so keeping its annotations would leave rows the library can
-          // never render. The prefix ENDS with ':' — matching on
-          // `paper:{instrument}:{startTime}` instead would also take down a
-          // session whose start time merely starts with the same digits.
-          const deletedReviews = reviewStore.deleteReviewsByPrefix(paperSessionReviewPrefix(instrument, startTime));
+          // never render. Both rows now commit on ONE SQLite connection — a
+          // review-delete failure rolls the session deletion back too. The
+          // prefix ENDS with ':' to protect prefix-sharing sessions.
+          const { deletedReviews } = freeReplaySessionStore.deleteSessionWithPaperReviews(
+            instrument,
+            startTime,
+            paperSessionReviewPrefix(instrument, startTime),
+          );
           return send(res, 200, { ok: true, deletedReviews });
         }
         return send(res, 405, { error: 'Method not allowed' });
