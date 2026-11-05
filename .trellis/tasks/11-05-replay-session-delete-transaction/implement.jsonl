@@ -1,0 +1,4 @@
+{"file":".trellis/spec/server/index.md","reason":"服务端层边界和验证入口。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"SessionStore、ReviewStore 和前缀删除契约。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对 Session→Paper Round→Review 持久化数据流。"}
+{"file":".trellis/tasks/11-05-replay-session-delete-transaction/research/current-state.md","reason":"跨连接原子性证据、边界与真实回滚实验。"}

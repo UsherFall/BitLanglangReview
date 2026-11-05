@@ -1,0 +1,4 @@
+{"file":".trellis/spec/server/index.md","reason":"服务端质量检查入口。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"检查事务归属、前缀匹配和 Store 兼容性。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查跨 Store 数据一致性。"}
+{"file":".trellis/tasks/11-05-replay-session-delete-transaction/research/current-state.md","reason":"对照原始非原子调用和回滚验收。"}
