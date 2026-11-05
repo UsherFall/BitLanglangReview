@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "11-05-replay-market-context"
+    "11-05-replay-market-context",
+    "11-05-free-replay-dataset"
   ],
   "parent": null,
   "relatedFiles": [],

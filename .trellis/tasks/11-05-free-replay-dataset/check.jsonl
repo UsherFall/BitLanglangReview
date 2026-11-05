@@ -1,0 +1,8 @@
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"检查订阅清理、effect 顺序、refs 生命周期和 pointer release 时序。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"检查 Cursor 与 Rendered 的 App 供给没有串线或形成双 owner。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"检查 Loader、快照、时间单位和 requestSource 类型安全。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"执行 Free Replay focused/full 质量门并检查旧断言未被放宽。"}
+{"file":".trellis/spec/domain/trade-and-review-model.md","reason":"检查 Candlestick、Paper Round 与 Review 行为未漂移。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查是否重复 merge/prefetch/source 规则或只做浅搬迁。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"按请求到 Dataset、Rendered、App 的路径检查跨层一致性。"}
+{"file":".trellis/tasks/11-05-free-replay-dataset/research/current-state.md","reason":"对照异步操作、竞态、历史决策和 Characterization Tests 审查最终 diff。"}

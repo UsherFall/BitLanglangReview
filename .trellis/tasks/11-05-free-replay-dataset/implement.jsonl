@@ -1,0 +1,11 @@
+{"file":".trellis/spec/frontend/index.md","reason":"确认前端职责、Dataset Module 的归属和验证入口。"}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"新增 framework-free UI helper、测试镜像与 domain 契约归属。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"迁移 refs/effects、订阅、过期响应和 pointer 事件时保持 chart 生命周期正确。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Cursor/Rendered 对 App 的供给、派生状态和禁止重复拥有规则。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Candlestick、requestSource、Loader Adapter 和不可变快照的类型约束。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Free Replay future、Focus、Timeframe、Paper Round 和完整验证要求。"}
+{"file":".trellis/spec/domain/index.md","reason":"共享类型保持纯 domain，Dataset 不得反向污染 domain。"}
+{"file":".trellis/spec/domain/trade-and-review-model.md","reason":"Candlestick 毫秒时间、Paper Round 标记与 Review 契约。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"复用 merge、prefetch、gap 与 chartMarketContext，避免第二套规则。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"追踪 Session source、Candlestick 请求、Dataset、Rendered 与 App 的跨层数据流。"}
+{"file":".trellis/tasks/11-05-free-replay-dataset/research/current-state.md","reason":"现有属主、异步操作、A/B 竞态证据、历史约束和 Characterization Tests。"}

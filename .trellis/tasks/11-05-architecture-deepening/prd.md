@@ -17,8 +17,8 @@
 
 | # | Deliverable | Task | State |
 | --- | --- | --- | --- |
-| 1 | 统一 Market Data Source、requestSource 与 Candle Grid 映射，修复 Free Replay Other Coin Panel 跨源风险 | `11-05-replay-market-context` | Planning |
-| 2 | 把 Free Replay Cursor / Focus 双数据集及加载协议收进独立 Module | 待子任务 1 验收后创建 | Not created |
+| 1 | 统一 Market Data Source、requestSource 与 Candle Grid 映射，修复 Free Replay Other Coin Panel 跨源风险 | `archive/2026-11/11-05-replay-market-context` | Completed（commit `9e627a6`） |
+| 2 | 把 Free Replay Cursor / Focus 双数据集及加载协议收进独立 Module | `11-05-free-replay-dataset` | Planning |
 | 3 | 把 Free Replay Session 生命周期从 App 中深化为独立 Module | 待子任务 2 验收后创建 | Not created |
 | 4 | 让 Free Replay Session 与 Paper Round Review 的级联删除具备事务性 | 待子任务 3 验收后创建 | Not created |
 | 5 | 按领域工作流提取可独立测试的路由 Module，保留 Vite 组装根 | 待子任务 4 验收后创建 | Not created |
