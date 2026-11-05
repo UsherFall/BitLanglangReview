@@ -1,37 +1,19 @@
 import Database from 'better-sqlite3';
+import type { ReplayCandleSource } from '../domain/candlestick';
+import type { FreeReplaySession, FreeReplaySessionPayload } from '../domain/free-replay-session';
 import { deleteReviewsByPrefix } from './review-store';
 
-// The session payload is opaque JSON to the store: the server serializes the
-// frontend's FreeReplayStart + paper trading session without knowing their
-// types, mirroring how chart drawing points are stored as points_json.
-export type FreeReplaySessionPayload = {
-  instrument: string;
-  /**
-   * Which venue's candles this session replays against (10/21).
-   *
-   * The Free Replay panel moved to the Bitget source, but the sessions stored
-   * BEFORE that move were recorded against Binance. The field is therefore
-   * OPTIONAL: an absent value means "the old behaviour" (Binance), so an old
-   * session keeps replaying exactly as it did instead of silently switching
-   * venues under the user's feet.
-   */
-  candleSource?: string;
-  startTime: string;
-  dataAnchorTime: string;
-  startCursorTime: number;
-  startProgressTime: number;
-  progressTime: number;
-  cursorTime: number;
-  timeframe: string;
-  paperTrading: unknown;
-  updatedAt: string;
-};
+export type { FreeReplaySessionPayload } from '../domain/free-replay-session';
 
-export type SaveFreeReplaySessionInput = Omit<FreeReplaySessionPayload, 'updatedAt'>;
+// The neutral domain owns the wire shape; paper_trading_json remains opaque
+// serialized JSON at the storage boundary, mirroring drawing points_json.
+export type SaveFreeReplaySessionInput = FreeReplaySessionPayload<unknown, string>;
+
+type StoredFreeReplaySession = FreeReplaySession<unknown, string>;
 
 type SessionRow = {
   instrument: string;
-  candle_source: string | null;
+  candle_source: ReplayCandleSource | null;
   start_time: string;
   timeframe: string;
   data_anchor_time: string;
@@ -101,12 +83,12 @@ export class FreeReplaySessionStore {
     `);
   }
 
-  listSessions(): FreeReplaySessionPayload[] {
+  listSessions(): StoredFreeReplaySession[] {
     const rows = this.db.prepare('select * from free_replay_sessions order by updated_at desc').all() as SessionRow[];
     return rows.map(toSessionPayload);
   }
 
-  saveSession(input: SaveFreeReplaySessionInput): FreeReplaySessionPayload {
+  saveSession(input: SaveFreeReplaySessionInput): StoredFreeReplaySession {
     const updatedAt = new Date().toISOString();
     this.db
       .prepare(
@@ -164,7 +146,7 @@ export class FreeReplaySessionStore {
   }
 }
 
-function toSessionPayload(row: SessionRow): FreeReplaySessionPayload {
+function toSessionPayload(row: SessionRow): StoredFreeReplaySession {
   return {
     instrument: row.instrument,
     candleSource: row.candle_source ?? undefined,

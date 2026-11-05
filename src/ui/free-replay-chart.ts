@@ -89,13 +89,7 @@ export function replayRequestInstrument(instrument: string, routeSource: string)
   return okxInstrumentToBitgetSymbol(instrument) ?? instrument;
 }
 
-/**
- * Merges candlestick pages by timestamp (last write wins) and sorts them.
- * One implementation shared by the chart and the Free Replay Dataset.
- */
-export function mergeCandles(candles: Candlestick[]): Candlestick[] {
-  return [...new Map(candles.map((candle) => [candle.timestamp, candle])).values()].sort((a, b) => a.timestamp - b.timestamp);
-}
+export { mergeCandles } from '../domain/candlestick';
 
 export function visibleCandlesForFreeReplay(candles: Candlestick[], cursorTime: number): Candlestick[] {
   const cursorTimestamp = cursorTime * 1000;

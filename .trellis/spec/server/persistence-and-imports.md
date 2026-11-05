@@ -16,7 +16,7 @@ Use `tests/drawing-store.test.ts` when changing drawing save/list/delete behavio
 
 ## Free Replay Session Store
 
-`src/server/free-replay-session-store.ts` persists Free Replay sessions in `free_replay_sessions`. It enables SQLite WAL mode and shares the same `data/review.sqlite` file as the other stores. Upsert key is `(instrument, start_time)`; the payload is stored as opaque JSON in `paper_trading_json`, with `updated_at` written by the server so history sorts deterministically.
+`src/server/free-replay-session-store.ts` persists Free Replay sessions in `free_replay_sessions`. It enables SQLite WAL mode and shares the same `data/review.sqlite` file as the other stores. Upsert key is `(instrument, start_time)`; the payload is stored as opaque JSON in `paper_trading_json`, with `updated_at` written by the server so history sorts deterministically. Shared wire/storage types live in `src/domain/free-replay-session.ts`: save/list use the explicit `<unknown, string>` legacy Adapter, while saved results are `FreeReplaySession` rows carrying `updatedAt`; UI uses the strict default generics.
 
 When the product requirement is to save Free Replay state, sessions keyed by the same instrument + start time overwrite rather than duplicate. Use `tests/free-replay-session-store.test.ts` when changing save/list/delete behavior.
 

@@ -4,7 +4,9 @@
 
 `src/domain/build-review-queue.ts` is the authoritative place for applying Review Queue filters, attaching reviews, and sorting trades. Do not duplicate this behavior in React components or server route handlers.
 
-The Vite middleware in `src/server/app-plugin.ts` should parse URL query parameters into `ReviewQueueOptions` and call `buildReviewQueue(trades, reviewStore.listReviews(), options)`.
+The Vite handlers in `src/server/review-routes.ts` and `bitget-routes.ts` parse URL query parameters into `ReviewQueueOptions` and call `buildReviewQueue(trades, reviewStore.listReviews(), options)`.
+
+`TradeResponse` in `src/domain/review-queue.ts` is the shared `/api/trades` and `/api/bitget/trades` response used by both those routes and App state. Keep `configured?: boolean` optional and Bitget-specific; do not recreate a UI-local response type.
 
 ## Filtering Rules
 

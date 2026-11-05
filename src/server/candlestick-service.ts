@@ -1,8 +1,10 @@
-import type { Candlestick } from '../domain/candlestick';
+import { timeframeMs, type Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { CandlestickStore } from './candlestick-store';
 import { defaultFetchJson, type FetchJson } from './http';
 import type { CandleRequest, CandleSource } from './market-data';
+
+export { timeframeMs } from '../domain/candlestick';
 
 type Request = CandleRequest;
 
@@ -117,18 +119,4 @@ function toCandlestick(instrument: string, timeframe: ReviewTimeframe, row: stri
     close: Number(row[4]),
     volume: Number(row[5] ?? 0),
   };
-}
-
-export function timeframeMs(timeframe: ReviewTimeframe): number {
-  const map: Record<ReviewTimeframe, number> = {
-    '1m': 60_000,
-    '5m': 5 * 60_000,
-    '15m': 15 * 60_000,
-    '1H': 60 * 60_000,
-    '4H': 4 * 60 * 60_000,
-    '1D': 24 * 60 * 60_000,
-    '1W': 7 * 24 * 60 * 60_000,
-    '1M': 30 * 24 * 60 * 60_000,
-  };
-  return map[timeframe];
 }

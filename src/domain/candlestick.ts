@@ -41,3 +41,26 @@ export type Candlestick = {
   close: number;
   volume: number;
 };
+
+/**
+ * Nominal duration of one Review Timeframe in milliseconds. `1M` is 30 DAYS,
+ * not a calendar-month or exchange closed-bar rule; venue grid code owns those.
+ */
+export function timeframeMs(timeframe: ReviewTimeframe): number {
+  const map: Record<ReviewTimeframe, number> = {
+    '1m': 60_000,
+    '5m': 5 * 60_000,
+    '15m': 15 * 60_000,
+    '1H': 60 * 60_000,
+    '4H': 4 * 60 * 60_000,
+    '1D': 24 * 60 * 60_000,
+    '1W': 7 * 24 * 60 * 60_000,
+    '1M': 30 * 24 * 60 * 60_000,
+  };
+  return map[timeframe];
+}
+
+/** Merge pages by timestamp (last write wins), returning ascending candles. */
+export function mergeCandles<T extends { timestamp: number }>(candles: readonly T[]): T[] {
+  return [...new Map(candles.map((candle) => [candle.timestamp, candle])).values()].sort((a, b) => a.timestamp - b.timestamp);
+}

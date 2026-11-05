@@ -4,6 +4,8 @@ import {
   isPaperReviewId,
   type PaperRound,
   type PaperRoundFilters,
+  type PaperRoundLibraryResponse,
+  type PaperRoundSessionRow,
 } from '../domain/paper-round';
 import { normalizePaperTrades } from '../domain/paper-trading';
 import type { TradeReview } from '../domain/review';
@@ -12,24 +14,10 @@ import type { TradeReview } from '../domain/review';
  * One replay session with at least one closed Paper Round — the library's
  * 「来源会话」 filter options.
  */
-export type PaperRoundSession = {
-  instrument: string;
-  startTime: string;
-  updatedAt: string;
-  roundCount: number;
-};
+export type PaperRoundSession = PaperRoundSessionRow;
 
-export type PaperRoundLibrary = {
-  rounds: PaperRound[];
-  sessions: PaperRoundSession[];
-  /**
-   * EVERY paper-scoped review, including those of rounds the library does not
-   * list (a still-open round's partial fills are annotatable in the replay but
-   * never appear as library rows). The client seeds its annotation cache from
-   * this, so restoring a session keeps annotations on the open round too.
-   */
-  reviews: TradeReview[];
-};
+/** Derivation always returns every review; API tags/counts are added downstream. */
+export type PaperRoundLibrary = Pick<Required<PaperRoundLibraryResponse>, 'rounds' | 'sessions' | 'reviews'>;
 
 /**
  * Builds the Paper Round library from the persisted sessions plus the saved

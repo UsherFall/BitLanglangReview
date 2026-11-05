@@ -2,60 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import flatpickr from 'flatpickr';
 import 'flatpickr/dist/themes/dark.css';
 import { ChevronDown, ChevronUp, Star, Trash2 } from 'lucide-react';
-import { paperSessionKey, type PaperRound } from '../domain/paper-round';
+import { paperSessionKey, type PaperRound, type PaperRoundLibraryResponse, type PaperRoundSessionRow } from '../domain/paper-round';
+import type { FreeReplaySession, FreeReplaySessionPayload, FreeReplayStart } from '../domain/free-replay-session';
 import type { ReplayCandleSource } from '../domain/candlestick';
 import type { TradeReview } from '../domain/review';
 import type { ReviewTimeframe } from '../domain/trade';
 import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
 import { FREE_REPLAY_CANDLE_SOURCE, REPLAY_SOURCE_LABELS, replayCandleGrid } from './free-replay-chart';
-import type { PaperTradingSession } from './free-replay-paper-trading';
 import { PaperRoundReviewEditor, type PaperReviewSavedPayload } from './PaperRoundReviewEditor';
 import type { TagMutation } from './ReviewEditor';
 
+export type { FreeReplaySession, FreeReplaySessionPayload, FreeReplayStart } from '../domain/free-replay-session';
+export type { PaperRoundLibraryResponse, PaperRoundSessionRow } from '../domain/paper-round';
+
 type InstrumentResponse = {
   instruments: string[];
-};
-
-/** One session that holds at least one closed Paper Round (library filter option). */
-export type PaperRoundSessionRow = {
-  instrument: string;
-  startTime: string;
-  updatedAt: string;
-  roundCount: number;
-};
-
-/** `GET /api/paper/rounds` answer. */
-export type PaperRoundLibraryResponse = {
-  rounds: PaperRound[];
-  sessions: PaperRoundSessionRow[];
-  tags: string[];
-  tagCounts: Record<string, number>;
-  /** Every paper-scoped review, including open-round ones the list omits. */
-  reviews?: TradeReview[];
-};
-
-export type FreeReplayStart = {
-  /**
-   * Which venue's candles this replay reads (10/21). Optional: a session
-   * recorded before the move has none and keeps its original venue.
-   */
-  candleSource?: ReplayCandleSource;
-  instrument: string;
-  startTime: string;
-  dataAnchorTime: string;
-  startCursorTime: number;
-  startProgressTime: number;
-  progressTime: number;
-  cursorTime: number;
-};
-
-export type FreeReplaySessionPayload = FreeReplayStart & {
-  timeframe: ReviewTimeframe;
-  paperTrading: PaperTradingSession;
-};
-
-export type FreeReplaySession = FreeReplaySessionPayload & {
-  updatedAt: string;
 };
 
 export function FreeReplayPanel({

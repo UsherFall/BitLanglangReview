@@ -42,6 +42,24 @@ export type PaperRound = {
   review?: TradeReview;
 };
 
+/** One source-session option in the Paper Round Library filter. */
+export type PaperRoundSessionRow = {
+  instrument: string;
+  startTime: string;
+  updatedAt: string;
+  roundCount: number;
+};
+
+/** Shared `/api/paper/rounds` response and the UI's client-side snapshot. */
+export type PaperRoundLibraryResponse = {
+  rounds: PaperRound[];
+  sessions: PaperRoundSessionRow[];
+  tags: string[];
+  tagCounts: Record<string, number>;
+  /** Every paper review, including open rounds omitted from `rounds`. */
+  reviews?: TradeReview[];
+};
+
 /**
  * The round's review id: `paper:{instrument}:{startTime}:{positionId}`.
  *

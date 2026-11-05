@@ -2,6 +2,7 @@ import type { ViteDevServer } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
 import { scopeReviewsToTrades, type TradeReview } from '../domain/review';
 import type { Trade } from '../domain/trade';
+import type { TradeResponse } from '../domain/review-queue';
 import type { ReviewStore } from './review-store';
 import { readBody, send, tagPayload, toQueueOptions } from './route-support';
 
@@ -20,11 +21,12 @@ export function registerReviewRoutes(server: ViteDevServer, deps: ReviewRoutesDe
     const options = toQueueOptions(url.searchParams);
     const reviews = reviewStore.listReviews();
     const scopedReviews = scopeReviewsToTrades(reviews, trades.map((trade) => trade.id));
-    send(res, 200, {
+    const response: TradeResponse = {
       trades: buildReviewQueue(trades, reviews, options),
       instruments: [...new Set(trades.map((trade) => trade.instrument))].sort(),
       ...tagPayload(reviewStore, scopedReviews),
-    });
+    };
+    send(res, 200, response);
   });
 
   server.middlewares.use('/api/reviews', async (req, res) => {

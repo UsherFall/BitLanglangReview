@@ -1,4 +1,4 @@
-import type { Candlestick } from '../domain/candlestick';
+import { mergeCandles, type Candlestick } from '../domain/candlestick';
 import { okxInstrumentToBitgetSymbol, resolveCandleChain } from '../domain/instrument-symbol';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { CandleSource } from './market-data';
@@ -177,8 +177,4 @@ export async function getCandlesForMode(input: {
   const earlier = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry, direction: 'earlier', limit: 150, allowPaging: input.allowPaging });
   const later = await input.candleSource.getCandlesticks({ instrument: input.instrument, timeframe: input.timeframe, anchor: entry - 1, direction: 'later', limit: 150, allowPaging: input.allowPaging });
   return mergeCandles([...earlier, ...later]);
-}
-
-function mergeCandles<T extends { timestamp: number }>(candles: T[]): T[] {
-  return [...new Map(candles.map((candle) => [candle.timestamp, candle])).values()].sort((a, b) => a.timestamp - b.timestamp);
 }

@@ -2,6 +2,7 @@ import type { ViteDevServer } from 'vite';
 import { buildReviewQueue } from '../domain/build-review-queue';
 import { ordersForRound } from '../domain/bitget-round-orders';
 import { scopeReviewsToTrades, type TradeReview } from '../domain/review';
+import type { TradeResponse } from '../domain/review-queue';
 import type { BitgetKeyConfig } from './bitget-keys';
 import { attachRoundOrders, historyPositionToTrade, toClosedRound } from './bitget-import';
 import type { BitgetPositionStore } from './bitget-position-store';
@@ -94,12 +95,13 @@ export function registerBitgetRoutes(server: ViteDevServer, deps: BitgetRoutesDe
         : [];
       const queue = buildReviewQueue(trades, reviews, options);
       const scopedReviews = scopeReviewsToTrades(reviews, trades.map((trade) => trade.id));
-      send(res, 200, {
+      const response: TradeResponse = {
         trades: queue,
         instruments: [...new Set(trades.map((trade) => trade.instrument))].sort(),
         configured,
         ...tagPayload(reviewStore, scopedReviews),
-      });
+      };
+      send(res, 200, response);
     } catch (error) {
       send(res, 502, { error: error instanceof Error ? error.message : 'Failed to load Bitget trades' });
     }

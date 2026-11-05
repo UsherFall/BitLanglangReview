@@ -8,6 +8,7 @@ Guidance for pure business types and helpers under `src/domain`.
 | --- | --- |
 | [Trade And Review Model](./trade-and-review-model.md) | Changing trades, reviews, drawings, candlesticks, or review timeframes |
 | [Review Queue](./review-queue.md) | Changing queue filtering, sorting, or reviewed status rules |
+| [Shared Contracts](./shared-contracts.md) | Changing Session/API response types, nominal timeframe duration, or timestamp merge |
 
 ## Scope
 
@@ -22,4 +23,5 @@ Representative files:
 - `src/domain/candlestick.ts`
 - `src/domain/drawing.ts`
 - `src/domain/paper-trading.ts` (paper data types + `normalizePaperTrade`, shared with the server)
-- `src/domain/paper-round.ts` (Paper Round grouping / ids / filters)
+- `src/domain/paper-round.ts` (Paper Round grouping / ids / filters / library response)
+- `src/domain/free-replay-session.ts` (shared Session wire/storage types)

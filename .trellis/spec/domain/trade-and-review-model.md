@@ -49,7 +49,7 @@ A Trade ID is a stable SHA-256 identifier. Workbook-sourced IDs are created by `
 
 ### 5. Good/Base/Bad Cases
 
-- Good: Add a new Review Timeframe by updating domain union, ordered array, UI `timeframeMs`, server `timeframeMs`, and tests together.
+- Good: Add a new Review Timeframe by updating the domain union, ordered array, `domain/candlestick.ts` `timeframeMs`, re-export Adapters, and tests together.
 - Base: Existing rows without a favorite marker read as `{ starred: false }`.
 - Bad: Adding a Review Store field only to React state without SQLite migration loses data on refresh.
 
@@ -88,7 +88,7 @@ A **Paper Round** (one paper position in a Free Replay, open → fully closed) i
 
 ## Candlestick And Drawing Contracts
 
-`src/domain/candlestick.ts` keeps market candles as millisecond timestamps with OHLCV fields and a `ReviewTimeframe`. Chart code converts to seconds only at the `lightweight-charts` boundary.
+`src/domain/candlestick.ts` keeps market candles as millisecond timestamps with OHLCV fields and a `ReviewTimeframe`. Chart code converts to seconds only at the `lightweight-charts` boundary. The same neutral Module owns `timeframeMs` (nominal duration only) and generic `mergeCandles` (timestamp last-write-wins + ascending); see `shared-contracts.md`.
 
 `src/domain/drawing.ts` defines instrument-level Chart Drawings. Drawings have `horizontal`, `ray`, or `segment` kind and price/time points. Every drawing carries a **`board`** (`'scan' | 'review'`, 10/26): the 选品 level drawer stamps `scan`, the review/replay charts stamp `review`. A drawing is displayed by Instrument (canonical-matched) across trades and Review Timeframes **within its board only** — the boards never show each other's lines, and the 选品 scan measures only the `scan` board (see `server/coin-scan.md`). The store migration defaults legacy rows to `'review'` and re-homes the post-10/21 native-symbol no-trade rows (the level drawer's output) to `'scan'`.
 

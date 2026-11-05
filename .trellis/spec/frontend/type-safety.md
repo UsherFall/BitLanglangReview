@@ -6,17 +6,19 @@ Domain types are defined in `src/domain` and should be imported into UI and serv
 
 - `Trade`, `Direction`, `ReviewTimeframe`, and `reviewTimeframes` in `src/domain/trade.ts`.
 - `TradeReview` in `src/domain/review.ts`.
-- `ReviewedTrade`, `ReviewQueueOptions`, and sort types in `src/domain/review-queue.ts`.
-- `Candlestick` in `src/domain/candlestick.ts`.
+- `ReviewedTrade`, `ReviewQueueOptions`, `TradeResponse`, and sort types in `src/domain/review-queue.ts`.
+- `FreeReplayStart`, `FreeReplaySessionPayload`, and `FreeReplaySession` in `src/domain/free-replay-session.ts`.
+- `PaperRoundLibraryResponse` in `src/domain/paper-round.ts`.
+- `Candlestick`, `timeframeMs`, and `mergeCandles` in `src/domain/candlestick.ts`.
 - `ChartDrawing`, `ChartPoint`, and `SaveChartDrawingInput` in `src/domain/drawing.ts`.
 
-UI-local payload types are acceptable at the API boundary when the server returns a composed payload. `TradeResponse` in `App.tsx` and `InstrumentResponse` in `FreeReplayPanel.tsx` are examples.
+Shared response types belong in `src/domain`, not parallel UI/Server declarations. UI-local payload types are acceptable only for a genuinely UI-only shape such as `InstrumentResponse` in `FreeReplayPanel.tsx`.
 
 ## Runtime Validation
 
 There is no schema validation library. Runtime validation happens manually at boundaries:
 
-- `src/server/app-plugin.ts` checks required query fields and `reviewTimeframes.includes(timeframe)` before loading candles.
+- `src/server/chart-routes.ts` checks required query fields and `reviewTimeframes.includes(timeframe)` before loading candles; other `*-routes.ts` handlers validate their own boundaries.
 - `src/server/trade-import.ts` converts workbook rows with `toString`, `toNumber`, `toDirection`, and `toShanghaiIso`, returning `null` for incomplete rows.
 - UI code treats API responses as typed after `response.json()`, so server route tests are important when changing payloads.
 

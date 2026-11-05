@@ -1,6 +1,8 @@
 import type { Time, UTCTimestamp } from 'lightweight-charts';
-import type { Candlestick } from '../domain/candlestick';
+import { timeframeMs, type Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
+
+export { timeframeMs } from '../domain/candlestick';
 
 /**
  * Which exchange's daily boundary the review timeframes follow.
@@ -89,20 +91,6 @@ export function entryVisibleRange(entryTime: string, timeframe: ReviewTimeframe,
     from: Math.floor((snappedEntry - timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
     to: Math.floor((snappedEntry + timeframeMs(timeframe) * 150) / 1000) as UTCTimestamp,
   };
-}
-
-export function timeframeMs(timeframe: ReviewTimeframe): number {
-  const map: Record<ReviewTimeframe, number> = {
-    '1m': 60_000,
-    '5m': 5 * 60_000,
-    '15m': 15 * 60_000,
-    '1H': 60 * 60_000,
-    '4H': 4 * 60 * 60_000,
-    '1D': 24 * 60 * 60_000,
-    '1W': 7 * 24 * 60 * 60_000,
-    '1M': 30 * 24 * 60 * 60_000,
-  };
-  return map[timeframe];
 }
 
 export function formatChartTime(time: Time, timeframe: ReviewTimeframe): string {

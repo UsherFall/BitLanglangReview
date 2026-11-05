@@ -1,7 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, type IChartApi, type ISeriesApi, type LogicalRange, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Candlestick, ChartCandleSource } from '../domain/candlestick';
+import { mergeCandles, type Candlestick, type ChartCandleSource } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { canonicalInstrument } from '../domain/instrument-symbol';
@@ -497,8 +497,4 @@ function currentVisibleRange(chart: IChartApi): VisibleTimeRange | null {
   const from = Number(visible.from);
   const to = Number(visible.to);
   return Number.isFinite(from) && Number.isFinite(to) && to > from ? { from, to } : null;
-}
-
-function mergeCandles(candles: Candlestick[]): Candlestick[] {
-  return [...new Map(candles.map((candle) => [candle.timestamp, candle])).values()].sort((a, b) => a.timestamp - b.timestamp);
 }

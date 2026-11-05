@@ -6,7 +6,8 @@ import type { ScanResponse } from '../domain/coin-scan';
 import { DEFAULT_MARKET_DATA_SOURCE, type MarketDataSource, type ScanScope } from '../domain/scan-scope';
 import type { ChartDrawing, ChartPoint } from '../domain/drawing';
 import type { TradeReview } from '../domain/review';
-import type { ReviewedTrade, ReviewQueueOptions, SortField } from '../domain/review-queue';
+import type { ReviewedTrade, ReviewQueueOptions, SortField, TradeResponse } from '../domain/review-queue';
+import type { FreeReplayStart } from '../domain/free-replay-session';
 import { reviewTimeframes, type ReviewTimeframe } from '../domain/trade';
 import { isSameVisibleRange, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange } from './chart-navigation-anchor';
@@ -23,7 +24,7 @@ import { useChartDrawings } from './chart-drawing';
 import { HeatScanResults } from './HeatScanResults';
 import { BoxScanResults } from './BoxScanResults';
 import { BitgetControlBar } from './BitgetControlBar';
-import { FreeReplayPanel, type FreeReplayStart } from './FreeReplayPanel';
+import { FreeReplayPanel } from './FreeReplayPanel';
 import { LeaderCoinPanel } from './LeaderCoinPanel';
 import { MarketHeatPanel } from './MarketHeatPanel';
 import { OtherCoinChart } from './OtherCoinChart';
@@ -55,24 +56,13 @@ import {
   type PaperTradingSession,
 } from './free-replay-paper-trading';
 import { ReviewEditor, type ReviewModule, type SavedReviewPayload, type TagMutation } from './ReviewEditor';
-import { paperRoundReviewId, paperSessionReviewPrefix, type PaperRound, type PaperRoundFilters } from '../domain/paper-round';
+import { paperRoundReviewId, paperSessionReviewPrefix, type PaperRound, type PaperRoundFilters, type PaperRoundLibraryResponse } from '../domain/paper-round';
 import { rewritePaperReviewTags, type PaperReviewMap } from './paper-review-state';
 import { PaperRoundReviewEditor, type PaperReviewSavedPayload } from './PaperRoundReviewEditor';
-import type { PaperRoundLibraryResponse, PaperRoundSessionRow } from './FreeReplayPanel';
 import { firstUnreviewedTrade, reviewProgress } from './review-progress';
 import { TradeMarkerPrimitive } from './trade-marker-primitive';
 import { allTradeChartPoints, tradeChartPoints, type MarkerPoint } from './trade-markers';
 import { createTradeMarkerTooltip, type TradeMarkerTooltip, type TooltipData } from './trade-marker-tooltip';
-
-type TradeResponse = {
-  trades: ReviewedTrade[];
-  instruments: string[];
-  tags: string[];
-  /** How many trades carry each tag. Drives the "N 笔" hint in the tag dropdown. */
-  tagCounts: Record<string, number>;
-  /** Present on the Bitget source; false until keys are configured. */
-  configured?: boolean;
-};
 
 
 

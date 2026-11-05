@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
-import type { FreeReplaySession, FreeReplaySessionPayload, FreeReplayStart } from './FreeReplayPanel';
+import type { FreeReplaySession, FreeReplaySessionPayload, FreeReplayStart } from '../domain/free-replay-session';
 import { freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch } from './chart-time';
 import { LEGACY_REPLAY_CANDLE_SOURCE, nextFreeReplayProgress, previousFreeReplayProgress, replayCandleGrid } from './free-replay-chart';
 import {
