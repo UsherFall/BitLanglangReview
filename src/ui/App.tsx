@@ -1578,8 +1578,14 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const historyBackfillVisibleBarsRef = useRef<number | null>(null);
   const historyBackfillKeyRef = useRef('');
   const previousRangeKeyRef = useRef('');
-  const [dataset] = useState(() => new FreeReplayDataset());
-  const [snapshot, setSnapshot] = useState(() => dataset.getSnapshot());
+  const datasetRef = useRef<FreeReplayDataset | null>(null);
+  // React state starts with an immutable empty snapshot; the subscription
+  // effect below owns the actual Dataset instance and its loader lifecycle.
+  const [snapshot, setSnapshot] = useState(() => new FreeReplayDataset().getSnapshot());
+  const onCandlesLoadedRef = useRef(onCandlesLoaded);
+  const onActiveCandlesLoadedRef = useRef(onActiveCandlesLoaded);
+  onCandlesLoadedRef.current = onCandlesLoaded;
+  onActiveCandlesLoadedRef.current = onActiveCandlesLoaded;
   const { cursorCandles, activeCandles, renderedCandles, loading } = snapshot;
   const [priceScaleMode, setPriceScaleMode] = useState<ChartPriceScaleMode>(PriceScaleMode.Logarithmic);
   const [hoverPercentage, setHoverPercentage] = useState<number | null>(null);
@@ -1659,27 +1665,30 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   const market = chartMarketContext(replayCandleSource(replay));
   const requestInstrument = replayRequestInstrument(replay.instrument, market.requestSource);
 
-  // One Dataset per mounted chart. The subscription mirrors its cached snapshot
-  // into React; the Module itself never creates a new object without a
-  // transition, so this cannot render-loop.
+  // The subscription effect owns the Dataset lifecycle. StrictMode replays
+  // setup → cleanup → setup, so each setup must have a fresh instance rather
+  // than reuse one permanently disposed by the first cleanup.
   useEffect(() => {
+    const dataset = new FreeReplayDataset();
+    datasetRef.current = dataset;
     let previous = dataset.getSnapshot();
     setSnapshot(previous);
     // Forward the two published datasets from the LISTENER (not from an effect):
     // App's reveal handler reads `freeReplayCandles` in the same async turn the
     // load resolves, and an extra render hop would make a click race the cursor
-    // advance.
+    // advance. Latest-value callback refs keep this subscription mount-only.
     const unsubscribe = dataset.subscribe((next) => {
-      if (next.cursorCandles !== previous.cursorCandles) onCandlesLoaded(next.cursorCandles);
-      if (next.renderedCandles !== previous.renderedCandles) onActiveCandlesLoaded(next.renderedCandles);
+      if (next.cursorCandles !== previous.cursorCandles) onCandlesLoadedRef.current(next.cursorCandles);
+      if (next.renderedCandles !== previous.renderedCandles) onActiveCandlesLoadedRef.current(next.renderedCandles);
       previous = next;
       setSnapshot(next);
     });
     return () => {
       unsubscribe();
       dataset.dispose();
+      if (datasetRef.current === dataset) datasetRef.current = null;
     };
-  }, [dataset, onCandlesLoaded, onActiveCandlesLoaded]);
+  }, []);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -1752,6 +1761,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }, [priceScaleMode]);
 
   useEffect(() => {
+    const dataset = datasetRef.current;
+    if (!dataset) return;
     const chart = chartApiRef.current;
     const previousRangeKey = previousRangeKeyRef.current;
     if (previousRangeKey && previousRangeKey !== rangeKey && chart) {
@@ -1780,7 +1791,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       dataAnchorTime: replay.dataAnchorTime,
       requestSource: market.requestSource,
     });
-  }, [replay.instrument, replay.startTime, replay.dataAnchorTime, replay.candleSource, timeframe, requestInstrument, rangeKey, dataset, market.requestSource]);
+  }, [replay.instrument, replay.startTime, replay.dataAnchorTime, replay.candleSource, timeframe, requestInstrument, rangeKey, market.requestSource]);
 
   // 10-30 退出焦点：Dataset 把活动数据集切回游标数据集（步进/开平仓/点持仓行/
   // 会话操作都会清 orderFocus 走到这）。游标缺失或跨 rangeKey 时 Dataset 自己
@@ -1794,8 +1805,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     appliedFocusKeyRef.current = '';
     historyBackfillVisibleBarsRef.current = null;
     historyBackfillKeyRef.current = '';
-    void dataset.syncFocus(null);
-  }, [focusRequest, snapshot.focusActive, timeframe, rangeKey, dataset]);
+    void datasetRef.current?.syncFocus(null);
+  }, [focusRequest, snapshot.focusActive, timeframe, rangeKey]);
 
   useEffect(() => {
     if (!pointerRef.current.inside) return;
@@ -1810,11 +1821,15 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     const handleRelease = () => {
       if (!pointerDownRef.current) return;
       pointerDownRef.current = false;
+      const dataset = datasetRef.current;
+      if (!dataset) return;
       dataset.setPointerDown(false);
       window.setTimeout(() => dataset.flushDeferredRender(), 0);
     };
     const handleBlur = () => {
       pointerDownRef.current = false;
+      const dataset = datasetRef.current;
+      if (!dataset) return;
       dataset.setPointerDown(false);
       dataset.flushDeferredRender();
     };
@@ -1889,8 +1904,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }, [focusRequest]);
 
   useEffect(() => {
-    dataset.syncCursor(replay.cursorTime);
-  }, [replay.cursorTime, dataset]);
+    datasetRef.current?.syncCursor(replay.cursorTime);
+  }, [replay.cursorTime]);
 
 
   useEffect(() => {
@@ -1914,8 +1929,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     const key = `${rangeKey}:${visibleBars}:${first}`;
     if (historyBackfillKeyRef.current === key) return;
     historyBackfillKeyRef.current = key;
-    void dataset.loadEarlier();
-  }, [activeCandles, renderedCandles, replay.cursorTime, replay.candleSource, rangeKey, loading.earlier, snapshot.focusActive, dataset]);
+    void datasetRef.current?.loadEarlier();
+  }, [activeCandles, renderedCandles, replay.cursorTime, replay.candleSource, rangeKey, loading.earlier, snapshot.focusActive]);
 
   // Cursor follow effect: keep the reveal cursor VISIBLE — nothing more.
   //
@@ -1969,6 +1984,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     const chart = chartApiRef.current;
     if (!chart || !focusRequest) return;
     const focusKey = `${rangeKey}:${focusRequest.token}`;
+    const dataset = datasetRef.current;
+    if (!dataset) return;
     // Intent-level command: same focusKey is a no-op inside the Dataset.
     void dataset.syncFocus(focusRequest);
     if (appliedFocusKeyRef.current === focusKey) return;
@@ -1991,7 +2008,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     window.setTimeout(() => {
       suppressAutoLoadRef.current = false;
     }, 0);
-  }, [focusRequest, activeCandles, cursorCandles, snapshot.focusKey, snapshot.focusSettled, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey, dataset, market.grid]);
+  }, [focusRequest, activeCandles, cursorCandles, snapshot.focusKey, snapshot.focusSettled, replay.instrument, replay.startTime, replay.candleSource, timeframe, rangeKey, market.grid]);
 
   // 10/30 回到光标：开平仓提交/点持仓行后，视口主动跳回光标（光标右侧留 10
   // 根缓冲，与初始锚定同一函数）。每个令牌只消费一次 —— 切周期不重新消费，
@@ -2034,8 +2051,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     const healKey = `${rangeKey}:${gap.from}:${gap.to}`;
     if (gapHealKeyRef.current === healKey) return;
     gapHealKeyRef.current = healKey;
-    void dataset.healGap(gap);
-  }, [activeCandles, renderedCandles, replay.cursorTime, replay.candleSource, timeframe, rangeKey, loading.window, dataset]);
+    void datasetRef.current?.healGap(gap);
+  }, [activeCandles, renderedCandles, replay.cursorTime, replay.candleSource, timeframe, rangeKey, loading.window]);
 
   useEffect(() => {
     const chart = chartApiRef.current;
@@ -2048,7 +2065,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       if (!Number.isFinite(logicalRange.from) || !Number.isFinite(logicalRange.to)) return;
       if (shouldLoadEarlierByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadEarlierRangeRef.current, logicalRange)) {
         lastLoadEarlierRangeRef.current = logicalRange;
-        void dataset.loadEarlier();
+        void datasetRef.current?.loadEarlier();
         return;
       }
       // R4（10-30）：焦点态向右平移从焦点窗口右缘继续加载更晚 K 线；非焦点态
@@ -2057,19 +2074,19 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       // 蜡烛全是未揭示未来，渲染数组永不增长，翻页只会请求风暴 —— 不翻。
       if (snapshot.focusActive && shouldLoadLaterFocusCandles(activeCandles, laterGateBoundaryRef.current) && shouldLoadLaterByLogicalRange(series, logicalRange) && !isSameVisibleRange(lastLoadLaterRangeRef.current, logicalRange)) {
         lastLoadLaterRangeRef.current = logicalRange;
-        void dataset.loadLater();
+        void datasetRef.current?.loadLater();
       }
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handler);
     return () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(handler);
-  }, [activeCandles, replay.instrument, replay.startTime, replay.candleSource, timeframe, snapshot.focusActive, dataset]);
+  }, [activeCandles, replay.instrument, replay.startTime, replay.candleSource, timeframe, snapshot.focusActive]);
 
   useEffect(() => {
     // 焦点态不预取：Dataset 内部也有同一道闸（焦点窗口是静态的开仓点±150 根，
     // 预取追游标是错目标）。非焦点态的游标预取保持「已加载未揭示」。
     if (snapshot.focusActive) return;
-    void dataset.prefetchFuture(replay.cursorTime);
-  }, [cursorCandles, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, futureRetryToken, requestInstrument, snapshot.focusActive, dataset]);
+    void datasetRef.current?.prefetchFuture(replay.cursorTime);
+  }, [cursorCandles, replay.cursorTime, replay.instrument, replay.startTime, replay.candleSource, timeframe, futureRetryToken, requestInstrument, snapshot.focusActive]);
 
   /** 光标锚定视口：光标右侧留 10 根缓冲（初始锚定与「回到光标」共用）。 */
   function anchorViewportToCursor(fallbackRange: { from: UTCTimestamp; to: UTCTimestamp }) {
@@ -2121,7 +2138,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   }
 
   return (
-    <div className="chart-wrap" onPointerDown={() => { pointerDownRef.current = true; dataset.setPointerDown(true); }} onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
+    <div className="chart-wrap" onPointerDown={() => { pointerDownRef.current = true; datasetRef.current?.setPointerDown(true); }} onPointerMove={(event) => { pointerRef.current = { inside: true, x: event.clientX, y: event.clientY }; updateHoverPercentage(event.clientY); }} onPointerLeave={() => { pointerRef.current.inside = false; setHoverPercentage(null); }}>
       {drawings.toolbar}
       {hoverPercentage !== null && <div className="hover-price-percentage">{formatHoverPricePercentage(hoverPercentage)}</div>}
       <div ref={chartRef} className="chart" />

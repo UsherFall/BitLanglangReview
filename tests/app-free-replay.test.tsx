@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/ui/App';
 
@@ -122,6 +123,25 @@ describe('App Free Replay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
+  });
+
+  it('keeps initial candles visible through StrictMode effect replay', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => Response.json({ candles: [
+        makeCandle('2024-05-21T09:55:00+08:00'),
+        makeCandle('2024-05-21T10:00:00+08:00'),
+        makeCandle('2024-05-21T10:05:00+08:00'),
+      ] }),
+    });
+
+    render(<StrictMode><App /></StrictMode>);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:07' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'BTCUSDT' })).toBeInTheDocument());
+    await waitFor(() => expect(lastSetDataRealTimes().length).toBeGreaterThan(0));
   });
 
   it('collapses the whole sidebar via the explicit collapse button', async () => {

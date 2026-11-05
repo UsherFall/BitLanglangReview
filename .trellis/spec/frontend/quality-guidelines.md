@@ -21,6 +21,7 @@ When changing trade review charts, verify:
 
 When changing Free Replay, verify:
 
+- The production-entry `<StrictMode>` initial mount renders real Candlesticks; effect replay must not reuse a Dataset disposed by the first cleanup.
 - Future candlesticks remain hidden until reveal.
 - Rewind cannot move before the start progress, and cannot move AT ALL while `paperTrading.active` (11/03: button + keyboard ← both locked, function-level guard in `rewindFreeReplayCandle`).
 - The 焦点单 pre-entry view (剪刀按钮, 11/03) keeps the two boundaries straight: render/magnet filter strictly below `positionOpenTime` (the candle OPENING at `positionOpenTime` is already the future), later-paging gate one step earlier than that (no request storm), auto-resets on focus exit, and never leaks into the session save payload.

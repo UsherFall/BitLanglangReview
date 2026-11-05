@@ -54,6 +54,7 @@ The chart mirrors the snapshot into React state through ONE mount-only subscript
 7. **Render protocol.** Prefetch installs into Cursor with `loaded` only (no Rendered change); `syncCursor` later publishes Active as Rendered. Later/Gap are append-type: during pointerdown they update Active + `pendingRender` and never call `setData`; `flushDeferredRender` publishes once. Earlier and whole-window Focus publish immediately.
 8. **Snapshot stability.** `getSnapshot()` returns the same object until an actual transition; arrays are never mutated in place; one listener call per transition.
 9. **No framework.** The Module imports no React, DOM, lightweight-charts, Session Store or `App.tsx`.
+10. **Effect-owned lifecycle.** `FreeReplayChart`'s mount-only subscription effect creates a fresh Dataset on every setup and disposes that same instance on cleanup. The current instance lives in a ref; every command reads it at execution time. StrictMode effect replay must never reuse the instance disposed by the first cleanup, and latest callback refs must not trigger owner recreation.
 
 ## Validation & Error Matrix
 
@@ -85,6 +86,7 @@ Moving the cursor (`syncCursor`) publishes `activeCandles` as `renderedCandles` 
 - **Bad:** guarding only initial loads while Earlier/Later/Prefetch/Gap skip the generation check.
 - **Bad:** calling `setData` for a Later/Gap page while the pointer is down.
 - **Bad:** caching a snapshot that mutates its arrays in place (React subscription loops).
+- **Bad:** storing one Dataset in render-scoped state while the subscription cleanup disposes it; StrictMode's second setup then issues no load and the chart stays blank.
 
 ## Tests Required
 
@@ -103,7 +105,7 @@ Moving the cursor (`syncCursor`) publishes `activeCandles` as `renderedCandles` 
 11. full request matrix (instrument, timeframe, entryTime, mode, anchor, source);
 12. snapshot stability / notification count.
 
-`tests/app-free-replay.test.tsx` remains the characterization suite for first anchor, comfort-zone follow, focus paging, deferred render, future hiding, paper rounds and timeframe switch. Do not weaken it.
+`tests/app-free-replay.test.tsx` remains the characterization suite for first anchor, comfort-zone follow, focus paging, deferred render, future hiding, paper rounds and timeframe switch. Do not weaken it. Its production-entry `<StrictMode>` initial-mount case must assert that real OHLC points reach the latest `series.setData`; Dataset unit tests and non-StrictMode App tests do not cover effect replay disposal.
 
 ## Wrong vs Correct
 

@@ -11,6 +11,33 @@ Examples:
 - `src/ui/FreeReplayPanel.tsx` fetches instruments once and creates the `flatpickr` instance once.
 - Chart effects in `src/ui/App.tsx` subscribe to lightweight-charts events and clean up subscriptions on unmount.
 
+## Disposable Owners And StrictMode
+
+When an effect cleanup calls `dispose()` / `destroy()` on a stateful owner, that SAME effect setup must create a fresh owner. React StrictMode replays `setup → cleanup → setup` in development; an owner retained in render-scoped `useState` / `useRef` remains disposed on the second setup.
+
+```ts
+// Wrong: the second StrictMode setup reuses a disposed owner.
+const [owner] = useState(() => new Dataset());
+useEffect(() => () => owner.dispose(), [owner]);
+
+// Correct: creation and disposal share one effect lifecycle.
+const ownerRef = useRef<Dataset | null>(null);
+useEffect(() => {
+  const owner = new Dataset();
+  ownerRef.current = owner;
+  const unsubscribe = owner.subscribe(handleSnapshot);
+  return () => {
+    unsubscribe();
+    owner.dispose();
+    if (ownerRef.current === owner) ownerRef.current = null;
+  };
+}, []);
+```
+
+Command effects and event handlers must read `ownerRef.current` when they execute instead of capturing the old owner. Use latest-value callback refs when changing a callback prop must not recreate the owner. Declare the owning/subscription effect before effects that issue commands to it.
+
+Do not “fix” this by removing StrictMode, skipping real cleanup, delaying disposal with a timer, or making a disposed owner reusable. Add a characterization test through the production `<StrictMode>` wrapper and assert the externally visible result (for a chart, real OHLC points in `series.setData`), not merely that no exception was thrown.
+
 ## Refs Versus State
 
 Use refs for mutable integration state that should not re-render the tree on every pointer move or chart event: chart APIs, series APIs, loaded candle arrays, pending render flags, active drag state, pointer location, and debounce timers.
