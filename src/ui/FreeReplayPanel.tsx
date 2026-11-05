@@ -3,10 +3,11 @@ import flatpickr from 'flatpickr';
 import 'flatpickr/dist/themes/dark.css';
 import { ChevronDown, ChevronUp, Star, Trash2 } from 'lucide-react';
 import { paperSessionKey, type PaperRound } from '../domain/paper-round';
+import type { ReplayCandleSource } from '../domain/candlestick';
 import type { TradeReview } from '../domain/review';
 import type { ReviewTimeframe } from '../domain/trade';
 import { freeReplayCursorTimeForProgress, freeReplayProgressTimeForStart } from './chart-time';
-import { FREE_REPLAY_CANDLE_SOURCE, REPLAY_SOURCE_LABELS, replayCandleGrid, type ReplayCandleSource } from './free-replay-chart';
+import { FREE_REPLAY_CANDLE_SOURCE, REPLAY_SOURCE_LABELS, replayCandleGrid } from './free-replay-chart';
 import type { PaperTradingSession } from './free-replay-paper-trading';
 import { PaperRoundReviewEditor, type PaperReviewSavedPayload } from './PaperRoundReviewEditor';
 import type { TagMutation } from './ReviewEditor';
@@ -38,7 +39,7 @@ export type FreeReplayStart = {
    * Which venue's candles this replay reads (10/21). Optional: a session
    * recorded before the move has none and keeps its original venue.
    */
-  candleSource?: string;
+  candleSource?: ReplayCandleSource;
   instrument: string;
   startTime: string;
   dataAnchorTime: string;

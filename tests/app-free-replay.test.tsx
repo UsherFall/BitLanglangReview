@@ -1821,6 +1821,74 @@ describe('App Free Replay', () => {
     }
   });
 
+  // 11/05：恢复的会话必须是面板的唯一真相。面板曾用 `replayCandleSource(null)`
+  // 猜源 → 默认 Bitget：OKX / 旧 Binance 会话的主图对、其他币面板错，仪表盘
+  // 的日界也跟着错。四条路径都要钉住（Bitget 为不变对照组）。
+  it('makes the other-coin panel inherit the restored session source and grid', async () => {
+    const cases = [
+      { label: 'OKX', instrument: 'BTC-USDT-SWAP', candleSource: 'okx' as const, requestSource: 'okx', venue: 'okx' },
+      { label: 'Bitget', instrument: 'BTCUSDT', candleSource: 'bitget' as const, requestSource: 'bitget', venue: 'bitget' },
+      { label: 'explicit binance-only', instrument: 'BTCUSDT', candleSource: 'binance-only' as const, requestSource: 'binance-only', venue: 'binance' },
+      { label: 'legacy session without a source', instrument: 'BTCUSDT', candleSource: undefined, requestSource: 'binance-only', venue: 'binance' },
+    ];
+
+    for (const testCase of cases) {
+      const seeded = [{ ...makeSeededSession(), instrument: testCase.instrument, ...(testCase.candleSource ? { candleSource: testCase.candleSource } : {}) }];
+      const candleSources: string[] = [];
+      const listSources: string[] = [];
+
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
+        if (url.startsWith('/api/free-replay/instruments')) {
+          listSources.push(new URL(`http://localhost${url}`).searchParams.get('source') ?? '');
+          return new Response(JSON.stringify({ instruments: ['BTCUSDT', 'BTC-USDT-SWAP'] }));
+        }
+        if (url.startsWith('/api/free-replay/sessions')) {
+          if (init?.method === 'PUT') return new Response(JSON.stringify({ ...JSON.parse(String(init.body)), updatedAt: '2024-05-21T12:00:00+08:00' }));
+          if (init?.method === 'DELETE') return new Response(JSON.stringify({ ok: true }));
+          return new Response(JSON.stringify({ sessions: seeded }));
+        }
+        if (url.startsWith('/api/drawings')) return new Response(JSON.stringify({ drawings: [] }));
+        if (url.startsWith('/api/candles')) {
+          candleSources.push(new URL(`http://localhost${url}`).searchParams.get('source') ?? '');
+          return new Response(JSON.stringify({ candles: [makeCandle('2024-05-21T09:55:00+08:00'), makeCandle('2024-05-21T10:00:00+08:00')] }));
+        }
+        return new Response(JSON.stringify({}));
+      }));
+
+      const { unmount } = render(<App />);
+
+      fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+      await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+
+      const restoreRow = await screen.findByRole('button', { name: new RegExp(`^${testCase.instrument}`) });
+      fireEvent.click(restoreRow);
+      await waitFor(() => expect(screen.getByRole('heading', { name: testCase.instrument })).toBeInTheDocument());
+
+      // Main chart: every candle request carries the session's request source.
+      await waitFor(() => expect(candleSources.length).toBeGreaterThan(0));
+      for (const source of candleSources) expect(source).toBe(testCase.requestSource);
+
+      const listsBefore = listSources.length;
+      const candlesBefore = candleSources.length;
+
+      fireEvent.click(screen.getByRole('button', { name: '其他币' }));
+
+      // Only requests issued AFTER the panel opens decide the panel's source.
+      await waitFor(() => expect(listSources.length).toBeGreaterThan(listsBefore));
+      expect(listSources.slice(listsBefore)[0]).toBe(testCase.venue);
+      await waitFor(() => expect(candleSources.length).toBeGreaterThan(candlesBefore));
+      for (const source of candleSources.slice(candlesBefore)) expect(source).toBe(testCase.requestSource);
+      // No default-source request may sneak in beside a non-Bitget session.
+      if (testCase.requestSource !== 'bitget') {
+        expect(listSources.slice(listsBefore)).not.toContain('bitget');
+        expect(candleSources.slice(candlesBefore)).not.toContain('bitget');
+      }
+
+      unmount();
+    }
+  });
+
   // 10/29 R1：面板分 Tab。默认落在「操作」；已完成交易行只在「单子」Tab。
   it('splits the paper trading panel into 操作/单子 tabs', async () => {
     stubFreeReplayFetch({

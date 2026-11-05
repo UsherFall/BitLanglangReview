@@ -1,6 +1,7 @@
-import type { Candlestick } from '../domain/candlestick';
+import type { Candlestick, ReplayCandleSource } from '../domain/candlestick';
 import { okxInstrumentToBitgetSymbol, usdtSymbolToOkxInstrument } from '../domain/instrument-symbol';
 import type { ReviewTimeframe } from '../domain/trade';
+import { chartMarketContext } from './chart-market-context';
 import type { CandleGrid } from './chart-time';
 import { freeReplayCandleCompletionTime, timeframeMs } from './chart-time';
 
@@ -22,16 +23,10 @@ import { freeReplayCandleCompletionTime, timeframeMs } from './chart-time';
  * replaying against Binance - the venue is a property of the SESSION, not a
  * global setting.
  */
-export const FREE_REPLAY_CANDLE_SOURCE = 'bitget';
-export const FREE_REPLAY_CANDLE_GRID: CandleGrid = 'shanghai';
-
-/**
- * A Free Replay session's recorded candle source (11/02). `binance-only` is the
- * strict Binance venue Free Replay has always used for its「币安」option; `okx`
- * and `bitget` are the other two selectable sources. This is the ROUTE's
- * vocabulary — it is stored verbatim in the session and sent as `source=`.
- */
-export type ReplayCandleSource = 'binance-only' | 'okx' | 'bitget';
+export const FREE_REPLAY_CANDLE_SOURCE: ReplayCandleSource = 'bitget';
+// 11/05: derived from the ONE chart market mapping so a Session's grid and the
+// Other Coin Panel's grid cannot drift apart.
+export const FREE_REPLAY_CANDLE_GRID: CandleGrid = chartMarketContext(FREE_REPLAY_CANDLE_SOURCE).grid;
 
 /** The UI-facing source list, in display order (选品同款词汇). */
 export const REPLAY_SOURCE_LABELS: Record<ReplayCandleSource, string> = {
@@ -47,8 +42,8 @@ export const REPLAY_SOURCE_LABELS: Record<ReplayCandleSource, string> = {
  * on Binance, so it must stay there: switching it to Bitget would move the
  * candlesticks under a replay the user already has progress in.
  */
-export const LEGACY_REPLAY_CANDLE_SOURCE = 'binance-only';
-export const LEGACY_REPLAY_CANDLE_GRID: CandleGrid = 'utc';
+export const LEGACY_REPLAY_CANDLE_SOURCE: ReplayCandleSource = 'binance-only';
+export const LEGACY_REPLAY_CANDLE_GRID: CandleGrid = chartMarketContext(LEGACY_REPLAY_CANDLE_SOURCE).grid;
 
 /**
  * The source and grid of ONE replay session.
@@ -63,22 +58,20 @@ export const LEGACY_REPLAY_CANDLE_GRID: CandleGrid = 'utc';
  * not 00:00 Beijing — a 1D/1W/1M reveal window on a restored legacy session
  * floored to the wrong day boundary.
  */
-export function replayCandleSource(session: { candleSource?: string } | null | undefined): string {
+export function replayCandleSource(session: { candleSource?: ReplayCandleSource } | null | undefined): ReplayCandleSource {
   // A session that names its venue uses it; a session recorded before the
-  // move keeps Binance; and a caller with NO session at all (the replay's
-  // other-coin panel) uses the CURRENT default.
+  // move keeps Binance; and a caller with NO session at all (standalone chart
+  // usage) uses the CURRENT default. The App passes the real Session source to
+  // the replay's other-coin panel, so this default no longer decides a Session.
   if (session && session.candleSource) return session.candleSource;
   if (session) return LEGACY_REPLAY_CANDLE_SOURCE;
   return FREE_REPLAY_CANDLE_SOURCE;
 }
 
-export function replayCandleGrid(session: { candleSource?: string } | null | undefined): CandleGrid {
-  // 无会话（其他币面板）→ 当前默认源的日界；有会话 → 按源值映射（未记录 = 旧
-  // Binance 会话，恢复路径会把 null 改写成 'binance-only'，按值映射两者一致）。
-  if (!session) return FREE_REPLAY_CANDLE_GRID;
-  const source = session.candleSource ?? LEGACY_REPLAY_CANDLE_SOURCE;
-  // Binance opens a day at 00:00Z; OKX and Bitget at 00:00 Beijing.
-  return source === 'binance-only' ? LEGACY_REPLAY_CANDLE_GRID : FREE_REPLAY_CANDLE_GRID;
+export function replayCandleGrid(session: { candleSource?: ReplayCandleSource } | null | undefined): CandleGrid {
+  // Delegate to the SAME mapping the charts use. 无会话 → 当前默认源的日界；有会话
+  // （含恢复路径把 null 改写成 'binance-only'）→ 一律按源值映射。
+  return chartMarketContext(replayCandleSource(session)).grid;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { CandlestickSeries, ColorType, createChart, CrosshairMode, type IChartApi, type ISeriesApi, type LogicalRange, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { Search, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Candlestick, CandleSourceId } from '../domain/candlestick';
+import type { Candlestick, ChartCandleSource } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { canonicalInstrument } from '../domain/instrument-symbol';
@@ -9,8 +9,9 @@ import type { DrawingBoard } from '../domain/drawing';
 import { useChartDrawings } from './chart-drawing';
 import { isSameVisibleRange, shouldLoadEarlier, shouldLoadLater, type VisibleTimeRange } from './chart-autoload';
 import { formatChartPrice } from './chart-price';
-import { entryVisibleRange, formatChartTime, markerTimeForEvent, timeframeMs, type CandleGrid } from './chart-time';
-import { LEGACY_REPLAY_CANDLE_GRID, replayCandleSource, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
+import { entryVisibleRange, formatChartTime, markerTimeForEvent, timeframeMs } from './chart-time';
+import { chartMarketContext } from './chart-market-context';
+import { FREE_REPLAY_CANDLE_SOURCE, shouldPrefetchFutureCandles, visibleCandlesForFreeReplay } from './free-replay-chart';
 
 // Opening instrument, per source: the panel must start on a symbol its own
 // source can resolve, or the first render asks for a contract that venue does
@@ -23,7 +24,7 @@ type InstrumentResponse = {
 
 type LoadDirection = 'earlier' | 'later';
 
-export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource = 'okx', initialInstrument, drawable = false, board = 'review', onClose }: {
+export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource, initialInstrument, drawable = false, board = 'review', onClose }: {
   entryTime: string;
   timeframe: ReviewTimeframe;
   /**
@@ -34,13 +35,22 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
    */
   cursorTime?: number;
   /**
-   * Which venue to read this panel's candlesticks from. It must match the
+   * Which source to read this panel's candlesticks from. It must match the
    * chart this panel sits beside: the venues do not share prices (QNT trades
    * near 263 on Binance and near 46 on OKX) and they cut the day differently, so
    * a mismatched panel would contradict the main chart it is meant to compare
-   * against. Defaults to OKX, the trade-review source.
+   * against.
+   *
+   * 11/05: the App passes the active Free Replay Session's source explicitly.
+   * Without a prop, a standalone replay panel uses the current default source
+   * and a non-Replay panel uses OKX (the trade-review source).
+   *
+   * `binance` and `binance-only` are NOT interchangeable: they share the
+   * Binance venue and UTC day grid, but `binance` still asks the candidate
+   * chain while `binance-only` asks strict Binance. Only a Session that
+   * recorded `binance-only` sends the latter.
    */
-  candleSource?: CandleSourceId;
+  candleSource?: ChartCandleSource;
   /**
    * The instrument to show when the panel opens. The 选品 list uses it to send
    * the user straight to the coin they picked ("去画线"). When the symbol is
@@ -70,26 +80,16 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
   onClose: () => void;
 }) {
   const isReplay = cursorTime != null;
-  // Venue and grid travel together: a request to one venue floored on the
-  // other's grid lands between candlesticks.
+  // ONE mapping owns venue / requestSource / grid (11/05). Venue and grid
+  // travel together: a request to one venue floored on the other's grid lands
+  // between candlesticks.
   //
-  // 10/21: the panel reads the venue it is TOLD to. Before, a replay forced
-  // `binance` and every other mode was ignored - so the replay's own venue
-  // (Bitget) could not be honoured, and a `source=bitget` panel silently read
-  // Binance instead. The replay's venue comes from the session (see
-  // `replayCandleSource`); a plain panel just uses the caller's `candleSource`.
-  // A replay panel is not told a venue by the caller - it inherits the
-  // session's (10/21). The `candleSource` prop defaults to OKX, so it cannot
-  // be the fallback here: the replay's own source is the only correct answer.
-  const venue: CandleSourceId = isReplay
-    ? (replayCandleSource(null) as CandleSourceId)
-    : candleSource;
-  const grid: CandleGrid = venue === 'binance' ? LEGACY_REPLAY_CANDLE_GRID : 'shanghai';
-  // The panel picks from a venue-specific instrument list, so it always knows
-  // the native symbol already and never needs the candidate chain - that chain
-  // exists to translate a *trade's* OKX-style name, and it returns an empty
-  // window for a Binance symbol.
-  const requestSource = venue;
+  // 10/21: the panel reads the venue it is TOLD to. The App tells a replay
+  // panel the active Session's source; a standalone replay panel falls back to
+  // the current default, and a plain panel keeps the OKX trade-review default.
+  // The panel never guesses the Session on its own: it has no Session to read.
+  const source: ChartCandleSource = candleSource ?? (isReplay ? FREE_REPLAY_CANDLE_SOURCE : 'okx');
+  const { venue, requestSource, grid } = chartMarketContext(source);
   const chartRef = useRef<HTMLDivElement>(null);
   const chartWrapRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
@@ -224,9 +224,12 @@ export function OtherCoinChart({ entryTime, timeframe, cursorTime, candleSource 
   // window. Replay: the anchor is the cursor, which moves on every reveal —
   // folding it into the key would re-download the whole window each step, so
   // the key covers only the instrument and the timeframe, and the moving anchor
-  // is read through `entryTimeRef` at load time. The venue belongs in the key
-  // because it decides which exchange the cached bars came from.
-  const anchorKey = `${venue}:${isReplay ? `${instrument}:${timeframe}` : `${instrument}:${timeframe}:${entryTime}`}`;
+  // is read through `entryTimeRef` at load time. The REQUEST SOURCE belongs in
+  // the key, not just the venue: `binance` and `binance-only` share the Binance
+  // venue but are different `/api/candles` policies, so a policy change must
+  // discard the old window. requestSource also still distinguishes every venue
+  // change, and keeps `venue` owned by the Instrument List vocabulary alone.
+  const anchorKey = `${requestSource}:${isReplay ? `${instrument}:${timeframe}` : `${instrument}:${timeframe}:${entryTime}`}`;
 
   useEffect(() => {
     const key = anchorKey;

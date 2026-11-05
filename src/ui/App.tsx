@@ -13,6 +13,7 @@ import { visibleRangeForAnchor, type NavigationAnchor, type NumericVisibleRange 
 import { formatChartPrice } from './chart-price';
 import { applyChartPriceScaleMode, resetChartPriceScale, type ChartPriceScaleMode } from './chart-scale';
 import { containingCandleTimestamp, entryVisibleRange, formatChartTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, timeframeMs, timeframeTimeForPoint } from './chart-time';
+import { chartMarketContext } from './chart-market-context';
 import { cursorAnchoredLogicalRange, cursorAnchoredTimeRange, visibleBarCountForLogicalRange, visibleBarCountForWidth } from './chart-time-scale';
 import { fetchCandles, ServerCandleError } from './candle-fetch';
 import { candlestickAtTime, formatCandlestickPrice, formatHoverPricePercentage, hoverPricePercentage } from './candlestick-readout';
@@ -1105,6 +1106,11 @@ export function App() {
                   entryTime={new Date(freeReplay.cursorTime * 1000).toISOString()}
                   timeframe={timeframe}
                   cursorTime={freeReplay.cursorTime}
+                  // 11/05: the panel inherits THIS session's source (venue,
+                  // request policy and day grid). Without it the panel fell
+                  // back to the default Bitget and contradicted an OKX /
+                  // legacy-Binance replay.
+                  candleSource={replayCandleSource(freeReplay)}
                   onClose={() => setOtherCoinOpen(false)}
                 />
               </div>
@@ -1687,7 +1693,11 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   // rangeKey 去重的初始化/跟随/回填都要重新来过；请求标的按当前源词汇翻译
   //（会话 instrument 保持创建时写法，会话键不变）。
   const rangeKey = `${replay.instrument}:${replay.startTime}:${timeframe}:${replay.candleSource ?? ''}`;
-  const requestInstrument = replayRequestInstrument(replay.instrument, replayCandleSource(replay));
+  // 11/05: ONE mapping owns the request source and the day grid. `market` is
+  // derived per render, so effects below depend on `rangeKey` / the primitive
+  // Session keys — never on this fresh object.
+  const market = chartMarketContext(replayCandleSource(replay));
+  const requestInstrument = replayRequestInstrument(replay.instrument, market.requestSource);
   // 最新 rangeKey 的同步镜像：异步取数落地时按它识别「取完已经切了周期/会话」的过期响应。
   rangeKeyRef.current = rangeKey;
   cursorTimeRef.current = replay.cursorTime;
@@ -2052,7 +2062,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       // 取窗失败/空：贴游标数据集最早边（活动数据集从未离开游标窗口）。
       : (cursorCandlesRef.current[0]?.timestamp ?? focusRequest.timeMs);
     appliedFocusKeyRef.current = focusKey;
-    const range = entryVisibleRange(new Date(anchorMs).toISOString(), timeframe, replayCandleGrid(replay));
+    const range = entryVisibleRange(new Date(anchorMs).toISOString(), timeframe, market.grid);
     suppressAutoLoadRef.current = true;
     chart.timeScale().setVisibleRange(range as { from: UTCTimestamp; to: UTCTimestamp });
     window.setTimeout(() => {
@@ -2147,7 +2157,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       entryTime: replay.startTime,
       mode: 'later',
       anchor: String(last.timestamp),
-      source: replayCandleSource(replay),
+      source: market.requestSource,
     });
     fetchCandles(params)
       .then((candles) => {
@@ -2186,7 +2196,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       anchor: String(anchor),
       // 10/30: 会话自带的 venue 必须跟随每一个翻页请求 —— 硬编码会把旧会话
       // （binance-only）的翻页数据混进 Bitget 的价，违反 10/21 契约。
-      source: replayCandleSource(replay),
+      source: market.requestSource,
     });
     try {
       const candles = await fetchCandles(params);
@@ -2216,7 +2226,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       entryTime: replay.startTime,
       mode: 'later',
       anchor: String(anchor),
-      source: replayCandleSource(replay),
+      source: market.requestSource,
     });
     try {
       const candles = await fetchCandles(params);
@@ -2260,7 +2270,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
       timeframe,
       entryTime: entryTimeISO,
       mode: 'initial',
-      source: replayCandleSource(replay),
+      source: market.requestSource,
     });
     return fetchCandles(params);
   }
@@ -2274,7 +2284,7 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
     if (cursorInitialKeyRef.current === rangeKey) return;
     cursorInitialKeyRef.current = rangeKey;
     const fetchRangeKey = rangeKey;
-    const params = new URLSearchParams({ instrument: requestInstrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: replayCandleSource(replay) });
+    const params = new URLSearchParams({ instrument: requestInstrument, timeframe, entryTime: replay.dataAnchorTime, mode: 'initial', source: market.requestSource });
     try {
       const candles = await fetchCandles(params);
       if (rangeKeyRef.current !== fetchRangeKey) return;

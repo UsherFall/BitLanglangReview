@@ -1,0 +1,28 @@
+{
+  "id": "architecture-deepening",
+  "name": "architecture-deepening",
+  "title": "架构深化：复盘与行情上下文",
+  "description": "按独立交付项逐步加深复盘、图表、行情上下文与持久化模块，保持现有行为并提升可测试性。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "UsherFall",
+  "assignee": "UsherFall",
+  "createdAt": "2026-11-05",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "11-05-replay-market-context"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

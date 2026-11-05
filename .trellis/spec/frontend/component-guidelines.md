@@ -35,23 +35,81 @@ Important local patterns:
 - `FreeReplayPaperTradingPanel` is remounted per session (`key={`${instrument}:${startTime}`}`, 11/02): the orders/position lists are prop-driven, but panel-LOCAL state (active tab, direction, limit inputs, close ratio) must not leak across sessions — the 11/02 complaint "切换会话后单子 Tab 没跟着变" is the regression this pins.
 - `OtherCoinChart` (其他币) marks the active trade's entry candle with a faint vertical reference line (`.other-coin-marker-overlay`, no label). It maps the entry event to a candle with `markerTimeForEvent(entryTime, timeframe, loadedCandles)` then to an x coordinate with `chart.timeScale().timeToCoordinate(...)`; the line only renders when that coordinate is non-null (entry candle loaded and on-scale). Because `autoSize` fires no logical-range event, the x must be recomputed on: initial load and `loadMore` (after `setVisibleRange`, in a `requestAnimationFrame`), the `subscribeVisibleLogicalRangeChange` handler (before the `suppressAutoLoadRef` early return, so programmatic range changes count), a `ResizeObserver` on the chart wrap, and a reset to `null` when `instrument`/`timeframe` change.
 
-### Every screen reads its candles from its own venue (10/21)
+### Every screen reads its candles from its own venue (10/21 / 11/05)
+
+#### 1. Scope / Trigger
+
+Use this contract whenever adding or changing a chart source, a Free Replay Session source, or an Other Coin Panel.
 
 `CandleSourceId` is `'okx' | 'binance' | 'bitget'`, and the venue decides the day boundary (`CandleGrid`): Binance opens a day at 00:00Z (`utc`), OKX and Bitget at 00:00 Beijing (`shanghai`). A request sent to one venue while flooring times on the other's grid lands between candlesticks, so **venue and grid always travel together**.
 
+#### 2. Signatures
+
+**One mapping owns venue / requestSource / grid (11/05).** `chartMarketContext(source: ChartCandleSource): ChartMarketContext` in `src/ui/chart-market-context.ts` is the ONLY source → (`venue`, `requestSource`, `grid`) table. `venue` is the instrument-list vocabulary; `requestSource` is the `/api/candles?source=` policy; `grid` is the candle day boundary. Never re-derive any of the three with a local ternary.
+
+#### 3. Contracts
+
+| source | venue | requestSource | grid |
+| --- | --- | --- | --- |
+| `binance` | `binance` | `binance` | `utc` |
+| `binance-only` | `binance` | `binance-only` | `utc` |
+| `okx` | `okx` | `okx` | `shanghai` |
+| `bitget` | `bitget` | `bitget` | `shanghai` |
+
+- **`binance` and `binance-only` are NOT interchangeable.** Same venue and grid, different request policies (candidate chain vs. strict Binance). Only a Session that recorded `binance-only` sends it; non-Replay `candleSource="binance"` callers keep the candidate chain, and `/api/free-replay/instruments` must always receive the `venue`, never `binance-only`.
 - The 选品 scan's level drawer draws on a chart of the **same venue the scan used** (`App` owns `scanSource`; the panel reports its venue through `onSourceChange`). The line's price and the scan's candles then share one basis, and the cross-venue rescale stays a fallback.
 - The Bitget-sourced review modes (回溯复盘, 个人交割单复盘) read Bitget candles. The Bitget positions' entry prices come from Bitget, so the candles must too.
 - **A replay session records its own venue** (`free_replay_sessions.candle_source`, optional). A session recorded before the move has none and keeps replaying against Binance — the venue is a property of the SESSION, not a global setting, and a session the user already has progress in must not be moved under their feet.
-- `OtherCoinChart` reads the venue it is TOLD. It used to hard-code Binance for the replay and ignore the prop everywhere else, which made a `source=bitget` panel silently read Binance.
+- **`OtherCoinChart` reads the source it is TOLD, and the App must tell it the active Session's source (11/05).** The replay's 其他币 panel used to call `replayCandleSource(null)` and silently fall back to the default Bitget, so an OKX or legacy-Binance session rendered two different venues' prices and day grids on one screen. `App` now passes `candleSource={replayCandleSource(freeReplay)}`; the panel only defaults on its own for standalone usage (replay → current default source, non-Replay → OKX). It derives venue/requestSource/grid exclusively from `chartMarketContext`.
+- **The panel's data identity is `requestSource`, not `venue`.** Its initial-load `anchorKey` starts with `requestSource` (11/05): `binance` and `binance-only` share the Binance venue but are different `/api/candles` policies, so a policy change under the same instrument/timeframe must discard the loaded window. `venue` remains only the Instrument List vocabulary.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Session has no source (legacy) | Restore as `binance-only` + `utc`; never switch it to the current default. |
+| Panel source is `binance-only` | Candle requests keep `binance-only`; Instrument List uses `binance`. |
+| Same venue but requestSource changes | Start a new initial Candlestick window; do not refetch the unchanged Instrument List. |
+| Standalone panel has no source | Replay → current default source; non-Replay → OKX. App's active Replay must pass the Session source explicitly. |
+| Source outside `ChartCandleSource` | Type error and an incomplete exhaustive mapping; do not invent a runtime venue fallback. |
+
+#### 5. Good / Base / Bad Cases
+
+- **Good:** an OKX Session's main chart and Other Coin Panel both request `source=okx` and use `shanghai`.
+- **Base:** the current default Replay is Bitget + `shanghai`; standalone Trade Review defaults to OKX.
+- **Bad:** calling `replayCandleSource(null)` for an active Session or keying candles only by `venue`, allowing default-Bitget data or the previous Binance policy to survive.
+
+#### 6. Tests Required
+
+- `tests/chart-market-context.test.ts`: the complete four-source matrix and the `binance` / `binance-only` non-collapse assertion.
+- `tests/app-free-replay.test.tsx`: restored OKX / Bitget / explicit and implicit legacy Sessions, checking main/panel requests and panel Instrument List sources separately.
+- `tests/other-coin-chart.test.tsx`: independent literal UTC 1D Review Window assertions, plus a `binance` → `binance-only` rerender proving a second initial Candlestick load and no Instrument List reload.
+- Run focused chart tests, full `npm test`, `npx tsc --noEmit`, and `git diff --check`. On CRLF checkouts, configure Git to recognize `cr-at-eol` rather than normalizing whole files or skipping the check.
+
+#### 7. Wrong vs Correct
+
+**Wrong** — guesses a Session and keys only by venue:
+
+```tsx
+const venue = replayCandleSource(null);
+const anchorKey = `${venue}:${instrument}:${timeframe}`;
+```
+
+**Correct** — App supplies the Session source and the data identity includes its request policy:
+
+```tsx
+<OtherCoinChart candleSource={replayCandleSource(freeReplay)} {...props} />
+const anchorKey = `${requestSource}:${instrument}:${timeframe}`;
+```
 
 ### Free Replay's candle source is USER-selectable (11/02)
 
 - The start panel offers the same three sources as 选品 (币安/OKX/Bitget, default Bitget); the selected source is recorded into the new session's `candleSource` in the ROUTE vocabulary (`binance-only` = the strict no-fallback Binance Free Replay has always used; `okx`; `bitget`). The instrument list follows the source (`/api/free-replay/instruments?source=…` — each venue has its own symbol vocabulary).
 - The source is chosen ONCE at session creation (11/03: the in-session header select was removed — the two pickers read as one duplicated control). An active session keeps its recorded source for its whole life; replaying another venue means starting a new session. The "never move a session's venue silently" contract now holds structurally, not just by convention.
 - The session's `instrument` keeps its creation-time vocabulary (the `(instrument, startTime)` session key must stay stable); every candle request translates instead via `replayRequestInstrument(instrument, routeSource)` (`usdtSymbolToOkxInstrument` / `okxInstrumentToBitgetSymbol`). A venue that does not know the translated instrument answers an empty window — a visible failure, never a silent venue switch.
-- `replayCandleGrid` maps the grid by the source's VALUE (`binance-only`/absent → `utc`, `okx`/`bitget` → `shanghai`), never by the field's PRESENCE: restore rewrites `null` to `binance-only`, and a presence-based mapping anchored restored legacy sessions to the wrong day boundary.
+- `replayCandleGrid` delegates to the SAME `chartMarketContext` mapping, and `FREE_REPLAY_*` / `LEGACY_REPLAY_*` grid constants are derived from it — the Session grid and the panel grid cannot drift. The grid follows the source's VALUE (`binance-only`/absent → `utc`, `okx`/`bitget` → `shanghai`), never the field's PRESENCE: restore rewrites `null` to `binance-only`, and a presence-based mapping anchored restored legacy sessions to the wrong day boundary.
 - The auto-save PUT payload MUST carry `candleSource` (11/02 fix): the payload used to drop it, so a post-10/21 Bitget session lost its venue on the first save and restored as `binance-only`.
-- The chart's `rangeKey` includes `candleSource` — a different source is a new data view, and all per-rangeKey dedupe (initialization, cursor-follow, backfill) restarts.
+- The chart's `rangeKey` includes `candleSource` — a different source is a new data view, and all per-rangeKey dedupe (initialization, cursor-follow, backfill) restarts. The request source and day grid come from `chartMarketContext(replayCandleSource(replay))`; effects depend on the primitive Session keys / `rangeKey`, never on that freshly derived object.
 
 ### Middle-gap healing (11/02)
 
@@ -188,7 +246,7 @@ Clicking a completed trade row anchors the chart viewport on that position round
   - **同一渲染数据里永远只有一个连续窗口** —— 索引型时间轴不为缺失时间留空白，把两段不相邻数据拼进同一数组就会把缝两侧画成相邻（用户现场 11/03：15m 下 9-7 → 9-30 直接跨越，洞内成交经 `containingCandleTimestamp` 全锚到缝左缘那根，开平仓点挤成一团）。
   - **`onCandlesLoaded`（App 的 `freeReplayCandles`）只喂游标数据集**（R2）：它服务 `currentCursorCandle`/浮盈/开平仓可用性；焦点取窗与焦点态翻页一律 `publishToApp: false`。
   - **开平仓点锚定走活动数据集**：图表另经 `onActiveCandlesLoaded`（renderedCandles 驱动）把活动数据集喂给 App 的 `freeReplayActiveCandles`，`paperTradeChartPoints` 用它锚定 —— 焦点态下焦点单的开仓点在游标窗口之外，点集锚游标数据集会让最老的单子丢开/平仓点（11/03 回归）。统计/步进/浮盈与标记各吃一份，互不串。
-  - 焦点取窗【一律重取】，不再判断「开仓点是否已在已加载窗口内」——活动数据集恒定为一个连续窗口，不依赖游标窗口边界。取窗失败/空：贴游标数据集最早边缘，不循环重试。NEVER page-chase with `mode=earlier` — a real session's open can sit weeks before the cursor and paging serially reads as "点单子不行了". The focus-window fetch, like the earlier/later loaders and the future prefetch, must send `replayCandleSource(replay)` — a legacy session (`candleSource: null`) stays on `binance-only`; hardcoding the current default mixes venues' prices on one chart.
+  - 焦点取窗【一律重取】，不再判断「开仓点是否已在已加载窗口内」——活动数据集恒定为一个连续窗口，不依赖游标窗口边界。取窗失败/空：贴游标数据集最早边缘，不循环重试。NEVER page-chase with `mode=earlier` — a real session's open can sit weeks before the cursor and paging serially reads as "点单子不行了". The focus-window fetch, like the earlier/later loaders and the future prefetch, must send `market.requestSource` (`chartMarketContext(replayCandleSource(replay))`) — a legacy session (`candleSource: null`) stays on `binance-only`; hardcoding the current default mixes venues' prices on one chart.
   - **过期响应丢弃**：异步取数落地时比对 `rangeKeyRef.current`，切周期/会话后的迟到响应直接丢弃（焦点取窗与游标初始加载同一守卫）；游标初始加载另有 `cursorInitialKeyRef` 同键在飞去重。
   - **历史回填与中段洞自愈在焦点态不追错目标**：回填在焦点态跳过（它追游标）；洞自愈与回填都有「活动数据集 timeframe 必须等于当前 timeframe」的过渡闸 —— 切周期的过渡 commit 里跨周期间距会被误判成洞。
   - **焦点态翻页（R4）**：向左 = 从焦点窗口左缘 `mode=earlier` 续取；向右 = 视口右缘贴近焦点窗口右缘（`shouldLoadLaterByLogicalRange`）时 `mode=later` 续取。两者只写焦点数据集。游标预取（`shouldPrefetchFutureCandles`）在焦点态跳过 —— 它追游标，会把焦点窗口逐页拽向游标。

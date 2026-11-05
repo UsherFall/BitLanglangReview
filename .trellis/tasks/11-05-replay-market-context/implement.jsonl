@@ -1,0 +1,12 @@
+{"file":".trellis/spec/frontend/index.md","reason":"确认前端职责、图表 Module 位置和验证入口。"}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"新增 chart-market-context 纯 helper 与共享 domain 类型需要遵守命名和归属。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"迁移 source 映射时不得引发生成 chart、重复请求或过期响应问题。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Free Replay Session 的 source 持久化、恢复和派生状态约束。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"CandleSourceId、ReplayCandleSource 和 ChartCandleSource 的 domain 归属及边界类型规则。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Free Replay focused/full 验证要求和禁止回归的行为。"}
+{"file":".trellis/spec/domain/index.md","reason":"domain 只能保存纯契约，不得引入 React 或 fetch。"}
+{"file":".trellis/spec/domain/trade-and-review-model.md","reason":"Candlestick 时间单位与 domain 类型契约。"}
+{"file":".trellis/spec/server/index.md","reason":"理解服务端职责，确保本任务不改变 server 路由行为。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"source/grid 应复用单一映射，避免新增分散分支。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"追踪 Session source 到 UI、路由和 Candle Grid 的跨层数据流。"}
+{"file":".trellis/tasks/11-05-replay-market-context/research/current-state.md","reason":"当前缺陷调用链、兼容矩阵、测试盲区和 deferred native-Binance 语义。"}

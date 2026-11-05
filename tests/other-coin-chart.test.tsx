@@ -374,6 +374,99 @@ describe('OtherCoinChart in Free Replay', () => {
     expect(okxCandles[0]).toBe('okx');
   });
 
+  it('reloads when the request policy changes under the same venue', async () => {
+    const requests: CandleRequest[] = [];
+    const listSources: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const parsed = new URL(`http://localhost${url}`);
+      if (parsed.pathname === '/api/free-replay/instruments') {
+        listSources.push(parsed.searchParams.get('source') ?? '');
+        return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      }
+      if (parsed.pathname === '/api/candles') {
+        requests.push({
+          mode: parsed.searchParams.get('mode') ?? 'initial',
+          anchor: parsed.searchParams.get('anchor') ? Number(parsed.searchParams.get('anchor')) : null,
+          entryTime: parsed.searchParams.get('entryTime') ?? '',
+          instrument: parsed.searchParams.get('instrument') ?? '',
+          source: parsed.searchParams.get('source') ?? '',
+        });
+        return new Response(JSON.stringify({ candles: makeSeries('2024-05-21T09:50:00+08:00', 5, 3) }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    const props = { entryTime: '2024-05-21T10:00:00.000Z', timeframe: '5m' as const, onClose: () => {} };
+    const { rerender } = render(<OtherCoinChart {...props} candleSource="binance" />);
+    await waitFor(() => expect(requests.filter((request) => request.mode === 'initial')).toHaveLength(1));
+    expect(requests[0].source).toBe('binance');
+
+    // Same venue, DIFFERENT request policy (candidate chain → strict Binance).
+    // The loaded window belongs to the old policy and must not survive.
+    rerender(<OtherCoinChart {...props} candleSource="binance-only" />);
+    await waitFor(() => expect(requests.filter((request) => request.mode === 'initial')).toHaveLength(2));
+    expect(requests.filter((request) => request.mode === 'initial').map((request) => request.source)).toEqual([
+      'binance',
+      'binance-only',
+    ]);
+    // The Instrument List vocabulary did not change, so it must not refetch.
+    expect(listSources).toEqual(['binance']);
+  });
+
+  it('rebuilds a legacy Binance replay on the UTC day grid, not Shanghai', async () => {
+    const listSources: string[] = [];
+    const candleRequests: CandleRequest[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const parsed = new URL(`http://localhost${url}`);
+      if (parsed.pathname === '/api/free-replay/instruments') {
+        listSources.push(parsed.searchParams.get('source') ?? '');
+        return new Response(JSON.stringify({ instruments: ['BTCUSDT'] }));
+      }
+      if (parsed.pathname === '/api/candles') {
+        candleRequests.push({
+          mode: parsed.searchParams.get('mode') ?? 'initial',
+          anchor: parsed.searchParams.get('anchor') ? Number(parsed.searchParams.get('anchor')) : null,
+          entryTime: parsed.searchParams.get('entryTime') ?? '',
+          instrument: parsed.searchParams.get('instrument') ?? '',
+          source: parsed.searchParams.get('source') ?? '',
+        });
+        return new Response(JSON.stringify({ candles: [makeCandle('2024-05-20T00:00:00.000Z', 100)] }));
+      }
+      return new Response(JSON.stringify({}));
+    }));
+
+    // A restored pre-10/21 session carries `binance-only`. Binance days open
+    // at 00:00Z, so its 1D review window must NOT be floored on the Shanghai
+    // grid the current-default source uses.
+    render(
+      <OtherCoinChart
+        entryTime="2024-05-21T10:00:00.000Z"
+        timeframe="1D"
+        cursorTime={CURSOR_1000}
+        candleSource="binance-only"
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalled());
+
+    // The instrument list speaks the venue vocabulary (`binance`), the candle
+    // route keeps the session's strict-Binance policy (`binance-only`).
+    expect(listSources).toEqual(['binance']);
+    expect(candleRequests.length).toBeGreaterThan(0);
+    for (const request of candleRequests) expect(request.source).toBe('binance-only');
+
+    // Independently calculated: the 00:00Z day containing the entry, ±150
+    // nominal 1D steps. A Shanghai floor would land on 2024-05-20T16:00Z —
+    // 8 hours earlier — so this can only pass on the UTC grid.
+    const utcDayStart = Date.parse('2024-05-21T00:00:00.000Z');
+    const stepMs = 24 * 60 * 60 * 1000;
+    expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: (utcDayStart - 150 * stepMs) / 1000,
+      to: (utcDayStart + 150 * stepMs) / 1000,
+    });
+  });
+
   it('shows every loaded candlestick in trade review, where there is no cursor', async () => {
     const candles = makeSeries('2024-05-21T09:50:00+08:00', 5, 5);
     stubFetch(({ mode }) => ({ candles: mode === 'later' ? [] : candles }));
