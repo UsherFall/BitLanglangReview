@@ -23,7 +23,8 @@
     "11-05-free-replay-dataset",
     "11-05-replay-candlestick-regression",
     "11-05-replay-session-lifecycle",
-    "11-05-replay-session-delete-transaction"
+    "11-05-replay-session-delete-transaction",
+    "11-05-domain-workflow-routes"
   ],
   "parent": null,
   "relatedFiles": [],
