@@ -104,6 +104,20 @@ describe('FreeReplayPanel', () => {
     expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
   });
 
+  it('locks both cursor buttons after ending review without changing the active rewind rule', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+    const { rerender } = render(<FreeReplayPanel timeframe="5m" canRewind={false} replayEnded />);
+
+    expect(screen.getByRole('button', { name: '上一根 K 线' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '上一根 K 线' })).toHaveAttribute('title', '结束复盘后不能调整 K 线进度');
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toHaveAttribute('title', '结束复盘后不能调整 K 线进度');
+
+    rerender(<FreeReplayPanel timeframe="5m" canRewind={false} replayEnded={false} />);
+    expect(screen.getByRole('button', { name: '上一根 K 线' })).toHaveAttribute('title', '开始模拟交易后不能回退 K 线');
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+  });
+
   // 11/04：回顾页首页并列的「模拟单库」—— 跨会话聚合已完结回合。
   const round = {
     id: 'paper:BTCUSDT:2024-05-21 10:07:position-1',

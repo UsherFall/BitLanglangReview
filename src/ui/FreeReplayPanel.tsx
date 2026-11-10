@@ -25,6 +25,7 @@ export function FreeReplayPanel({
   onReveal,
   onRewind,
   canRewind = true,
+  replayEnded = false,
   sessions,
   activeReplay,
   onRestore,
@@ -47,6 +48,8 @@ export function FreeReplayPanel({
   /** 11/03：开始模拟交易后回退会把游标拉回已成交单之前，成单时间线错乱 ——
    * App 以 `!paperTrading.active` 传入，按钮置灰并把原因写进 title。 */
   canRewind?: boolean;
+  /** 11/10 结束复盘：冻结上一根/下一根，恢复后解除。 */
+  replayEnded?: boolean;
   sessions?: FreeReplaySession[];
   activeReplay?: FreeReplayStart | null;
   onRestore?: (session: FreeReplaySession) => void;
@@ -196,13 +199,13 @@ export function FreeReplayPanel({
       <div className="replay-controls">
         <button
           type="button"
-          disabled={!canRewind}
-          title={canRewind ? undefined : '开始模拟交易后不能回退 K 线'}
+          disabled={!canRewind || replayEnded}
+          title={replayEnded ? '结束复盘后不能调整 K 线进度' : canRewind ? undefined : '开始模拟交易后不能回退 K 线'}
           onClick={onRewind}
         >
           上一根 K 线
         </button>
-        <button type="button" onClick={onReveal}>下一根 K 线</button>
+        <button type="button" disabled={replayEnded} title={replayEnded ? '结束复盘后不能调整 K 线进度' : undefined} onClick={onReveal}>下一根 K 线</button>
       </div>
       <div className="free-replay-history" data-testid="free-replay-history">
         <button type="button" className="history-header" aria-expanded={!historyCollapsed} onClick={() => setHistoryCollapsed((current) => !current)}>

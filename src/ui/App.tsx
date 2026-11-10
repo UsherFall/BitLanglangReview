@@ -270,6 +270,9 @@ export function App() {
     revealNext: revealNextFreeReplayCandle,
     rewind: rewindFreeReplayCandle,
     switchTimeframe: switchFreeReplayTimeframe,
+    reviewStatus,
+    endReview,
+    resumeReview,
   } = useFreeReplaySessionLifecycle({
     active: reviewMode === 'freeReplay',
     cursorCandles: freeReplayCandles,
@@ -640,6 +643,7 @@ export function App() {
   useEffect(() => {
     if (reviewMode !== 'freeReplay') return;
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (reviewStatus === 'ended') return;
       const target = event.target as HTMLElement | null;
       if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
       if (event.key === 'ArrowRight') {
@@ -653,7 +657,7 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reviewMode, freeReplay, freeReplayCandles, timeframe, paperTrading.active]);
+  }, [reviewMode, freeReplay, freeReplayCandles, timeframe, paperTrading.active, reviewStatus]);
 
   useEffect(() => {
     selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
@@ -668,6 +672,7 @@ export function App() {
   }, [reviewMode]);
 
   const freeReplayCurrentCandle = freeReplay ? currentCursorCandle(freeReplayCandles, freeReplay.cursorTime) : null;
+  const replayEnded = reviewStatus === 'ended';
   const paperStats = paperTradingStats(paperTrading, freeReplayCurrentCandle);
   // 11/02 标记层换成交割单复盘管线：点集纯函数锚定到包含成交时刻的已加载K线
   // （修复跨周期做单后标记左移一根粗蜡烛），隐藏眼睛只留焦点单。
@@ -830,6 +835,7 @@ export function App() {
             sessions={freeReplaySessions}
             activeReplay={freeReplay}
             canRewind={!paperTrading.active}
+            replayEnded={replayEnded}
             onStart={handleFreeReplayStart}
             onReveal={revealNextFreeReplayCandle}
             onRewind={rewindFreeReplayCandle}
@@ -869,10 +875,14 @@ export function App() {
               <div>
                 <h1>{freeReplay.instrument}</h1>
                 <p>回溯复盘 {freeReplay.startTime}</p>
+                {replayEnded && <span className="replay-ended-badge">已结束 · 仅可查看</span>}
               </div>
               <div className="timeframes">
                 {reviewTimeframes.map((item) => <button key={item} className={item === timeframe ? 'selected' : ''} onClick={() => switchFreeReplayTimeframe(item)}>{item}</button>)}
                 <button type="button" className={otherCoinOpen ? 'selected' : ''} onClick={() => setOtherCoinOpen((current) => !current)}>其他币</button>
+                <button type="button" className="replay-review-toggle" onClick={replayEnded ? resumeReview : endReview}>
+                  {replayEnded ? '恢复复盘' : '结束复盘'}
+                </button>
               </div>
             </header>
             <div className="free-replay-workspace">
@@ -882,6 +892,7 @@ export function App() {
               <FreeReplayPaperTradingPanel
                 key={`${freeReplay.instrument}:${freeReplay.startTime}`}
                 session={paperTrading}
+                readOnly={replayEnded}
                 stats={paperStats}
                 currentCandle={freeReplayCurrentCandle}
                 focusedOrderId={orderFocus?.id ?? null}
@@ -1026,6 +1037,7 @@ export function App() {
 
 function FreeReplayPaperTradingPanel({
   session,
+  readOnly = false,
   stats,
   currentCandle,
   onStart,
@@ -1049,6 +1061,8 @@ function FreeReplayPaperTradingPanel({
   onToggleRoundStar,
 }: {
   session: PaperTradingSession;
+  /** 11/10 结束复盘：只显示单子，禁止 Paper Trading 变更。 */
+  readOnly?: boolean;
   stats: PaperStats;
   currentCandle: Candlestick | null;
   onStart: () => void;
@@ -1075,6 +1089,7 @@ function FreeReplayPaperTradingPanel({
   onToggleRoundStar: (reviewId: string, review: TradeReview | undefined) => void;
 }) {
   const [panelTab, setPanelTab] = useState<'trade' | 'orders'>('trade');
+  const activePanelTab = readOnly ? 'orders' : panelTab;
   const [editingRoundId, setEditingRoundId] = useState<string | null>(null);
   const [direction, setDirection] = useState<PaperDirection>('long');
   const [positionRatioPercent, setPositionRatioPercent] = useState(100);
@@ -1112,7 +1127,7 @@ function FreeReplayPaperTradingPanel({
           {/* 11/02 权益制：开仓额度随已实现盈亏复利，头部直接显示当前权益。 */}
           <p>本金 1000 USDT · 权益 {(PAPER_ACCOUNT_EQUITY + stats.realizedPnl).toFixed(2)} USDT</p>
         </div>
-        <button type="button" aria-label="重置模拟交易" onClick={onReset}>重置</button>
+        <button type="button" aria-label="重置模拟交易" disabled={readOnly} title={readOnly ? '恢复复盘后才能重置模拟交易' : undefined} onClick={onReset}>重置</button>
       </div>
 
       <div className="paper-stats">
@@ -1123,11 +1138,12 @@ function FreeReplayPaperTradingPanel({
       </div>
 
       <div className="paper-tabs" role="tablist" aria-label="模拟交易面板分页">
-        <button type="button" role="tab" aria-selected={panelTab === 'trade'} className={panelTab === 'trade' ? 'selected' : ''} onClick={() => setPanelTab('trade')}>操作</button>
-        <button type="button" role="tab" aria-selected={panelTab === 'orders'} className={panelTab === 'orders' ? 'selected' : ''} onClick={() => setPanelTab('orders')}>单子{orderCount ? ` (${orderCount})` : ''}</button>
+        {!readOnly && <button type="button" role="tab" aria-selected={activePanelTab === 'trade'} className={activePanelTab === 'trade' ? 'selected' : ''} onClick={() => setPanelTab('trade')}>操作</button>}
+        <button type="button" role="tab" aria-selected={activePanelTab === 'orders'} className={activePanelTab === 'orders' ? 'selected' : ''} onClick={() => setPanelTab('orders')}>单子{orderCount ? ` (${orderCount})` : ''}</button>
       </div>
+      {readOnly && <p className="paper-readonly-note">已结束复盘，仅可查看单子；恢复复盘后可继续操作</p>}
 
-      {panelTab === 'trade' ? (
+      {activePanelTab === 'trade' ? (
       <div className="paper-tab-body">
       {!session.active ? (
         <button type="button" aria-label="开始模拟交易" className="save-button paper-primary" onClick={onStart}>开始模拟</button>

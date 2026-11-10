@@ -41,6 +41,7 @@ function makeSession(overrides: Partial<FreeReplaySession> = {}): FreeReplaySess
       startedAtCursorTime: START,
       nextId: 8,
     },
+    reviewStatus: 'active',
     updatedAt: '2024-05-21T12:00:00+08:00',
     ...overrides,
   };
@@ -179,21 +180,26 @@ describe('useFreeReplaySessionLifecycle', () => {
       progressTime: START,
       timeframe: '5m',
       paperTrading: { active: false },
+      reviewStatus: 'active',
     });
   });
 
   it('flushes pending saves on mode exit and pagehide without dropping keepalive', async () => {
     const first = setup();
     act(() => first.result.current.start(makeStart()));
+    act(() => first.result.current.endReview());
     first.rerender({ ...first.initialProps, active: false });
     await settle();
     expect(putBodies(first.fetchMock)).toHaveLength(1);
+    expect(putBodies(first.fetchMock)[0]?.reviewStatus).toBe('ended');
     expect(putCalls(first.fetchMock)[0]?.[1]?.keepalive).not.toBe(true);
 
     const second = setup();
     act(() => second.result.current.start(makeStart()));
+    act(() => second.result.current.endReview());
     act(() => window.dispatchEvent(new Event('pagehide')));
     expect(putCalls(second.fetchMock)).toHaveLength(1);
+    expect(putBodies(second.fetchMock)[0]?.reviewStatus).toBe('ended');
     expect(putCalls(second.fetchMock)[0]?.[1]?.keepalive).toBe(true);
   });
 
@@ -297,5 +303,106 @@ describe('useFreeReplaySessionLifecycle', () => {
     act(() => result.current.switchTimeframe('15m'));
     expect(result.current.timeframe).toBe('15m');
     expect(result.current.freeReplay?.dataAnchorTime).toBe(new Date(progressBeforeSwitch! * 1000).toISOString());
+  });
+
+  it('freezes Paper updates and cursor commands without changing the scene, then resumes in place', async () => {
+    const saved = makeSession();
+    const candles = [
+      makeCandle('2024-05-21T09:55:00+08:00'),
+      makeCandle('2024-05-21T10:00:00+08:00'),
+    ];
+    const { result, callbacks } = setup({ sessions: [saved], cursorCandles: candles });
+    await settle();
+    act(() => result.current.restore(saved));
+    const frozenReplay = result.current.freeReplay;
+    const frozenPaper = result.current.paperTrading;
+
+    act(() => result.current.endReview());
+
+    expect(result.current.reviewStatus).toBe('ended');
+    expect(result.current.freeReplay).toBe(frozenReplay);
+    expect(result.current.paperTrading).toBe(frozenPaper);
+    expect(result.current.sessions[0]?.reviewStatus).toBe('ended');
+
+    act(() => {
+      result.current.setPaperTrading(initialPaperTradingSession());
+      result.current.setPaperTrading((current) => ({ ...current, nextId: 999 }));
+      result.current.revealNext();
+      result.current.rewind();
+    });
+    expect(result.current.freeReplay).toBe(frozenReplay);
+    expect(result.current.paperTrading).toBe(frozenPaper);
+    expect(callbacks.onClearFocus).not.toHaveBeenCalled();
+    expect(callbacks.onFutureRetry).not.toHaveBeenCalled();
+
+    const progressBeforeSwitch = result.current.freeReplay?.progressTime;
+    act(() => result.current.switchTimeframe('1H'));
+    expect(result.current.freeReplay?.progressTime).toBe(progressBeforeSwitch);
+    expect(result.current.paperTrading).toBe(frozenPaper);
+    expect(callbacks.onClearFocus).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.resumeReview());
+    expect(result.current.reviewStatus).toBe('active');
+    expect(result.current.paperTrading).toBe(frozenPaper);
+    act(() => result.current.setPaperTrading((current) => ({ ...current, nextId: 999 })));
+    expect(result.current.paperTrading.nextId).toBe(999);
+  });
+
+  it('persists ended/active transitions and does not let same-key restores bypass the freeze', async () => {
+    const saved = makeSession({ reviewStatus: 'ended' });
+    const { result, fetchMock } = setup({ sessions: [saved] });
+    await settle();
+    act(() => result.current.restore(saved));
+    expect(result.current.reviewStatus).toBe('ended');
+    const frozenReplay = result.current.freeReplay;
+    const frozenPaper = result.current.paperTrading;
+
+    act(() => result.current.restore({
+      ...saved,
+      reviewStatus: 'active',
+      progressTime: saved.progressTime + 3600,
+      cursorTime: saved.cursorTime + 3600,
+      paperTrading: initialPaperTradingSession(),
+    }));
+    expect(result.current.reviewStatus).toBe('ended');
+    expect(result.current.freeReplay).toBe(frozenReplay);
+    expect(result.current.paperTrading).toBe(frozenPaper);
+    act(() => result.current.start(makeStart()));
+    expect(result.current.reviewStatus).toBe('ended');
+    expect(result.current.freeReplay).toBe(frozenReplay);
+    expect(result.current.paperTrading).toBe(frozenPaper);
+
+    act(() => result.current.resumeReview());
+    expect(result.current.reviewStatus).toBe('active');
+    expect(result.current.sessions[0]?.reviewStatus).toBe('active');
+    act(() => result.current.restore({ ...saved, reviewStatus: 'ended' }));
+    expect(result.current.reviewStatus).toBe('active');
+
+    await advance(500);
+    expect(putBodies(fetchMock).at(-1)?.reviewStatus).toBe('active');
+    act(() => result.current.endReview());
+    await advance(500);
+    expect(putBodies(fetchMock).at(-1)?.reviewStatus).toBe('ended');
+
+    const legacy = makeSession({ instrument: 'ETHUSDT', startTime: '2024-05-22 10:00' });
+    delete (legacy as Partial<FreeReplaySession>).reviewStatus;
+    act(() => result.current.restore(legacy));
+    expect(result.current.reviewStatus).toBe('active');
+  });
+
+  it('keeps the locally latest ended status when switching sessions before the trailing PUT resolves', async () => {
+    const first = makeSession();
+    const second = makeSession({ instrument: 'ETHUSDT', startTime: '2024-05-22 10:00' });
+    const { result } = setup({ sessions: [first, second] });
+    await settle();
+    act(() => result.current.restore(first));
+    act(() => result.current.endReview());
+    expect(result.current.sessions.find((row) => row.instrument === first.instrument)?.reviewStatus).toBe('ended');
+
+    act(() => result.current.restore(second));
+    expect(result.current.reviewStatus).toBe('active');
+    const latestFirst = result.current.sessions.find((row) => row.instrument === first.instrument)!;
+    act(() => result.current.restore(latestFirst));
+    expect(result.current.reviewStatus).toBe('ended');
   });
 });

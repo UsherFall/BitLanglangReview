@@ -50,7 +50,11 @@ export function registerFreeReplaySessionRoutes(server: ViteDevServer, deps: Fre
       if (!parsed.instrument || !parsed.startTime || !reviewTimeframes.includes(parsed.timeframe as ReviewTimeframe)) {
         return send(res, 400, { error: 'instrument, startTime, and a valid timeframe are required' });
       }
-      return send(res, 200, freeReplaySessionStore.saveSession(parsed));
+      // 11/10 结束/恢复复盘：状态缺省按 active，仅接受 active | ended。
+      if (parsed.reviewStatus !== undefined && parsed.reviewStatus !== 'active' && parsed.reviewStatus !== 'ended') {
+        return send(res, 400, { error: 'reviewStatus must be active or ended' });
+      }
+      return send(res, 200, freeReplaySessionStore.saveSession({ ...parsed, reviewStatus: parsed.reviewStatus ?? 'active' }));
     }
     if (req.method === 'DELETE') {
       const instrument = url.searchParams.get('instrument') ?? '';

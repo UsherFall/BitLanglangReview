@@ -26,6 +26,49 @@ describe('Free Replay routes', () => {
     expect(okx.json).toEqual({ instruments: ['BTC-USDT-SWAP'] });
   });
 
+  it('validates and persists reviewStatus while keeping legacy PUT payloads active', async () => {
+    const saveSession = vi.fn((input: { reviewStatus?: string }) => ({
+      ...input,
+      reviewStatus: input.reviewStatus ?? 'active',
+      updatedAt: '2024-05-21T12:00:00+08:00',
+    }));
+    const sessionStore = {
+      saveSession,
+      listSessions: vi.fn(() => []),
+    } as unknown as FreeReplaySessionStore;
+    reviewStore = new ReviewStore(':memory:');
+    const { handlers } = captureRoutes((server) => registerFreeReplaySessionRoutes(server, {
+      freeReplaySessionStore: sessionStore,
+      reviewStore: reviewStore!,
+      scopedReviewsForModule: () => [],
+    }));
+    const body = {
+      instrument: 'BTCUSDT',
+      startTime: '2024-05-21 10:00',
+      dataAnchorTime: '2024-05-21 10:00',
+      startCursorTime: 1716267600,
+      startProgressTime: 1716268800,
+      progressTime: 1716269400,
+      cursorTime: 1716268800,
+      timeframe: '5m',
+      paperTrading: { active: false, trades: [] },
+    };
+    const route = handlers.get('/api/free-replay/sessions')!;
+
+    const legacy = await invokeRoute(route, { method: 'PUT', body });
+    expect(legacy.status).toBe(200);
+    expect(legacy.json.reviewStatus).toBe('active');
+    const ended = await invokeRoute(route, { method: 'PUT', body: { ...body, reviewStatus: 'ended' } });
+    expect(ended.status).toBe(200);
+    expect(ended.json.reviewStatus).toBe('ended');
+    expect(saveSession).toHaveBeenCalledTimes(2);
+
+    const invalid = await invokeRoute(route, { method: 'PUT', body: { ...body, reviewStatus: 'completed' } });
+    expect(invalid.status).toBe(400);
+    expect(invalid.json.error).toContain('reviewStatus');
+    expect(saveSession).toHaveBeenCalledTimes(2);
+  });
+
   it('wires DELETE to exactly one atomic cascade with the trailing session prefix', async () => {
     reviewStore = new ReviewStore(':memory:');
     const deleteSessionWithPaperReviews = vi.fn(() => ({ deletedReviews: 2 }));

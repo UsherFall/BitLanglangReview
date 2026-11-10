@@ -1105,6 +1105,30 @@ p {
   width: 100%;
 }
 
+.replay-ended-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border: 1px solid #4b5563;
+  border-radius: 4px;
+  color: #d1d5db;
+  background: #1f2937;
+  font-size: 12px;
+}
+
+.timeframes .replay-review-toggle {
+  border-color: #9ca3af;
+  color: #f3f4f6;
+}
+
+.paper-readonly-note {
+  margin: 0 12px 8px;
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .paper-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;

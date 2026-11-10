@@ -1,0 +1,10 @@
+{"file":".trellis/spec/domain/index.md","reason":"定位共享 Free Replay Session 状态所属的领域边界与必读契约。"}
+{"file":".trellis/spec/domain/shared-contracts.md","reason":"扩展 FreeReplaySessionPayload/Session 时保持泛型、legacy Adapter 和 saved/unsaved 类型语义。"}
+{"file":".trellis/spec/frontend/free-replay-session-lifecycle.md","reason":"在唯一 lifecycle owner 中接入 ended 状态、自动保存、恢复和游标命令守卫，避免泄漏内部状态。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"遵守 App/lifecycle/Dataset/Paper Library 的现有状态所有权，不新增全局 store。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"正确处理状态化命令、键盘闭包和 effect 依赖，避免 ended 状态陈旧。"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"在现有 header、FreeReplayPanel 和 Paper Trading 单子/操作结构中实现只读交互并保留 Focus。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"共享状态类型只在 Domain 定义，并在 PUT 边界手工校验。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"保留 Free Replay reveal/rewind、StrictMode、Focus、标记与 Paper Round 既有回归门槛。"}
+{"file":".trellis/spec/server/api-plugin.md","reason":"沿用现有 Free Replay workflow route 所有权、校验和响应方式。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"扩展 Session SQLite schema/upsert 时保持 opaque Paper JSON 和原子删除级联。"}

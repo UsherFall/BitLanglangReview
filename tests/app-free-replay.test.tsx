@@ -2976,6 +2976,127 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
     await waitFor(() => expect(screen.getAllByTitle('跳到开仓点')[0].className).toContain('active'));
   });
+
+  it('freezes and resumes the exact paper scene while keeping read-only viewing available', async () => {
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const timeframe = new URL(url, 'http://localhost').searchParams.get('timeframe');
+        if (timeframe === '15m') {
+          return Response.json({ candles: [
+            makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+            makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+          ] });
+        }
+        return Response.json({ candles: [
+          makeCandle('2024-05-21T09:55:00+08:00'),
+          makeCandle('2024-05-21T10:00:00+08:00'),
+          makeCandle('2024-05-21T10:05:00+08:00'),
+        ] });
+      },
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    fireEvent.click(await screen.findByRole('button', { name: '开始模拟交易' }));
+    fireEvent.change(screen.getByLabelText('仓位比例'), { target: { value: '50' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+
+    fireEvent.change(screen.getByLabelText('仓1 止损价'), { target: { value: '1' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '设仓1止损' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '设仓1止损' }));
+    fireEvent.change(screen.getByLabelText('限价加仓价格'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交限价加仓' }));
+    fireEvent.change(screen.getByLabelText('限价平仓价格'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交限价平仓' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: '单子 (3)' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '结束复盘' }));
+
+    expect(screen.getByText('已结束 · 仅可查看')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '操作' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '市价加仓' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重置模拟交易' })).toBeDisabled();
+    expect(screen.getByRole('tab', { name: '单子 (3)' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('待开仓 1')).toBeInTheDocument();
+    expect(screen.getByText('待平仓 1')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上一根 K 线' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeDisabled();
+
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.reviewStatus).toBe('ended'));
+    const frozen = sessionPutBodies().at(-1)!;
+    const candleRequestsBefore = (fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    fireEvent.click(screen.getByRole('button', { name: '上一根 K 线' }));
+    expect((fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(candleRequestsBefore);
+    expect(sessionPutBodies().at(-1)?.cursorTime).toBe(frozen.cursorTime);
+    expect(sessionPutBodies().at(-1)?.paperTrading).toEqual(frozen.paperTrading);
+
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.timeframe).toBe('15m'));
+    expect(sessionPutBodies().at(-1)?.reviewStatus).toBe('ended');
+    expect(sessionPutBodies().at(-1)?.progressTime).toBe(frozen.progressTime);
+    expect(sessionPutBodies().at(-1)?.paperTrading).toEqual(frozen.paperTrading);
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复复盘' }));
+    expect(screen.queryByText('已结束 · 仅可查看')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '上一根 K 线' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('tab', { name: '操作' }));
+    expect(screen.getByRole('button', { name: '市价加仓' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重置模拟交易' })).toBeEnabled();
+  });
+
+  it('restores a saved ended session as read-only until the reviewer explicitly resumes', async () => {
+    const session = {
+      ...makeSeededSession(),
+      paperTrading: seededPaperTrading(100, 'fill-1', 'position-1'),
+      reviewStatus: 'ended',
+    };
+    stubFreeReplayFetch({
+      sessions: [session],
+      onCandles: () => Response.json({ candles: [makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' })] }),
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.click(screen.getByRole('button', { name: /^BTCUSDT/ }));
+
+    expect(await screen.findByRole('button', { name: '恢复复盘' })).toBeInTheDocument();
+    expect(screen.getByText('已结束 · 仅可查看')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeDisabled();
+    expect(screen.queryByRole('tab', { name: '操作' })).not.toBeInTheDocument();
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.reviewStatus).toBe('ended'));
+    const orderRow = screen.getByTitle('跳到开仓点');
+    fireEvent.click(orderRow);
+    expect(orderRow.className).toContain('active');
+    expect(sessionPutBodies().at(-1)?.reviewStatus).toBe('ended');
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复复盘' }));
+    fireEvent.click(screen.getByRole('tab', { name: '操作' }));
+    expect(screen.getByRole('button', { name: '市价开仓' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+  });
+
+  it('does not auto-start paper trading when a never-started replay is ended and resumed', async () => {
+    stubFreeReplayFetch({
+      onCandles: () => Response.json({ candles: [makeCandle('2024-05-21T09:55:00+08:00')] }),
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2024-05-21 10:00' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '结束复盘' }));
+    expect(screen.queryByRole('button', { name: '开始模拟交易' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '恢复复盘' }));
+    expect(screen.getByRole('button', { name: '开始模拟交易' })).toBeInTheDocument();
+  });
 });
 
 function makeCandle(time: string, overrides = {}) {

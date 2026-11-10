@@ -1,0 +1,9 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"逐层核对 reviewStatus 从 SQLite/API 到 lifecycle/UI 的字段、默认值和恢复链路。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"确认复用现有 Session lifecycle 与 Paper/Chart owners，没有另建冻结状态副本。"}
+{"file":".trellis/spec/domain/shared-contracts.md","reason":"检查 shared Session 类型、legacy 缺省与 saved 响应契约一致。"}
+{"file":".trellis/spec/frontend/free-replay-session-lifecycle.md","reason":"检查自动保存、restore、delete tombstone、reveal/rewind 与 timeframe 行为未回归。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"检查 ended 只有 lifecycle 一个 owner，Paper/Dataset/App 状态边界未混淆。"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"检查只读单子面板、Focus、workspace 行结构和可访问控件。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"执行 Free Replay 全量兼容门槛并验证按钮与函数级双重守卫。"}
+{"file":".trellis/spec/server/api-plugin.md","reason":"检查 PUT 状态校验和现有 Session/Paper Round 路由契约。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"检查旧库迁移、upsert、opaque JSON 与原子删除级联。"}
