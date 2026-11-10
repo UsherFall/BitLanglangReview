@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-11-05
+- **Total Sessions**: 12
+- **Last Active**: 2026-11-10
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~264 | Active |
+| `journal-1.md` | ~287 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-11-10 | 回溯复盘结束与恢复复盘 | `7a24f8e`, `06e803a` | `feat/replay-end-review` |
 | 11 | 2026-11-05 | 完成架构深化全部七项交付 | `9e627a6`, `665ad0d`, `d4e55a1`, `81896b4`, `720367d`, `9f771a2`, `4c78c8d` | `feat/architecture-deepening` |
 | 10 | 2026-11-05 | 修复回溯复盘 StrictMode K 线空白 | `d4e55a1`, `52d4748` | `fix/replay-candlestick-regression` |
 | 9 | 2026-11-04 | 回溯复盘侧栏列表自适应 + 模拟单库交互 + 切周期视图回右缘 | `9c3cbce`, `5813069`, `16ea543`, `f31793d` | `master` |

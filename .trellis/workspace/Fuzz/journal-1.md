@@ -262,3 +262,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: 回溯复盘结束与恢复复盘
+<!-- trellis-session: v=2 fp=9bf392452989461f -->
+
+**Date**: 2026-11-10
+**Task**: 回溯复盘结束与恢复复盘
+**Branch**: `feat/replay-end-review`
+
+### Summary
+
+实现 active/ended 会话状态、SQLite 旧库迁移、交易与 K 线进度双重冻结、只读单子查看和原样恢复；补齐历史恢复防绕过及持久化测试。相关测试与类型检查通过，排除既有缺失 level-alert fixture 后全量 735 项测试通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7a24f8e` | feat(replay): 增加结束与恢复复盘冻结态 |
+| `06e803a` | docs(spec): 回溯复盘结束恢复状态契约 |
+
+### Status
+
+[OK] **Completed**
