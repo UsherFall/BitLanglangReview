@@ -9,7 +9,7 @@ This project uses React local state only. There is no global store. Persistent s
 - Review queue filters, fetched trades, known instruments, known tags, and selected trade ID.
 - Review mode: `trade`, `bitget`, `freeReplay`, or `scan`.
 
-`useFreeReplaySessionLifecycle` owns the active Free Replay Session, Paper Trading session, shared Review Timeframe, history list, auto-save timers and deletion tombstones. App consumes its read state and intent commands; Trade Review uses the exposed shared-timeframe setter. App keeps chart-facing candle arrays, Focus and Paper Library outside that lifecycle boundary (see `free-replay-session-lifecycle.md`).
+`useFreeReplaySessionLifecycle` owns the active Free Replay Session, Paper Trading session, reversible `reviewStatus` (`active | ended`), shared Review Timeframe, history list, auto-save timers and deletion tombstones. App consumes its read state and intent commands; Trade Review uses the exposed shared-timeframe setter. App keeps chart-facing candle arrays, Focus and Paper Library outside that lifecycle boundary (see `free-replay-session-lifecycle.md`). While ended, the lifecycle's exposed Paper Dispatch and reveal/rewind commands are no-ops; App only supplies the read-only presentation and must not keep a second status copy.
 
 `trade` (交割单复盘, xlsx source) and `bitget` (Bitget复盘) share ONE queue/detail code path: both render the same filters/progress/list/detail/chart/editor and differ only by the data-source endpoint. `App.tsx` picks the endpoint with `tradeReviewEndpoint(mode)` (`/api/trades` vs `/api/bitget/trades`) and re-fetches when the mode or a `tradeRefreshToken` bump changes; `BitgetControlBar` bumps that token after a successful sync. Review tags/notes/star are shared across both sources because reviews key on `trade.id` and Bitget ids carry a `bg-` prefix.
 - Free Replay Session creation/restore/save/delete and cursor commands live in `src/ui/use-free-replay-session-lifecycle.ts`; loaded candles remain owned by `src/ui/free-replay-dataset.ts` (Cursor / Focus / Active / Rendered + all loads), not by component refs. Keep the two boundaries separate.
@@ -53,7 +53,7 @@ Keep derived state close to the consumer and prefer pure helpers:
 
 ## Domain Rules
 
-Review Progress counts a trade as reviewed only when it has at least one Review Tag. Review Notes alone do not mark a trade as reviewed. Free Replay sessions auto-save to SQLite and restore the reveal cursor and paper trading state; starting the same instrument + start time resumes the saved session instead of creating a new one. Pending-save and deleted-key coordination is private to `useFreeReplaySessionLifecycle`; direct `renderHook` tests cover those races without mounting App.
+Review Progress counts a trade as reviewed only when it has at least one Review Tag. Review Notes alone do not mark a trade as reviewed. Free Replay sessions auto-save to SQLite and restore the reveal cursor, paper trading state and reversible `reviewStatus`; starting the same instrument + start time resumes the saved session instead of creating a new one. A saved ended session stays read-only until `resumeReview`; legacy rows without the field are active. Pending-save and deleted-key coordination is private to `useFreeReplaySessionLifecycle`; direct `renderHook` tests cover those races without mounting App.
 
 ## Common Mistakes
 

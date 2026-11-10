@@ -7,7 +7,7 @@ Domain types are defined in `src/domain` and should be imported into UI and serv
 - `Trade`, `Direction`, `ReviewTimeframe`, and `reviewTimeframes` in `src/domain/trade.ts`.
 - `TradeReview` in `src/domain/review.ts`.
 - `ReviewedTrade`, `ReviewQueueOptions`, `TradeResponse`, and sort types in `src/domain/review-queue.ts`.
-- `FreeReplayStart`, `FreeReplaySessionPayload`, and `FreeReplaySession` in `src/domain/free-replay-session.ts`.
+- `FreeReplayStart`, `FreeReplaySessionPayload`, `FreeReplaySession`, and `FreeReplayReviewStatus` in `src/domain/free-replay-session.ts`.
 - `PaperRoundLibraryResponse` in `src/domain/paper-round.ts`.
 - `Candlestick`, `timeframeMs`, and `mergeCandles` in `src/domain/candlestick.ts`.
 - `ChartDrawing`, `ChartPoint`, and `SaveChartDrawingInput` in `src/domain/drawing.ts`.

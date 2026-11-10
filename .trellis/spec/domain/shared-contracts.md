@@ -17,10 +17,11 @@ FreeReplayStart = {
   progressTime: number;
   cursorTime: number;
 };
+FreeReplayReviewStatus = 'active' | 'ended';
 FreeReplaySessionPayload<Paper = PaperTradingSession, Timeframe extends string = ReviewTimeframe> =
-  FreeReplayStart & { timeframe: Timeframe; paperTrading: Paper };
+  FreeReplayStart & { timeframe: Timeframe; paperTrading: Paper; reviewStatus?: FreeReplayReviewStatus };
 FreeReplaySession<Paper = PaperTradingSession, Timeframe extends string = ReviewTimeframe> =
-  FreeReplaySessionPayload<Paper, Timeframe> & { updatedAt: string };
+  FreeReplaySessionPayload<Paper, Timeframe> & { reviewStatus: FreeReplayReviewStatus; updatedAt: string };
 
 TradeResponse = {
   trades: ReviewedTrade[];
@@ -43,7 +44,7 @@ mergeCandles<T extends { timestamp: number }>(candles: readonly T[]): T[];
 
 ## Contracts
 
-1. **Session shape.** `updatedAt` exists only on a saved Session. UI uses the strict default generic parameters; SessionStore explicitly uses `FreeReplaySessionPayload<unknown, string>` / `FreeReplaySession<unknown, string>` for opaque legacy JSON, while PUT routes validate new timeframes and UI restore normalizes Paper Trading.
+1. **Session shape.** `updatedAt` exists only on a saved Session. `reviewStatus` is the reversible `active | ended` freeze state: it is optional on unsaved/legacy payloads and means `active` when absent, while every saved Store/API row carries it explicitly. UI uses the strict default generic parameters; SessionStore explicitly uses `FreeReplaySessionPayload<unknown, string>` / `FreeReplaySession<unknown, string>` for opaque legacy JSON, while PUT routes validate new timeframes and `reviewStatus` and UI restore normalizes Paper Trading.
 2. **Adapters.** `FreeReplayPanel`, `ui/chart-time`, `server/candlestick-service` and `ui/free-replay-chart` may re-export domain contracts for compatibility. They must not keep another implementation or divergent response type.
 3. **Queue response.** `TradeResponse` is used by App state AND review/bitget route responses; `configured` remains optional and meaningful only for Bitget.
 4. **Library response.** API/UI `reviews` stays optional for compatibility; `server/paper-rounds.ts` derivation always returns `rounds`, `sessions` and every Paper Review.
@@ -55,6 +56,8 @@ mergeCandles<T extends { timestamp: number }>(candles: readonly T[]): T[];
 | Condition | Required behavior |
 | --- | --- |
 | Legacy Session without source | Type permits absence; UI restore applies legacy source |
+| Legacy Session/payload without reviewStatus | Read/save/restore as `active`; saved rows emit the field explicitly |
+| PUT reviewStatus outside `active` / `ended` | HTTP 400 before Store save |
 | Store receives opaque/old Paper JSON | Store generic accepts it; route/UI boundaries validate or normalize |
 | Unsaved payload | No `updatedAt` required |
 | Duplicate timestamps | Last input object wins |
@@ -66,6 +69,7 @@ mergeCandles<T extends { timestamp: number }>(candles: readonly T[]): T[];
 - **Good:** a route and its UI state both annotate with `TradeResponse`; changing a field is a single type edit.
 - **Good:** generic `{timestamp,payload}` merges retain the concrete payload and last duplicate.
 - **Base:** existing UI imports continue through a re-export Adapter.
+- **Base:** a pre-11/10 Session without `reviewStatus` opens as `active`; `ended` never means `paperTrading.active=false`.
 - **Bad:** separate UI and Server `timeframeMs` maps or private `mergeCandles` copies.
 - **Bad:** narrowing opaque Store input to the strict UI Paper shape and breaking old sessions/tests.
 - **Bad:** adding calendar-month logic to `timeframeMs` or venue fields to the merge key.

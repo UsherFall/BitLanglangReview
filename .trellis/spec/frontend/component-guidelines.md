@@ -214,6 +214,8 @@ Do not put pure chart or queue math directly into JSX when it can be tested as a
 
 ### Free Replay Paper Trading Orders
 
+**End/resume review read-only panel (11/10):** the active Replay header owns the「结束复盘 / 恢复复盘」toggle and ended badge. While ended, `FreeReplayPaperTradingPanel.readOnly` forces the 单子 view, removes the 操作 tab and disables reset; position, pending orders, fills and stats stay visible and order Focus remains available. The sidebar disables BOTH previous/next Candlestick controls and App's Arrow handler checks `reviewStatus`, but these are only presentation guards — the lifecycle's freeze-aware Paper Dispatch and reveal/rewind guards are mandatory. Timeframe switching and Round annotations keep their existing independent behavior.
+
 Free Replay paper trading state lives in `src/ui/free-replay-paper-trading.ts`; keep order execution rules there and cover them with unit tests before wiring UI controls in `App.tsx`.
 
 - **Rewind locks once paper trading starts (11/03)**: `paperTrading.active === true` makes rewinding (按钮 + 键盘 ←) a no-op — pulling the cursor back before already-filled orders corrupts the fill timeline with no warning. The guard lives at the FUNCTION entry (`rewindFreeReplayCandle` early-returns), the button greys out via `FreeReplayPanel`'s `canRewind` prop (`!paperTrading.active`, with an explanatory `title`), and the keyboard effect's deps MUST include `paperTrading.active` — its closure goes stale otherwise and re-enables the key after the subscription (same class as the reveal-boundary mirror).「下一根」stays enabled; 重置 re-enables rewind.

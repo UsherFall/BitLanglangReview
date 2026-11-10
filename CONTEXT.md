@@ -137,8 +137,12 @@ A floating panel that shows the candlesticks of a reviewer-chosen **Instrument**
 _Avoid_: future leak, second replay cursor, panel on a different venue than its chart
 
 **Free Replay Session**:
-The saved state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, **Free Replay Cursor**, and paper trading session. Free Replay sessions auto-save as history and can be restored so the reviewer resumes from where they left off.
+The saved state of a **Free Replay**, including its selected **Instrument**, start time, active **Review Timeframe**, **Free Replay Cursor**, paper trading session, and reversible **Free Replay Review Status**. Free Replay sessions auto-save as history and can be restored so the reviewer resumes from where they left off.
 _Avoid_: journal entry, review note
+
+**Free Replay Review Status**:
+A session-level `active | ended` state (11/10).「结束复盘」keeps the chart and orders mounted but freezes all Paper Trading changes and previous/next reveal commands, including keyboard shortcuts; positions, pending orders and stops remain unchanged. The reviewer can still inspect orders, drag/zoom and switch Review Timeframes.「恢复复盘」only flips the state back to `active` and never auto-starts Paper Trading. The status persists in SQLite as `free_replay_sessions.review_status`; legacy sessions without it are `active`. It is independent of `paperTrading.active`, and an ended same-key history restore must not resume or roll back the current scene.
+_Avoid_: permanent completion, archived session, exit to home, forced close, `paperTrading.active=false`
 
 **Paper Round** (模拟单回合):
 One paper position in a **Free Replay**, from its first open to the moment it is FULLY closed — the annotation unit for paper trading, deliberately coarser than a fill so that a position scaled out in three partial closes is one reviewable round, not three. A round is identified by `paper:{instrument}:{startTime}:{positionId}` (`paperRoundReviewId` in `src/domain/paper-round.ts`): the session key makes it stable across restores, and `positionId` (`position-N`, persisted in the session blob) makes it stable within a session. Its market data (direction, prices, pnl, fill count) is DERIVED per request from `free_replay_sessions.paper_trading_json` by `groupFillsIntoRounds` — no round snapshot table exists, so the blob stays the single source of truth. A round whose position is still open is NOT a Paper Round yet: it has no closing price, so it stays out of the **Paper Round Library** until fully closed.
