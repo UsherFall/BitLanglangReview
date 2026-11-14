@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-11-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~310 | Active |
+| `journal-1.md` | ~333 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-11-14 | 结束复盘切周期保留单子开仓定位 | `490f3a3`, `5153d66` | `master` |
 | 13 | 2026-11-14 | 修复回溯复盘100%平仓浮点尘仓 | `ac85732`, `9556fb7` | `fix/replay-duplicate-close` |
 | 12 | 2026-11-10 | 回溯复盘结束与恢复复盘 | `7a24f8e`, `06e803a` | `feat/replay-end-review` |
 | 11 | 2026-11-05 | 完成架构深化全部七项交付 | `9e627a6`, `665ad0d`, `d4e55a1`, `81896b4`, `720367d`, `9f771a2`, `4c78c8d` | `feat/architecture-deepening` |

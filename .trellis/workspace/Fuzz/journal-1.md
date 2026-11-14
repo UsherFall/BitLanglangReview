@@ -308,3 +308,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: 结束复盘切周期保留单子开仓定位
+<!-- trellis-session: v=2 fp=a6400ac1c8e48b91 -->
+
+**Date**: 2026-11-14
+**Task**: 结束复盘切周期保留单子开仓定位
+**Branch**: `master`
+
+### Summary
+
+复现并修复 ended 回溯复盘切周期清焦点导致未定位当前单子开仓点：switchTimeframe 仅在 active 清 Focus，ended 保留同一 rangeKey:token 焦点链路，目标周期重新取 positionOpenTime 窗口并定位，progressTime/Paper 冻结不变。新增 lifecycle 与 App 红绿回归，相关 78 项及排除既有缺失 pool fixture 后全量 84 文件/740 用例通过，tsc/diff check 通过；同步 active/ended 切周期 Focus 规范并归档任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `490f3a3` | fix(replay): 结束复盘切周期保留开仓定位 |
+| `5153d66` | docs(spec): 明确结束复盘切周期焦点契约 |
+
+### Status
+
+[OK] **Completed**
