@@ -285,3 +285,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: 修复回溯复盘100%平仓浮点尘仓
+<!-- trellis-session: v=2 fp=a25693b76567891e -->
+
+**Date**: 2026-11-14
+**Task**: 修复回溯复盘100%平仓浮点尘仓
+**Branch**: `fix/replay-duplicate-close`
+
+### Summary
+
+用 BTC 2020-08-03 真实会话复现100%平仓后5.55e-17尘仓，根因为数量×100÷100及多仓腿FIFO浮点误差。新增共享quantityForCloseRatio并让全平逐腿完整消费，覆盖市价/限价/单多仓腿与App链路；739用例通过，唯一既有level-alert-parity缺pool数据。切周期问题经真实浏览器对照及用户强刷确认是旧页面状态，未改相关代码。数值契约已写入spec并归档任务。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac85732` | fix(replay): 修复100%平仓浮点尘仓 |
+| `9556fb7` | docs(spec): 回溯复盘全平数值契约 |
+
+### Status
+
+[OK] **Completed**
