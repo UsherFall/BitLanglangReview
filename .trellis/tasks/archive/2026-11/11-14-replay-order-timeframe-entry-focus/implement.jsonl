@@ -1,0 +1,3 @@
+{"file":".trellis/spec/frontend/free-replay-session-lifecycle.md","reason":"switchTimeframe、onClearFocus、ended 冻结与切周期进度的权威生命周期契约；本次只调整 ended Focus 分支"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"App Focus 与 lifecycle、Dataset 的状态边界，避免新增第二份状态或移动 Candlestick 所有权"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Free Replay Order Focus Anchor、整窗替换、rangeKey:token 与切周期首锚守卫的完整契约"}
