@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/11-14-replay-duplicate-close/research/reproduction.md","reason":"真实 BTC 数值复现、根因公式、多仓腿浮点边界和已排除的切周期问题，实施时必须保持这些证据语义"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Free Replay 回归测试与全量验证要求"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Paper Trading 状态边界与优先使用可测试纯函数派生值的约定"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"市价与限价平仓需要共享同一数量换算规则，避免复制实现"}

@@ -46,6 +46,38 @@ describe('Free Replay Paper Trading', () => {
     });
   });
 
+  it('closes the real BTC 2020-08-03 position once at 100% without floating-point dust', () => {
+    const prior = normalizePaperTradingSession({
+      active: true,
+      startedAtCursorTime: 1596427200,
+      nextId: 10,
+      pendingEntry: null,
+      pendingExit: null,
+      position: null,
+      trades: [
+        { pnl: 16.82897275950276 },
+        { pnl: 120.89097920261985 },
+        { pnl: -65.2030028506056 },
+      ],
+    });
+    const opened = openMarket(
+      prior,
+      makeCandle('2020-08-07T16:00:00Z', { close: 11630.5, timeframe: '15m' }),
+      { direction: 'short', positionRatioPercent: 50, leverage: 10 },
+      1596816900,
+    );
+    const originalQuantity = opened.position?.quantity;
+    expect(originalQuantity).toBe(0.4610794673967229);
+
+    const closed = closeMarket(opened, makeCandle('2020-08-07T20:00:00Z', { close: 11568, timeframe: '15m' }), 1596831300, 100);
+
+    expect(closed.position).toBeNull();
+    expect(closed.trades).toHaveLength(4);
+    expect(closed.trades.at(-1)?.quantity).toBe(originalQuantity);
+    const closedAgain = closeMarket(closed, makeCandle('2020-08-08T09:45:00Z', { close: 11748, timeframe: '15m' }), 1596880800, 100);
+    expect(closedAgain.trades).toHaveLength(4);
+  });
+
   it('calculates short pnl, realized stats, and floating pnl without adding floating pnl to realized totals', () => {
     const settings: PaperTradingSettings = { direction: 'short', positionRatioPercent: 100, leverage: 1 };
     const opened = openMarket(startPaperTrading(initialPaperTradingSession(), 1), makeCandle('2024-05-21T10:00:00+08:00', { close: 100 }), settings, 1);
@@ -139,6 +171,51 @@ describe('Free Replay Paper Trading', () => {
     expect(closed.trades[0].exitPrice).toBe(105);
     expect(closed.trades[0].exitTime).toBe(exitTime * 1000);
     expect(closed.trades[0].pnl).toBe(25);
+  });
+
+  it('restores a legacy 100% exit limit at the exact full quantity and closes without dust', () => {
+    const quantity = 0.4610794673967229;
+    const leg = {
+      id: 'leg-1',
+      entryPrice: 11630.5,
+      entryTime: 1596816900000,
+      quantity,
+      margin: 536.2584745557585,
+      notional: 5362.584745557586,
+      leverage: 10,
+    };
+    const pending = normalizePaperTradingSession({
+      active: true,
+      startedAtCursorTime: 1596427200,
+      nextId: 2,
+      pendingEntry: null,
+      pendingExit: { id: 'exit-1', kind: 'exit', direction: 'short', limitPrice: 11568, closeRatioPercent: 100, createdAtCursorTime: 1596820000 },
+      position: {
+        id: 'position-1',
+        direction: 'short',
+        originPrice: 11630.5,
+        originTime: 1596816900000,
+        entryPrice: 11630.5,
+        entryTime: 1596816900000,
+        quantity,
+        margin: leg.margin,
+        notional: leg.notional,
+        leverage: 10,
+        legs: [leg],
+      },
+      trades: [],
+    });
+
+    expect(pending.pendingExit?.quantity).toBe(quantity);
+    const closed = processRevealedCandle(
+      pending,
+      makeCandle('2020-08-07T20:00:00Z', { low: 11500, high: 11600, close: 11568, timeframe: '15m' }),
+      1596831300,
+    );
+    expect(closed.position).toBeNull();
+    expect(closed.pendingExit).toBeNull();
+    expect(closed.trades).toHaveLength(1);
+    expect(closed.trades[0].quantity).toBe(quantity);
   });
 
   it('rejects a global exit limit larger than the position', () => {
@@ -301,6 +378,45 @@ describe('Free Replay Paper Trading', () => {
     expect(last).toMatchObject({ quantity: 6.4, margin: 760, exitPrice: 200, pnl: 520, returnRate: 520 / 760 });
     expect(last.entryPrice).toBeCloseTo((4 * 100 + 2.4 * 150) / 6.4, 6);
     expect(last.entryTime).toBe(firstEntryTime * 1000);
+  });
+
+  it('consumes every leg on a full close even when FIFO subtraction would leave one ulp', () => {
+    const quantities = [946.8837696911233, 454.44114875185096];
+    const quantity = quantities.reduce((sum, value) => sum + value, 0);
+    const legs = quantities.map((legQuantity, index) => ({
+      id: `leg-${index + 1}`,
+      entryPrice: 1,
+      entryTime: 1000 + index,
+      quantity: legQuantity,
+      margin: legQuantity,
+      notional: legQuantity,
+      leverage: 1,
+    }));
+    const opened: PaperTradingSession = {
+      ...startPaperTrading(initialPaperTradingSession(), 1),
+      pendingExit: { id: 'exit-1', kind: 'exit', direction: 'long', limitPrice: 2, quantity: 1, createdAtCursorTime: 1 },
+      position: {
+        id: 'position-1',
+        direction: 'long',
+        originPrice: 1,
+        originTime: 1000,
+        entryPrice: 1,
+        entryTime: 1000,
+        quantity,
+        margin: quantity,
+        notional: quantity,
+        leverage: 1,
+        legs,
+      },
+      trades: [],
+    };
+
+    const closed = closeMarket(opened, makeCandle('2024-05-21T10:05:00+08:00', { open: 1, high: 2, low: 0.5, close: 2 }), 2, 100);
+
+    expect(closed.position).toBeNull();
+    expect(closed.pendingExit).toBeNull();
+    expect(closed.trades).toHaveLength(1);
+    expect(closed.trades[0].quantity).toBe(quantity);
   });
 
   it('compounds the available margin with realized profit and shrinks it with realized loss (11/02 权益制)', () => {

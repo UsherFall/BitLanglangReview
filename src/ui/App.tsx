@@ -46,6 +46,7 @@ import {
   placeEntryLimit,
   placeExitLimit,
   placeStopLoss,
+  quantityForCloseRatio,
   startPaperTrading,
   type PaperDirection,
   type PaperLeg,
@@ -1104,7 +1105,7 @@ function FreeReplayPaperTradingPanel({
   const exitLimitPrice = Number(exitLimit);
   const currentPrice = currentCandle?.close;
   const positionQuantity = position?.quantity ?? 0;
-  const exitQuantity = positionQuantity * closeRatioPercent / 100;
+  const exitQuantity = quantityForCloseRatio(positionQuantity, closeRatioPercent);
   const canOpenMarket = session.active && !session.position && !!currentCandle;
   const canAddMarket = session.active && !!position && available > 0 && !!currentCandle;
   const canSubmitEntryLimit = session.active && !session.position && Number.isFinite(entryLimitPrice) && entryLimitPrice > 0;

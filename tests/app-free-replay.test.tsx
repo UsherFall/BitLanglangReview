@@ -2977,6 +2977,71 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(screen.getAllByTitle('跳到开仓点')[0].className).toContain('active'));
   });
 
+  it('submits a 100% limit close at the exact position quantity and fills without dust', async () => {
+    const quantity = 0.4610794673967229;
+    const entryTime = Date.parse('2024-05-21T09:45:00+08:00');
+    const session = makeSeededSession({
+      timeframe: '15m',
+      cursorTime: entryTime / 1000,
+      paperTrading: {
+        active: true,
+        startedAtCursorTime: entryTime / 1000,
+        nextId: 2,
+        pendingEntry: null,
+        pendingExit: null,
+        position: {
+          id: 'position-1',
+          direction: 'short',
+          originPrice: 11630.5,
+          originTime: entryTime,
+          entryPrice: 11630.5,
+          entryTime,
+          quantity,
+          margin: 536.2584745557585,
+          notional: 5362.584745557586,
+          leverage: 10,
+          legs: [{
+            id: 'leg-1',
+            entryPrice: 11630.5,
+            entryTime,
+            quantity,
+            margin: 536.2584745557585,
+            notional: 5362.584745557586,
+            leverage: 10,
+          }],
+        },
+        trades: [],
+      },
+    });
+    stubFreeReplayFetch({
+      sessions: [session],
+      onCandles: () => Response.json({ candles: [
+        makeCandle('2024-05-21T09:30:00+08:00', { timeframe: '15m', close: 11600 }),
+        makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m', close: 11630.5 }),
+        makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m', low: 11500, high: 11600, close: 11568 }),
+      ] }),
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(document.querySelector('.history-row')).toHaveTextContent('BTCUSDT'));
+    fireEvent.click(document.querySelector('.history-row')!);
+    await waitFor(() => expect(screen.getByText('保证金 536.26')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('限价平仓价格'), { target: { value: '11568' } });
+    fireEvent.click(screen.getByRole('button', { name: '提交限价平仓' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.paperTrading).toMatchObject({
+      pendingExit: { quantity },
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.paperTrading).toMatchObject({
+      position: null,
+      pendingExit: null,
+      trades: [{ quantity }],
+    }));
+  });
+
   it('freezes and resumes the exact paper scene while keeping read-only viewing available', async () => {
     stubFreeReplayFetch({
       onCandles: (url) => {

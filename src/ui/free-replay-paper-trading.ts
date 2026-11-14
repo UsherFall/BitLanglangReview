@@ -92,9 +92,19 @@ export function placeEntryLimit(session: PaperTradingSession, limitPrice: number
   return { ...session, nextId: session.nextId + 1, pendingEntry: order };
 }
 
+/**
+ * Converts a close ratio to quantity without rounding a requested full close
+ * down by one ulp (`quantity * 100 / 100` is not always an identity).
+ * Other ratios deliberately keep their existing arithmetic and validation.
+ */
+export function quantityForCloseRatio(positionQuantity: number, closeRatioPercent: number): number {
+  return closeRatioPercent === 100 ? positionQuantity : positionQuantity * closeRatioPercent / 100;
+}
+
 export function closeMarket(session: PaperTradingSession, candle: Candlestick, eventTime: number, closeRatioPercent = 100): PaperTradingSession {
   if (!session.active || !session.position) return session;
-  const closeQuantity = session.position.quantity * normalizeCloseRatio(closeRatioPercent) / 100;
+  const closeRatio = normalizeCloseRatio(closeRatioPercent);
+  const closeQuantity = quantityForCloseRatio(session.position.quantity, closeRatio);
   return closeQuantityFor(session, candle.close, eventTime * 1000, closeQuantity);
 }
 
@@ -400,6 +410,9 @@ function fillExitOrder(session: PaperTradingSession, order: PaperOrder, eventTim
 function closeQuantityFor(session: PaperTradingSession, exitPrice: number, exitTime: number, closeQuantity: number): PaperTradingSession {
   if (!session.position || closeQuantity <= 0) return session;
   const position = session.position;
+  // Covering the aggregate means EVERY leg is consumed in full. Subtracting
+  // an aggregate float through FIFO can otherwise leave a one-ulp final leg.
+  const closeWholePosition = closeQuantity >= position.quantity;
   let remaining = Math.min(closeQuantity, position.quantity);
   const legs: PaperLeg[] = [];
   let consumedQuantity = 0;
@@ -409,11 +422,11 @@ function closeQuantityFor(session: PaperTradingSession, exitPrice: number, exitT
   let pnl = 0;
   let firstConsumedEntryTime = 0;
   for (const leg of position.legs) {
-    if (remaining <= 0) {
+    if (!closeWholePosition && remaining <= 0) {
       legs.push(leg);
       continue;
     }
-    const take = Math.min(remaining, leg.quantity);
+    const take = closeWholePosition ? leg.quantity : Math.min(remaining, leg.quantity);
     remaining -= take;
     if (firstConsumedEntryTime === 0) firstConsumedEntryTime = leg.entryTime;
     const delta = position.direction === 'long' ? exitPrice - leg.entryPrice : leg.entryPrice - exitPrice;
@@ -591,7 +604,7 @@ function normalizeExitOrder(order: Partial<PaperOrder> & { closeRatioPercent?: n
   if (typeof limitPrice !== 'number' || !isPositiveFinite(limitPrice)) return null;
   let quantity = typeof raw.quantity === 'number' && raw.quantity > 0 ? raw.quantity : 0;
   if (quantity <= 0 && positionQuantity > 0) {
-    quantity = positionQuantity * clamp(raw.closeRatioPercent ?? 100, 1, 100) / 100;
+    quantity = quantityForCloseRatio(positionQuantity, clamp(raw.closeRatioPercent ?? 100, 1, 100));
   }
   if (quantity <= 0) return null;
   return {
