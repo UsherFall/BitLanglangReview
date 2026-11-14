@@ -3116,6 +3116,68 @@ describe('App Free Replay', () => {
     expect(screen.getByRole('button', { name: '重置模拟交易' })).toBeEnabled();
   });
 
+  it('keeps the focused order anchored to its entry across timeframe switches after ending review', async () => {
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        const timeframe = new URL(url, 'http://localhost').searchParams.get('timeframe');
+        if (timeframe === '15m') {
+          return Response.json({ candles: [
+            makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+            makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+            makeCandle('2024-05-21T10:15:00+08:00', { timeframe: '15m' }),
+          ] });
+        }
+        return Response.json({ candles: [
+          makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+          makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+        ] });
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('button', { name: '结束复盘' }));
+    await waitFor(() => expect(sessionPutBodies().at(-1)?.reviewStatus).toBe('ended'));
+    const frozen = sessionPutBodies().at(-1)!;
+
+    const row = screen.getByRole('button', { name: /开 05-21 10:00/ });
+    fireEvent.click(row);
+    const openMs = Date.parse('2024-05-21T10:00:00+08:00');
+    const openSec = openMs / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 300,
+      to: openSec + 150 * 300,
+    }));
+
+    chartMocks.setVisibleRange.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+
+    // ended 切周期保留同一焦点：新周期重新取该单开仓点窗口，而不是回游标。
+    await waitFor(() => {
+      const found = (fetch as unknown as { mock: { calls: Array<[unknown, RequestInit | undefined]> } }).mock.calls
+        .some(([input]) => {
+          const url = String(input);
+          if (!url.startsWith('/api/candles')) return false;
+          const params = new URL(url, 'http://localhost').searchParams;
+          return params.get('timeframe') === '15m'
+            && params.get('mode') === 'initial'
+            && params.get('entryTime') === new Date(openMs).toISOString();
+        });
+      expect(found).toBe(true);
+    });
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 900,
+      to: openSec + 150 * 900,
+    }));
+    expect(row.className).toContain('active');
+    expect(screen.getByText('已结束 · 仅可查看')).toBeInTheDocument();
+
+    const latest = sessionPutBodies().at(-1)!;
+    expect(latest.reviewStatus).toBe('ended');
+    expect(latest.progressTime).toBe(frozen.progressTime);
+    expect(latest.paperTrading).toEqual(frozen.paperTrading);
+  });
+
   it('restores a saved ended session as read-only until the reviewer explicitly resumes', async () => {
     const session = {
       ...makeSeededSession(),

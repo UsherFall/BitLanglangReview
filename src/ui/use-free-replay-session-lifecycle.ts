@@ -290,7 +290,9 @@ export function useFreeReplaySessionLifecycle({
 
   function switchTimeframe(nextTimeframe: ReviewTimeframe): void {
     setTimeframe(nextTimeframe);
-    callbacksRef.current.onClearFocus();
+    // active 切周期回光标右缘；ended 是纯查看态，保留当前单子并由图表在
+    // 新 rangeKey 下重新取开仓点窗口、重新定位，无需用户再点一次。
+    if (reviewStatus !== 'ended') callbacksRef.current.onClearFocus();
     setFreeReplay((current) => current ? {
       ...current,
       dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),

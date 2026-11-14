@@ -339,11 +339,15 @@ describe('useFreeReplaySessionLifecycle', () => {
     act(() => result.current.switchTimeframe('1H'));
     expect(result.current.freeReplay?.progressTime).toBe(progressBeforeSwitch);
     expect(result.current.paperTrading).toBe(frozenPaper);
-    expect(callbacks.onClearFocus).toHaveBeenCalledTimes(1);
+    // ended 是纯查看态：保留当前单子，让图表在新周期重新定位其开仓点。
+    expect(callbacks.onClearFocus).not.toHaveBeenCalled();
 
     act(() => result.current.resumeReview());
     expect(result.current.reviewStatus).toBe('active');
     expect(result.current.paperTrading).toBe(frozenPaper);
+    act(() => result.current.switchTimeframe('5m'));
+    // active 保持 11/04 契约：切周期清 Focus 并回光标右缘。
+    expect(callbacks.onClearFocus).toHaveBeenCalledTimes(1);
     act(() => result.current.setPaperTrading((current) => ({ ...current, nextId: 999 })));
     expect(result.current.paperTrading.nextId).toBe(999);
   });
