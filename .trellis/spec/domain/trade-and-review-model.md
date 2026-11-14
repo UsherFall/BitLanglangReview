@@ -86,6 +86,66 @@ A **Paper Round** (one paper position in a Free Replay, open → fully closed) i
 
 `PaperTrade` / `PaperTradingSession` etc. therefore live in `src/domain/paper-trading.ts` (types only, re-exported by `src/ui/free-replay-paper-trading.ts`) and `normalizePaperTrade` lives there too — the server must parse the same blob the UI parses, and the two must not diverge on defaults.
 
+## Scenario: Paper Full-Close Numerical Contract (11/14)
+
+### 1. Scope / Trigger
+
+Read this before changing Paper Trading close-ratio math, FIFO closing, market/limit exits, or legacy exit-order normalization. A 100% close must never leave a floating-point dust position that needs a second close.
+
+### 2. Signatures
+
+```ts
+quantityForCloseRatio(positionQuantity: number, closeRatioPercent: number): number
+closeMarket(session, candle, eventTime, closeRatioPercent = 100): PaperTradingSession
+// Internal FIFO used by market closes and filled exit limits:
+closeQuantityFor(session, exitPrice, exitTime, closeQuantity): PaperTradingSession
+```
+
+`quantityForCloseRatio` lives in `src/ui/free-replay-paper-trading.ts` and is the SINGLE ratio-to-quantity rule for `closeMarket`, App's exit-limit quantity, and legacy `closeRatioPercent` normalization.
+
+### 3. Contracts
+
+1. **100% is identity.** Return `positionQuantity` directly. `positionQuantity * 100 / 100` is not an IEEE-754 identity for every quantity and can round one ulp down. Other ratios deliberately retain `positionQuantity * closeRatioPercent / 100`; existing input clamp/disable behavior is unchanged.
+2. **Covering the aggregate consumes every leg.** When `closeQuantity >= position.quantity`, FIFO consumes each leg's full remaining quantity rather than relying on repeated floating subtraction to reach zero. The result is one aggregate Paper Trade, `position: null`, and `pendingExit: null`.
+3. **Partial closes stay partial.** FIFO order, per-leg stops, adds, equity and PnL rules do not change. An exit limit larger than the position is still rejected at placement; at fill time its fixed quantity is still capped by the then-remaining position.
+4. **No epsilon clearing and no history rewrite.** Do not round off a small real position to zero and do not migrate already-saved dust fills. The contract prevents new dust; historical session blobs remain untouched.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| 100% market close, one leg | Exact full quantity, null position, no second dust fill |
+| 100% market/limit close, multiple legs | Every leg consumed; one aggregate fill; null position/pending exit |
+| Legacy exit carrying `closeRatioPercent: 100` | Normalized quantity is exactly the restored position quantity |
+| Ratio below 100% | Existing FIFO partial-close behavior and remaining position |
+| Exit quantity above position at placement | Order rejected |
+| Exit quantity above remaining position at fill | Cap to remaining and fully close |
+
+### 5. Good / Base / Bad Cases
+
+- **Good:** the BTC quantity `0.4610794673967229` closes to null in one call instead of becoming `0.46107946739672284` plus a `5.551115123125783e-17` leg.
+- **Good:** quantities `[946.8837696911233, 454.44114875185096]` both close fully even though naive FIFO subtraction leaves a final `1.1368683772161603e-13` leg.
+- **Base:** 50% closes and exit quantities capped after later manual closes retain their previous semantics.
+- **Bad:** fixing only App's formula while FIFO still subtracts aggregate floats, or using an arbitrary epsilon to hide dust.
+
+### 6. Tests Required
+
+- `tests/free-replay-paper-trading.test.ts`: real BTC open→100% market close and idempotent second call; legacy 100% exit normalization→fill; a multi-leg one-ulp regression.
+- `tests/app-free-replay.test.tsx`: restore a position → submit 100% limit close → reveal its fill; assert exact order quantity and final `position: null`.
+- Keep `tests/paper-round.test.ts` and `tests/paper-rounds.test.ts` green so one round's fill aggregation is unchanged.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: a requested full close can become one ulp smaller.
+const closeQuantity = position.quantity * ratio / 100;
+
+// Correct: only non-full ratios use multiplication; full-close FIFO then
+// consumes each leg directly instead of subtracting the aggregate.
+const closeQuantity = quantityForCloseRatio(position.quantity, ratio);
+const take = closeWholePosition ? leg.quantity : Math.min(remaining, leg.quantity);
+```
+
 ## Candlestick And Drawing Contracts
 
 `src/domain/candlestick.ts` keeps market candles as millisecond timestamps with OHLCV fields and a `ReviewTimeframe`. Chart code converts to seconds only at the `lightweight-charts` boundary. The same neutral Module owns `timeframeMs` (nominal duration only) and generic `mergeCandles` (timestamp last-write-wins + ascending); see `shared-contracts.md`.
