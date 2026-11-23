@@ -941,7 +941,7 @@ export function App() {
         ) : reviewMode === 'scan' ? (
           <>
             {scanResult && scanResult.method === 'heat' ? (
-              <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} />
+              <HeatScanResults result={scanResult.data} label={scanResult.anchorLabel} onOpenChart={openLevelDrawer} />
             ) : scanResult && scanResult.method === 'box' ? (
               <BoxScanResults result={scanResult.data} />
             ) : (

@@ -1,11 +1,14 @@
 import {
   HEAT_POOL_TOP_N,
+  HEAT_ACTIVITY_POOL_TOP_N,
+  HEAT_BASELINE_DAILY_BARS,
   HEAT_TIMEFRAME,
   HEAT_WINDOW_BARS,
   HEAT_WINDOW_MS,
   HEAT_MOVERS_LIMIT,
   VOLATILE_THRESHOLD_PCT,
   classifyTier,
+  computeActivityScore,
   normalizeToBinance,
   type HeatRow,
   type MarketHeatResult,
@@ -41,10 +44,9 @@ const MAX_CACHED_ANCHORS = 50;
  * Rate-limit behavior follows the scan: 429 backoff pauses the whole pipeline,
  * 418 fails fast with a warning surfaced on the response; no silent retry.
  *
- * NOTE: this service ALWAYS runs against Binance sources (injected by
- * `app-plugin.ts`), independent of `MARKET_DATA_SOURCE`, because the pool is
- * defined as Binance USDT-M top-N and only Binance metadata can gate TradFi
- * sessions.
+ * NOTE: each instance runs against the ticker/candle sources selected for the
+ * request, independent of `MARKET_DATA_SOURCE`, because the pool is defined by
+ * that source's USDT perpetual universe and session metadata.
  */
 export class MarketHeatService {
   /** anchor -> (instrument -> row|null; null = coin had no 24h window there). */
@@ -54,6 +56,7 @@ export class MarketHeatService {
     private readonly tickerSource: TickerSource,
     private readonly candleSource: CandleSource,
     private readonly rateLimitWarnings: Pick<RateGate, 'takeWarnings'> = binanceRateGate,
+    private readonly dailyGrid: 'utc' | 'shanghai' = 'utc',
   ) {}
 
   async computeHeat(input: {
@@ -80,25 +83,32 @@ export class MarketHeatService {
       else closed.push(ticker.instrument);
     }
     const pool = open.slice(0, poolTopN);
+    const activityPool = open.slice(0, input.poolTopN ?? HEAT_ACTIVITY_POOL_TOP_N);
     const poolInstruments = pool.map((ticker) => ticker.instrument);
 
     const reviewBinance = input.reviewInstrument ? normalizeToBinance(input.reviewInstrument) : null;
     const unmappedReviewInstrument = Boolean(input.reviewInstrument) && reviewBinance === null;
-    const requests = new Set(poolInstruments);
-    if (reviewBinance && !requests.has(reviewBinance)) requests.add(reviewBinance);
+    const statsRequests = new Set(poolInstruments);
+    const activityRequests = new Set(activityPool.map((ticker) => ticker.instrument));
+    if (reviewBinance) {
+      statsRequests.add(reviewBinance);
+      activityRequests.add(reviewBinance);
+    }
+    const requests = new Set([...statsRequests, ...activityRequests]);
 
     const rowsByInstrument = this.anchorCache(input.anchor);
     const missing = [...requests].filter((instrument) => !rowsByInstrument.has(instrument));
     await this.fetchMissing(missing, rowsByInstrument, input.anchor, reviewBinance);
 
-    // Stats over the coins this request actually asked for (pool ∪ review coin).
+    // Stats over the Top80 market pool only. The wider activity universe must
+    // not change breadth, median, tier, or the legacy gainers/losers boards.
     let coveredCount = 0;
     let noDataCount = 0;
     let upCount = 0;
     let downCount = 0;
     let volatileCount = 0;
     const covered: HeatRow[] = [];
-    for (const instrument of requests) {
+    for (const instrument of statsRequests) {
       const row = rowsByInstrument.get(instrument);
       if (!row) {
         noDataCount += 1;
@@ -121,6 +131,11 @@ export class MarketHeatService {
     const flagReview = (row: HeatRow): HeatRow => ({ ...row, isReviewCoin: row.instrument === reviewBinance });
     const gainers = covered.filter((row) => row.changePct > 0).sort((a, b) => b.changePct - a.changePct).slice(0, HEAT_MOVERS_LIMIT).map(flagReview);
     const losers = covered.filter((row) => row.changePct < 0).sort((a, b) => a.changePct - b.changePct).slice(0, HEAT_MOVERS_LIMIT).map(flagReview);
+    const activityCandidates = [...activityRequests]
+      .map((instrument) => rowsByInstrument.get(instrument))
+      .filter((row): row is HeatRow => Boolean(row))
+      .map(flagReview)
+      .sort(compareActivityRows);
 
     let reviewRow: HeatRow | null = null;
     if (reviewBinance) {
@@ -132,9 +147,9 @@ export class MarketHeatService {
     return {
       tier,
       stats: {
-        // Pool size = every instrument this reading tried to cover (top-N pool
-        // plus a forced review coin), before no-data members are skipped.
-        poolSize: requests.size,
+        // Pool size = every instrument in the Top80 market reading plus a forced
+        // review coin. Activity-only members are deliberately excluded.
+        poolSize: statsRequests.size,
         coveredCount,
         medianChangePct,
         upCount,
@@ -143,6 +158,8 @@ export class MarketHeatService {
       },
       topGainers: gainers,
       topLosers: losers,
+      activityCandidates,
+      activityPoolSize: input.poolTopN ?? HEAT_ACTIVITY_POOL_TOP_N,
       reviewCoin: reviewRow,
       skipped,
       warnings: this.rateLimitWarnings.takeWarnings(),
@@ -170,19 +187,33 @@ export class MarketHeatService {
   ): Promise<void> {
     const step = timeframeMs(HEAT_TIMEFRAME);
     const refTime = anchor - HEAT_WINDOW_MS;
+    // A live anchor can sit inside the current 15m bar. Fetch from the completed
+    // boundary so OKX's earlier-contiguity seed cannot reject its newest closed
+    // candle; heatRowFromCandles still judges the original anchor below.
+    const candleAnchor = Math.floor(anchor / step) * step;
+    const dailyAnchor = dailyFetchAnchor(anchor, this.dailyGrid);
     await mapLimit(instruments, HEAT_CONCURRENCY, async (instrument) => {
       // The reviewed coin may name a symbol that no longer exists on Binance;
       // degrade it to "no data" instead of failing the whole reading.
       const degradeToNull = instrument === reviewBinance;
       try {
-        const candles = await this.candleSource.getCandlesticks({
-          instrument,
-          timeframe: HEAT_TIMEFRAME,
-          anchor,
-          direction: 'earlier',
-          limit: HEAT_WINDOW_BARS,
-        });
-        rowsByInstrument.set(instrument, heatRowFromCandles(candles, instrument, step, refTime, anchor));
+        const [candles, dailyCandles] = await Promise.all([
+          this.candleSource.getCandlesticks({
+            instrument,
+            timeframe: HEAT_TIMEFRAME,
+            anchor: candleAnchor,
+            direction: 'earlier',
+            limit: HEAT_WINDOW_BARS,
+          }),
+          this.candleSource.getCandlesticks({
+            instrument,
+            timeframe: '1D',
+            anchor: dailyAnchor,
+            direction: 'earlier',
+            limit: HEAT_BASELINE_DAILY_BARS + 1,
+          }),
+        ]);
+        rowsByInstrument.set(instrument, heatRowFromCandles(candles, instrument, step, refTime, anchor, dailyCandles));
       } catch (error) {
         if (degradeToNull) {
           rowsByInstrument.set(instrument, null);
@@ -207,6 +238,7 @@ function heatRowFromCandles(
   step: number,
   refTime: number,
   anchor: number,
+  dailyCandles: Candlestick[],
 ): HeatRow | null {
   // Completed-bar guard: the anchor's containing bar is still forming at the
   // anchor instant and would distort the "as of anchor" reading. Sources may
@@ -230,12 +262,52 @@ function heatRowFromCandles(
   // Candles carry base volume only; quote volume ≈ Σ close × volume.
   let quote = 0;
   for (let i = refIndex; i < completed.length; i += 1) quote += completed[i].close * completed[i].volume;
+  const activityBars = completed.slice(refIndex);
+  const firstOpen = activityBars[0]?.open ?? curClose;
+  const high = Math.max(...activityBars.map((candle) => candle.high));
+  const low = Math.min(...activityBars.map((candle) => candle.low));
+  const currentRangePct = (high - low) / firstOpen * 100;
+  const recentBars = activityBars.slice(-16);
+  const previousBars = activityBars.slice(0, -16);
+  const recentQuote = recentBars.reduce((sum, candle) => sum + candle.close * candle.volume, 0);
+  const previousQuote = previousBars.reduce((sum, candle) => sum + candle.close * candle.volume, 0);
+
+  // One extra daily bar is requested because the anchor's own day may still be
+  // forming. Only completed daily candles enter the 20-day baseline.
+  const baseline = dailyCandles
+    .filter((candle) => candle.timestamp + HEAT_WINDOW_MS <= anchor)
+    .slice(-HEAT_BASELINE_DAILY_BARS);
+  const dailyQuotes = baseline.map((candle) => candle.close * candle.volume).sort((a, b) => a - b);
+  const dailyRanges = baseline.map((candle) => (candle.high - candle.low) / candle.open * 100).sort((a, b) => a - b);
+  const enoughBaseline = baseline.length >= HEAT_BASELINE_DAILY_BARS && dailyQuotes.length > 0 && dailyRanges.length > 0;
+  const baselineQuote = enoughBaseline ? median(dailyQuotes) : 0;
+  const baselineRange = enoughBaseline ? median(dailyRanges) : 0;
+  const quoteVolumeRatio20d = baselineQuote > 0 && quote > 0 ? quote / baselineQuote : null;
+  const rangeRatio20d = baselineRange > 0 && currentRangePct > 0 ? currentRangePct / baselineRange : null;
   return {
     instrument,
     changePct: (curClose / refClose - 1) * 100,
     windowQuoteVolume: quote,
+    quoteVolumeRatio20d,
+    rangeRatio20d,
+    activityScore: computeActivityScore(quoteVolumeRatio20d, rangeRatio20d),
+    recent4hVolumeIntensity: recentBars.length > 0 && previousBars.length > 0 && previousQuote > 0
+      ? (recentQuote / recentBars.length) / (previousQuote / previousBars.length)
+      : null,
     isReviewCoin: false,
   };
+}
+
+function dailyFetchAnchor(anchor: number, grid: 'utc' | 'shanghai'): number {
+  const offset = grid === 'shanghai' ? 8 * 60 * 60 * 1000 : 0;
+  return Math.floor((anchor + offset) / HEAT_WINDOW_MS) * HEAT_WINDOW_MS - offset;
+}
+
+function compareActivityRows(a: HeatRow, b: HeatRow): number {
+  const aScore = a.activityScore ?? Number.NEGATIVE_INFINITY;
+  const bScore = b.activityScore ?? Number.NEGATIVE_INFINITY;
+  if (aScore !== bScore) return bScore - aScore;
+  return Math.abs(b.changePct) - Math.abs(a.changePct);
 }
 
 function median(sortedAsc: number[]): number {

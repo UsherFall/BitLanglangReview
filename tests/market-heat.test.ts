@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTier, normalizeToBinance } from '../src/domain/market-heat';
+import { classifyTier, computeActivityScore, normalizeToBinance } from '../src/domain/market-heat';
 
 describe('classifyTier', () => {
   it('classifies broad, strongly-up pools as hot', () => {
@@ -30,6 +30,22 @@ describe('classifyTier', () => {
     expect(classifyTier(0.75, 0.8)).toBe('warm');
     // 跌家占比 >= 60% but median > -1% → 偏冷 (not 冷市).
     expect(classifyTier(0.25, -0.8)).toBe('cool');
+  });
+});
+
+describe('computeActivityScore', () => {
+  it('combines volume and range ratios without implying direction', () => {
+    expect(computeActivityScore(4, 0.25)).toBe(1);
+    expect(computeActivityScore(2, 2)).toBe(2);
+  });
+
+  it('returns null for missing or invalid baselines', () => {
+    expect(computeActivityScore(null, 1)).toBeNull();
+    expect(computeActivityScore(1, null)).toBeNull();
+    expect(computeActivityScore(0, 1)).toBeNull();
+    expect(computeActivityScore(1, 0)).toBeNull();
+    expect(computeActivityScore(Number.NaN, 1)).toBeNull();
+    expect(computeActivityScore(1, Number.POSITIVE_INFINITY)).toBeNull();
   });
 });
 

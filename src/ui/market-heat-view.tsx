@@ -17,12 +17,12 @@ export const TIER_HINT: Record<MarketTier, string> = {
   cold: '普跌且跌得深，场子很冷',
 };
 
-function formatSigned(value: number): string {
+export function formatSigned(value: number): string {
   const sign = value >= 0 ? '+' : '';
   return `${sign}${value.toFixed(2)}%`;
 }
 
-function formatVolume(value: number): string {
+export function formatVolume(value: number): string {
   if (value >= 1e9) return `${(value / 1e9).toFixed(2)}B`;
   if (value >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
   if (value >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
@@ -36,9 +36,11 @@ function formatVolume(value: number): string {
  * markup so the two surfaces never drift apart. `layout` only switches the board
  * container: `stack` (floating review panel) or `columns` (embedded scan card).
  */
-export function MarketHeatView({ result, layout = 'stack' }: {
+export function MarketHeatView({ result, layout = 'stack', showBoards = true }: {
   result: MarketHeatResult;
   layout?: 'stack' | 'columns';
+  /** Embedded activity scan hides the legacy boards; the review panel keeps them. */
+  showBoards?: boolean;
 }) {
   const reviewInstrument = result.reviewCoin?.instrument;
   return (
@@ -56,10 +58,12 @@ export function MarketHeatView({ result, layout = 'stack' }: {
         <span className="market-heat-number">异动 <b>{result.stats.volatileCount}</b></span>
         <span className="market-heat-number">覆盖 <b>{result.stats.coveredCount}/{result.stats.poolSize}</b></span>
       </div>
-      <div className={`market-heat-boards ${layout}`}>
-        <HeatBoard rows={result.topGainers} title="涨幅榜" tone="profit" reviewInstrument={reviewInstrument} empty="当时没有上涨的币" />
-        <HeatBoard rows={result.topLosers} title="跌幅榜" tone="loss" reviewInstrument={reviewInstrument} empty="当时没有下跌的币" />
-      </div>
+      {showBoards && (
+        <div className={`market-heat-boards ${layout}`}>
+          <HeatBoard rows={result.topGainers} title="涨幅榜" tone="profit" reviewInstrument={reviewInstrument} empty="当时没有上涨的币" />
+          <HeatBoard rows={result.topLosers} title="跌幅榜" tone="loss" reviewInstrument={reviewInstrument} empty="当时没有下跌的币" />
+        </div>
+      )}
       {renderSkips(result)}
       {result.warnings.map((warning) => <p key={warning} className="market-heat-warning">{warning}</p>)}
     </>

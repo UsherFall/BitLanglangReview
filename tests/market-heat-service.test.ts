@@ -4,6 +4,7 @@ import type { Ticker } from '../src/server/market-data';
 import { MarketHeatService } from '../src/server/market-heat-service';
 
 const STEP = 15 * 60 * 1000;
+const DAY = 24 * 60 * 60 * 1000;
 // Wednesday 2024-06-12 04:00 UTC — crypto/commodity always open, US equities open.
 const ANCHOR = Date.UTC(2024, 5, 12, 4, 0, 0);
 // Saturday 2024-06-15 — US equities closed.
@@ -18,7 +19,7 @@ function ticker(instrument: string, quoteVolume24h = 1e9, marketClass?: Ticker['
  * except the last one, which lands on `changePct` away from the reference so the
  * computed 24h change equals `changePct` (up to float noise).
  */
-function candlesFor(instrument: string, changePct: number, anchor: number): Candlestick[] {
+function candlesFor(instrument: string, changePct: number, anchor: number, barRangePct = 0): Candlestick[] {
   const close = 100;
   const candles: Candlestick[] = [];
   for (let i = 0; i < 100; i += 1) {
@@ -28,9 +29,28 @@ function candlesFor(instrument: string, changePct: number, anchor: number): Cand
       timeframe: '15m',
       timestamp: anchor - STEP * (100 - i),
       open: close,
-      high: close,
-      low: close,
+      high: close * (1 + barRangePct / 200),
+      low: close * (1 - barRangePct / 200),
       close: isLast ? close * (1 + changePct / 100) : close,
+      volume: 10,
+    });
+  }
+  return candles;
+}
+
+/** Twenty completed daily bars with deterministic quote volume and range. */
+function dailyCandlesFor(instrument: string, anchor: number): Candlestick[] {
+  const candles: Candlestick[] = [];
+  for (let i = 0; i < 20; i += 1) {
+    const timestamp = anchor - (20 - i) * DAY;
+    candles.push({
+      instrument,
+      timeframe: '1D',
+      timestamp,
+      open: 100,
+      high: 110,
+      low: 90,
+      close: 100,
       volume: 10,
     });
   }
@@ -42,16 +62,22 @@ function buildService(options: {
   tickers: Ticker[];
   changes?: Record<string, number>;
   noData?: string[];
+  noBaselineData?: string[];
+  barRangePct?: number;
+  dailyGrid?: 'utc' | 'shanghai';
   warnings?: string[];
   onFetch?: (instrument: string) => void;
   /** Append the anchor's own (still-forming) bar, as the sources now may. */
   anchorBar?: boolean;
 }) {
   const warnings = options.warnings ?? [];
-  const getCandlesticks = vi.fn(async ({ instrument, anchor }: { instrument: string; anchor: number }) => {
+  const getCandlesticks = vi.fn(async ({ instrument, anchor, timeframe }: { instrument: string; anchor: number; timeframe: string }) => {
     options.onFetch?.(instrument);
+    if (timeframe === '1D') {
+      return options.noBaselineData?.includes(instrument) ? [] : dailyCandlesFor(instrument, anchor);
+    }
     if (options.noData?.includes(instrument)) return [];
-    const candles = candlesFor(instrument, options.changes?.[instrument] ?? 0, anchor);
+    const candles = candlesFor(instrument, options.changes?.[instrument] ?? 0, anchor, options.barRangePct);
     if (options.anchorBar) {
       candles.push({ instrument, timeframe: '15m', timestamp: anchor, open: 100, high: 100, low: 100, close: 100, volume: 10 });
     }
@@ -61,6 +87,7 @@ function buildService(options: {
     { listTickers: vi.fn(async () => options.tickers) },
     { getCandlesticks },
     { takeWarnings: () => warnings.splice(0) },
+    options.dailyGrid,
   );
   return { service, getCandlesticks };
 }
@@ -96,7 +123,67 @@ describe('MarketHeatService.computeHeat', () => {
     expect(result.topGainers).toHaveLength(8);
     expect(result.topLosers[0]?.instrument).toBe('NEARUSDT');
     expect(result.topLosers).toHaveLength(2);
-    expect(getCandlesticks).toHaveBeenCalledTimes(10);
+    expect(getCandlesticks).toHaveBeenCalledTimes(20);
+  });
+
+  it('computes relative activity from rolling 24h and the 20-day baseline', async () => {
+    const tickers = [ticker('BTCUSDT')];
+    const { service } = buildService({ tickers, changes: { BTCUSDT: 0 }, barRangePct: 2 });
+    const result = await service.computeHeat({ anchor: ANCHOR });
+    const row = result.activityCandidates?.[0];
+
+    // 97 bars including the reference candle × 100×10 quote = 97,000; daily baseline = 1,000.
+    expect(row?.quoteVolumeRatio20d).toBeCloseTo(97, 6);
+    // 24h range 2% / daily baseline range 20% = 0.1.
+    expect(row?.rangeRatio20d).toBeCloseTo(0.1, 6);
+    expect(row?.activityScore).toBeCloseTo(Math.sqrt(97 * 0.1), 6);
+    expect(row?.recent4hVolumeIntensity).toBeCloseTo(1, 6);
+  });
+
+  it('floors intraday and UTC daily fetch anchors without changing the heat anchor', async () => {
+    const tickers = [ticker('BTCUSDT')];
+    const { service, getCandlesticks } = buildService({ tickers });
+    const anchor = ANCHOR + 7 * 60 * 1000;
+    await service.computeHeat({ anchor });
+
+    const intraday = getCandlesticks.mock.calls.find(([call]) => call.timeframe === '15m');
+    const daily = getCandlesticks.mock.calls.find(([call]) => call.timeframe === '1D');
+    expect(intraday?.[0].anchor).toBe(ANCHOR);
+    expect(daily?.[0].anchor).toBe(Date.UTC(2024, 5, 12));
+  });
+
+  it('uses the Shanghai daily grid when the source requires it', async () => {
+    const tickers = [ticker('BTC-USDT-SWAP')];
+    const { service, getCandlesticks } = buildService({ tickers, dailyGrid: 'shanghai' });
+    const anchor = ANCHOR + 7 * 60 * 1000;
+    await service.computeHeat({ anchor });
+
+    const daily = getCandlesticks.mock.calls.find(([call]) => call.timeframe === '1D');
+    expect(daily?.[0].anchor).toBe(Date.UTC(2024, 5, 11, 16));
+  });
+
+  it('keeps the Top80 market reading separate from the Top120 activity universe', async () => {
+    const tickers = Array.from({ length: 85 }, (_, index) => ticker(`COIN${index}USDT`));
+    const { service } = buildService({ tickers });
+    const result = await service.computeHeat({ anchor: ANCHOR });
+
+    expect(result.stats.poolSize).toBe(80);
+    expect(result.stats.coveredCount).toBe(80);
+    expect(result.activityPoolSize).toBe(120);
+    expect(result.activityCandidates).toHaveLength(85);
+  });
+
+  it('returns null activity metrics when the 20-day baseline is unavailable', async () => {
+    const tickers = [ticker('BTCUSDT')];
+    const { service } = buildService({ tickers, noBaselineData: ['BTCUSDT'] });
+    const result = await service.computeHeat({ anchor: ANCHOR });
+
+    expect(result.stats.coveredCount).toBe(1);
+    expect(result.activityCandidates?.[0]).toMatchObject({
+      quoteVolumeRatio20d: null,
+      rangeRatio20d: null,
+      activityScore: null,
+    });
   });
 
   it('drops session-closed TradFi pool members at the anchor and reports them', async () => {
@@ -126,7 +213,7 @@ describe('MarketHeatService.computeHeat', () => {
 
     expect(result.skipped.closedCount).toBe(0);
     expect(result.stats.poolSize).toBe(1);
-    expect(getCandlesticks.mock.calls.map(([call]) => call.instrument)).toEqual(['BTCUSDT']);
+    expect(getCandlesticks.mock.calls.map(([call]) => call.instrument)).toEqual(['BTCUSDT', 'BTCUSDT']);
   });
 
   it('drops the anchor bar instead of degrading the instrument to no-data', async () => {
@@ -206,6 +293,6 @@ describe('MarketHeatService.computeHeat', () => {
       onFetch: () => warnings.push('币安限频(HTTP 429)，已自动退避 10 秒'),
     });
     const result = await service.computeHeat({ anchor: ANCHOR });
-    expect(result.warnings).toEqual(['币安限频(HTTP 429)，已自动退避 10 秒']);
+    expect(result.warnings).toEqual(['币安限频(HTTP 429)，已自动退避 10 秒', '币安限频(HTTP 429)，已自动退避 10 秒']);
   });
 });

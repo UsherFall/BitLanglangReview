@@ -66,10 +66,10 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
       const bitgetCandleSource = new BitgetCandleSource(candleStore);
       const okxTickerSource = new OkxTickerSource();
       // One ticker/candle/gate trio per source. OKX shares Binance's gate.
-      const marketSources: Record<MarketDataSource, { tickerSource: TickerSource; candleSource: CandleSource; gate: RateGate }> = {
-        binance: { tickerSource: binanceTickerSource, candleSource: binanceCandleSource, gate: binanceRateGate },
-        okx: { tickerSource: okxTickerSource, candleSource: candleService, gate: binanceRateGate },
-        bitget: { tickerSource: bitgetTickerSource, candleSource: bitgetCandleSource, gate: bitgetMarketRateGate },
+      const marketSources: Record<MarketDataSource, { tickerSource: TickerSource; candleSource: CandleSource; gate: RateGate; dailyGrid: 'utc' | 'shanghai' }> = {
+        binance: { tickerSource: binanceTickerSource, candleSource: binanceCandleSource, gate: binanceRateGate, dailyGrid: 'utc' },
+        okx: { tickerSource: okxTickerSource, candleSource: candleService, gate: binanceRateGate, dailyGrid: 'shanghai' },
+        bitget: { tickerSource: bitgetTickerSource, candleSource: bitgetCandleSource, gate: bitgetMarketRateGate, dailyGrid: 'shanghai' },
       };
       const drawingStore = new DrawingStore(resolveDataPath('review.sqlite'));
       const coinScanServices = buildPerSource((source) => {
@@ -77,8 +77,8 @@ export function tradingReviewApiPlugin(options: TradingReviewApiPluginOptions = 
         return new CoinScanService(tickerSource, candleSource, gate, drawingStore);
       });
       const marketHeatServices = buildPerSource((source) => {
-        const { tickerSource, candleSource } = marketSources[source];
-        return new MarketHeatService(tickerSource, candleSource);
+        const { tickerSource, candleSource, gate, dailyGrid } = marketSources[source];
+        return new MarketHeatService(tickerSource, candleSource, gate, dailyGrid);
       });
       const freeReplaySessionStore = new FreeReplaySessionStore(resolveDataPath('review.sqlite'));
       const bitgetPositionStore = new BitgetPositionStore(resolveDataPath('review.sqlite'));

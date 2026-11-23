@@ -16,18 +16,21 @@
 ```ts
 const requestedSource = options.marketDataSource ?? process.env.MARKET_DATA_SOURCE;
 const defaultSource: MarketDataSource = isMarketDataSource(requestedSource) ? requestedSource : DEFAULT_MARKET_DATA_SOURCE;
-const marketSources: Record<MarketDataSource, { tickerSource: TickerSource; candleSource: CandleSource; gate: RateGate }> = {
-  binance: { tickerSource: binanceTickerSource, candleSource: binanceCandleSource, gate: binanceRateGate },
-  okx:     { tickerSource: okxTickerSource,     candleSource: candleService,     gate: binanceRateGate },   // OKX shares the Binance gate
-  bitget:  { tickerSource: bitgetTickerSource,  candleSource: bitgetCandleSource, gate: bitgetMarketRateGate },
+const marketSources: Record<MarketDataSource, { tickerSource: TickerSource; candleSource: CandleSource; gate: RateGate; dailyGrid: 'utc' | 'shanghai' }> = {
+  binance: { tickerSource: binanceTickerSource, candleSource: binanceCandleSource, gate: binanceRateGate, dailyGrid: 'utc' },
+  okx:     { tickerSource: okxTickerSource,     candleSource: candleService,     gate: binanceRateGate, dailyGrid: 'shanghai' }, // OKX shares the Binance gate
+  bitget:  { tickerSource: bitgetTickerSource,  candleSource: bitgetCandleSource, gate: bitgetMarketRateGate, dailyGrid: 'shanghai' },
 };
 // One stateless service per source (MarketHeatService's anchor cache is per-source by construction).
 const coinScanServices  = buildPerSource((s) => new CoinScanService(marketSources[s].tickerSource, marketSources[s].candleSource, marketSources[s].gate));
-const marketHeatServices = buildPerSource((s) => new MarketHeatService(marketSources[s].tickerSource, marketSources[s].candleSource));
+const marketHeatServices = buildPerSource((s) => {
+  const { tickerSource, candleSource, gate, dailyGrid } = marketSources[s];
+  return new MarketHeatService(tickerSource, candleSource, gate, dailyGrid);
+});
 // Route: source = isMarketDataSource(url.searchParams.get('source')) ? that : defaultSource.
 ```
 
-The coin scan and the market-heat service consume the REQUEST-selected `tickerSource`; the scan also consumes `scanCandleSource`. `/api/market-heat` (the review 市场热度 popover) stays on `defaultSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source").
+The coin scan and the market-heat service consume the REQUEST-selected `tickerSource`; the scan also consumes `scanCandleSource`. `/api/market-heat` (the review 市场热度 popover) stays on `defaultSource`. **FreeReplay and the workbook TradeReview default to the OKX `CandlestickService`** and the OKX instrument list regardless of the setting. The personal review mode (Bitget-sourced trades, tab「个人交割单复盘」) is the exception: its charts pass `source=binance` and go through the Binance-then-OKX candidate chain (see "Personal Review Candle Source"). The `dailyGrid` values drive the 1D baseline anchor used by activity scanning: Binance = UTC day, OKX/Bitget = Shanghai day. The selected source's `gate` is also passed into `MarketHeatService`, so rate-limit warnings stay on the selected source's budget.
 
 ### Market heat follows the scan's source (flipped from always-Binance on 10/12)
 
