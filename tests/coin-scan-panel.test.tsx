@@ -32,8 +32,8 @@ function stubFetch(config: { source?: unknown } = {}) {
 function renderPanel(scope: 'crypto' | 'equity' = 'crypto') {
   const onScopeChange = vi.fn();
   const onScanned = vi.fn();
-  render(<CoinScanPanel scope={scope} onScopeChange={onScopeChange} onScanned={onScanned} />);
-  return { onScopeChange, onScanned };
+  const view = render(<CoinScanPanel scope={scope} onScopeChange={onScopeChange} onScanned={onScanned} />);
+  return { ...view, onScopeChange, onScanned };
 }
 
 /** Mirrors App: the scope is owned by the parent and fed back into the panel. */
@@ -79,6 +79,18 @@ describe('CoinScanPanel sub-modules (选品)', () => {
     expect([...methodSelect().options].map((option) => option.value)).toEqual(['shrink', 'watch', 'heat']);
     // 10/21: 「距你标的线」→「主升浪候选」(扫什么), plus the new 标线监控 view.
     expect([...methodSelect().options].map((option) => option.textContent)).toEqual(['主升浪候选', '标线监控', '热度']);
+  });
+
+  it('explains the candidate scan in plain language without algorithm jargon', () => {
+    const { container } = renderPanel('crypto');
+
+    const help = container.querySelector('.coin-scan-help');
+    expect(help?.textContent).toContain('最近 23 根日线振幅较小、首尾变化不大');
+    expect(help?.textContent).toContain('结果只是横盘候选，不代表已经启动，也不自动判断买点');
+    expect(help?.textContent).toContain('你画线后，列表会显示现价离这些线还有多远');
+    expect(help?.textContent).not.toContain('池内分位粗筛');
+    expect(help?.textContent).not.toContain('净漂移');
+    expect(help?.textContent).not.toContain('序列绝对底部');
   });
 
   it('hides 热度 in the equity sub-module', () => {

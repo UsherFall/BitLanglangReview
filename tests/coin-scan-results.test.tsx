@@ -144,33 +144,73 @@ describe('CoinScanResults', () => {
     expect(container.querySelectorAll('.coin-scan-table tbody tr.demoted')).toHaveLength(0);
   });
 
-  it('shows the 1D coarse measures in the 结构 column, with this scan\'s cuts', () => {
+  it('shows the 1D measures with plain labels and preserves this scan\'s cuts', () => {
     const { container } = renderResults();
 
-    const headers = [...container.querySelectorAll('.coin-scan-table thead th')].map((th) => th.textContent);
-    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '结构', '距线', '操作']);
+    const headers = [...container.querySelectorAll('.coin-scan-table > thead th')].map((th) => th.textContent);
+    expect(headers).toEqual(['币', '最新价', '24h 涨跌', '成交额', '日线表现', '离我画的线', '操作']);
 
     const cell = container.querySelector('.coin-scan-coarse');
-    // 区间/净漂移 are pool-relative measures, 位 is the row's position inside its
-    // whole 1D series (the quantity the absolute floor judges).
-    expect(cell?.textContent).toBe('23天 区间45.9% 净9.5% 位50.0%');
-    // The thresholds are pool-relative and recomputed per scan, so they are
-    // reported (they are NOT the qR/qN constants); the position floor is the one
-    // ABSOLUTE gate and is reported as such.
+    expect(cell?.textContent).toContain('23 日振幅 45.9%');
+    expect(cell?.textContent).toContain('23 日变动 9.5%');
+    expect(cell?.textContent).toContain('历史价格位置 50.0%');
+    expect(cell?.textContent).not.toContain('区间45.9%');
+    expect(cell?.textContent).not.toContain('净9.5%');
+    // The thresholds are pool-relative and recomputed per scan, so they remain
+    // available even though the visible labels no longer use algorithm jargon.
     expect(cell?.getAttribute('title')).toContain('41.0%');
     expect(cell?.getAttribute('title')).toContain('6.0%');
     expect(cell?.getAttribute('title')).toContain('3.0%');
   });
 
-  it('shows the distance to the user\'s own line, with its state', () => {
+  it('uses the response window in both daily labels', () => {
+    const base = scanResponse();
+    const { container } = renderResults({
+      result: { ...base, coarse: { ...base.coarse!, windowDays: 30 } },
+    });
+
+    const cell = container.querySelector('.coin-scan-coarse');
+    expect(cell?.textContent).toContain('30 日振幅 45.9%');
+    expect(cell?.textContent).toContain('30 日变动 9.5%');
+    expect(cell?.textContent).not.toContain('23 日振幅');
+  });
+
+  it('opens an on-demand explanation with accurate metric and distance definitions', () => {
     const { container } = renderResults();
 
-    const cell = container.querySelector('.coin-scan-level');
-    expect(cell).not.toBeNull();
-    // The timeframe the line was drawn on, the distance in %, and the state.
-    expect(cell?.textContent).toContain('5m');
-    expect(cell?.textContent).toContain('+1.20%');
-    expect(cell?.textContent).toContain('贴近');
+    const summary = [...container.querySelectorAll('summary')].find((element) => element.textContent === '指标怎么算？');
+    expect(summary).toBeDefined();
+    const details = summary!.closest('details')!;
+    expect(details.hasAttribute('open')).toBe(false);
+
+    fireEvent.click(summary!);
+
+    expect(details.hasAttribute('open')).toBe(true);
+    expect(details.textContent).toContain('23 日振幅');
+    expect(details.textContent).toContain('包含影线');
+    expect(details.textContent).toContain('23 日变动');
+    expect(details.textContent).toContain('不分涨跌方向');
+    expect(details.textContent).toContain('本次读取的日线序列');
+    expect(details.textContent).toContain('不是全部历史');
+    expect(details.textContent).toContain('随当前候选池重新计算');
+    expect(details.textContent).toContain('41.0%');
+    expect(details.textContent).toContain('6.0%');
+    expect(details.textContent).toContain('很近 = 不超过 0.5 倍典型波动');
+    expect(details.textContent).toContain('较近 = 大于 0.5 且不超过 1 倍');
+    expect(details.textContent).toContain('还远 = 大于 1 倍');
+    expect(details.textContent).toContain('距离为正表示现价在线上方，为负表示在线下方');
+  });
+
+  it('shows the distance to the user\'s own line with all three plain state labels', () => {
+    const row = scanRow();
+    row.levelAlerts['15m'] = alert(3, 'watch');
+    row.levelAlerts['1H'] = alert(9, 'far');
+    const { container } = renderResults({ result: { ...scanResponse(), scanned: [row] } });
+
+    const cells = [...container.querySelectorAll('.coin-scan-level')];
+    expect(cells[0]?.textContent).toContain('5m');
+    expect(cells[0]?.textContent).toContain('+1.20%');
+    expect(cells.map((cell) => cell.querySelector('.coin-scan-level-state')?.textContent)).toEqual(['很近', '较近', '还远']);
   });
 
   it('画过线的行在币列带「已画」徽标，hover 报线数与周期（10/26）', () => {
@@ -206,12 +246,26 @@ describe('CoinScanResults', () => {
     expect(buttons).not.toContain('画线');
   });
 
-  it('reports the coarse candidates against the alert subset in the header', () => {
+  it('reports the scan flow from the candidate pool to qualified and nearby rows', () => {
     const { container } = renderResults({ result: scanResponse(['AAAUSDT', 'BBBUSDT']) });
 
     const summary = container.querySelector('.detail-header p')?.textContent ?? '';
-    expect(summary).toContain('候选 465 个');
-    expect(summary).toContain('贴近 2 个');
+    expect(summary).toContain('扫描 465 个 → 符合横盘条件 2 个');
+    expect(summary).toContain('靠近画线 2 个');
+    expect(summary).not.toContain('粗筛 2 个');
+    expect(summary).not.toContain('候选 465 个');
+  });
+
+  it('uses explicit distance labels and explains direction in the expanded row', () => {
+    const { container } = renderResults();
+
+    const detailButton = [...container.querySelectorAll('button')].find((button) => button.textContent === '详情');
+    fireEvent.click(detailButton!);
+
+    const headers = [...container.querySelectorAll('.coin-scan-detail-table th')].map((th) => th.textContent);
+    expect(headers).toEqual(['K 线周期', '现价距画线', '近期典型波动', '相当于几倍波动', '状态']);
+    expect(container.querySelector('.coin-scan-detail-note')?.textContent).toContain('正数 = 现价在线上方，负数 = 在线下方');
+    expect(container.querySelector('.coin-scan-detail-table')?.textContent).toContain('很近');
   });
 
   it('sinks demoted rows to the bottom while keeping the order inside each group', () => {
@@ -320,9 +374,11 @@ describe('CoinScanResults · 标线监控视图（10/21）', () => {
     expect(container.querySelector('.coin-scan-note')).toBeNull();
     const summary = container.querySelector('.detail-header p')?.textContent ?? '';
     expect(summary).toContain('监控 2 个画线币');
-    expect(summary).toContain('贴近 2 个');
+    expect(summary).toContain('靠近画线 2 个');
     expect(summary).not.toContain('候选');
-    // The 距线 column still renders — the watch view shares the measurement path.
+    expect(summary).not.toContain('符合横盘条件');
+    expect(container.querySelector('.coin-scan-metric-help')).toBeNull();
+    // The distance column still renders — the watch view shares the measurement path.
     expect(container.querySelector('.coin-scan-level')).not.toBeNull();
   });
 

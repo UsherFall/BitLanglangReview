@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { scanTimeframes, type LevelWatchResponse, type ScanResponse, type ScanRow, type CoarseSummary } from '../domain/coin-scan';
+import { DEFAULT_COARSE_PARAMS, scanTimeframes, type LevelWatchResponse, type ScanResponse, type ScanRow, type CoarseSummary } from '../domain/coin-scan';
 import type { LevelAlert, LevelAlertState } from '../domain/level-alert';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { MarketHeatResult } from '../domain/market-heat';
@@ -267,21 +267,30 @@ export function CoinScanPanel({ scope, onScopeChange, onScanned, onSourceChange 
           <input type="datetime-local" value={anchorInput} onChange={(event) => setAnchorInput(event.target.value)} />
         </label>
       </div>
-      <p className="panel-status hint">
-        {scope === 'equity'
-          ? '范围 = 美股 + 韩股:休市时段整体剔除,序列只含真实交易时段 K 线(盘前 04:00 – 盘后 20:00 ET)。'
-          : '范围 = 加密 + 指数 + 商品,7×24 参与,不受交易时段影响。'}
-        {method === 'shrink'
-          ? '扫描数量留空 = 全池(上限保护)。先对全池取日线做「池内分位粗筛」(盘得够久 + 收住了 + 不在趋势中,再排除趴在序列绝对底部的品种),每币一行。'
-            + '「主升浪候选」找的是盘整里有机会开主升浪的币;行内「距线」列报现价离你自己画的线(水平线/射线)还有多远 — '
-            + '距离按该币自己的波动折算(所以 BTC 和山寨币的门槛不一样),近 → 贴近,远 → 不接近;没画线的币显示「—」。'
-            + '时间点留空 = 现在,填入则扫描「该时刻之前已完成」的 K 线。'
-          : method === 'watch'
-          ? '标线监控:只列你画过线的币(所有周期、跨品种),不经过粗筛 —— 画了线但已不满足盘整口径的币照样在。'
-            + '每行报现价、24h 涨跌和各周期距线三档(贴近/接近/远),按离线最近排序;当前行情源解析不到的画线币会单独提示。'
-            + '时间点留空 = 现在,填入则回放该时刻的状态。'
-          : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
-      </p>
+      <div className="panel-status hint coin-scan-help">
+        <p>
+          {scope === 'equity'
+            ? '范围 = 美股 + 韩股：休市时段整体剔除，只使用真实交易时段的 K 线（盘前 04:00 – 盘后 20:00 ET）。'
+            : '范围 = 加密 + 指数 + 商品，7×24 参与，不受交易时段影响。'}
+        </p>
+        {method === 'shrink' ? (
+          <>
+            <p>
+              找最近 {DEFAULT_COARSE_PARAMS.windowDays} 根日线振幅较小、首尾变化不大，且不贴近近期低位的品种。
+            </p>
+            <p>结果只是横盘候选，不代表已经启动，也不自动判断买点。你画线后，列表会显示现价离这些线还有多远；没画线显示「—」。</p>
+            <p>扫描数量留空 = 全部，填写则只限制最多扫描数；最低成交额按 24h 成交额过滤。时间点留空 = 现在，填入则只使用该时刻前已完成的 K 线。</p>
+          </>
+        ) : (
+          <p>
+            {method === 'watch'
+              ? '标线监控：只列你画过线的币（所有周期、跨品种），不经过横盘筛选 —— 画了线但已不满足盘整条件的币照样在。'
+                + '每行报现价、24h 涨跌和各周期离我画的线三档（很近/较近/还远），按离线最近排序；当前行情源解析不到的画线币会单独提示。'
+                + '时间点留空 = 现在，填入则回放该时刻的状态。'
+              : '扫描当前市场热度:整体场子五档温度 + 涨跌幅榜,池 = 币安成交额 Top80,口径与复盘一致;时间点留空 = 现在。'}
+          </p>
+        )}
+      </div>
       <button className="save-button" disabled={scanning} onClick={() => void scan()}>
         {scanning ? '扫描中…' : '扫描'}
       </button>
@@ -371,7 +380,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
   // line the user drew comes first) and the UI keeps that order, except that
   // manually demoted rows sink to the bottom (a stable partition, not a re-rank).
   const rows = orderScanRows(result.scanned, demotedCoins);
-  // 行入选: shrink = 通过 1D 粗筛;watch = 画了线。「贴近」是行内子集(价格已贴到线边的币)。
+  // 行入选: shrink = 通过 1D 粗筛;watch = 画了线。「很近」是行内子集(价格已到线附近)。
   const alertRows = rows.filter((row) => row.alertTimeframes.length > 0).length;
   // The DISPLAY cut (10/21). Demoted rows already sank to the bottom, so they
   // never hold one of the 20 slots — a coin the user explicitly pushed down must
@@ -385,9 +394,8 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
           <h1>{scopeLabel ? `选品结果 · ${scopeLabel}` : '标线监控'}</h1>
           <p>
             {scopeLabel
-              ? `粗筛 ${result.scanned.length} 个${coarse ? ` · 候选 ${coarse.candidates} 个` : ''} · 贴近 ${alertRows} 个`
-              : `监控 ${result.scanned.length} 个画线币 · 贴近 ${alertRows} 个`}
-            {coarse ? ` · 日线窗口 ${coarse.windowDays} 天` : ''}
+              ? `${coarse ? `扫描 ${coarse.candidates} 个 → ` : ''}符合横盘条件 ${result.scanned.length} 个 · 靠近画线 ${alertRows} 个`
+              : `监控 ${result.scanned.length} 个画线币 · 靠近画线 ${alertRows} 个`}
             {hiddenRows > 0 ? ` · 显示 ${visibleRows.length} 个` : ''}
             {hiddenRows > 0 && (
               <button type="button" className="coin-scan-more" onClick={() => setShowAllRows(true)}>
@@ -401,9 +409,19 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
             )}
           </p>
           {coarse && (
-            <p className="coin-scan-note" title="粗筛用最近 23 根日线算「区间振幅」与「净漂移」（盘得够久 / 收住了 / 不在趋势中）；「位」算的是该币在全部历史里的位置，不是 23 天。">
-              日线窗口 {coarse.windowDays} 天 = 最近 {coarse.windowDays} 根日线算「区间 / 净漂移」；「位」= 该币在全部历史里的位置。
-            </p>
+            <details className="coin-scan-note coin-scan-metric-help">
+              <summary>指标怎么算？</summary>
+              <div className="coin-scan-metric-help-body">
+                <p><strong>{coarse.windowDays} 日振幅：</strong>最近 {coarse.windowDays} 根已完成日线中，最高价到最低价的跨度（包含影线）占最新收盘价的比例；越小表示近期波动越窄。</p>
+                <p><strong>{coarse.windowDays} 日变动：</strong>同一窗口最后一根相对第一根收盘价的绝对变化，占第一根收盘价的比例，不分涨跌方向；越小表示越接近横盘。</p>
+                <p><strong>历史价格位置：</strong>最新已完成日线收盘价在本次读取的日线序列最高价与最低价之间的位置，0% 靠低位、100% 靠高位；这里不是全部历史。</p>
+                <p>
+                  <strong>本次通过门槛：</strong>{coarse.windowDays} 日振幅 ≤ {formatPercent(coarse.rangePctThreshold)}，{coarse.windowDays} 日变动 ≤ {formatPercent(coarse.netPctThreshold)}，历史价格位置 ≥ {formatPercent(COARSE_POS_RANGE_FLOOR)}。前两项随当前候选池重新计算。
+                </p>
+                <p><strong>近期典型波动：</strong>对应周期单根 K 线振幅的中位数，用各币自己的波动衡量画线距离。</p>
+                <p><strong>距离状态：</strong>很近 = 不超过 0.5 倍典型波动；较近 = 大于 0.5 且不超过 1 倍；还远 = 大于 1 倍。距离为正表示现价在线上方，为负表示在线下方。</p>
+              </div>
+            </details>
           )}
           {result.levelScaleNotes && result.levelScaleNotes.length > 0 && (
             <p className="coin-scan-note" title={result.levelScaleNotes.join('\n')}>
@@ -440,8 +458,8 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
               <th>最新价</th>
               <th>24h 涨跌</th>
               <th>成交额</th>
-              <th>结构</th>
-              <th>距线</th>
+              <th>日线表现</th>
+              <th>离我画的线</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -473,7 +491,7 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                       <button
                         type="button"
                         className="coin-scan-copy"
-                        title="展开各周期距线明细"
+                        title="展开各周期画线距离明细"
                         onClick={() => setExpandedInstrument((current) => (current === row.instrument ? null : row.instrument))}
                       >
                         {expandedInstrument === row.instrument ? '收起' : '详情'}
@@ -518,13 +536,14 @@ export function CoinScanResults({ result, leaderCoins, onToggleLeaderCoin, demot
                   {expandedInstrument === row.instrument && (
                     <tr className={isDemoted ? 'coin-scan-detail-row demoted' : 'coin-scan-detail-row'}>
                       <td colSpan={8}>
+                        <p className="coin-scan-detail-note">正数 = 现价在线上方，负数 = 在线下方；距离按近期典型波动折算。</p>
                         <table className="coin-scan-detail-table">
                           <thead>
                             <tr>
-                              <th>周期</th>
-                              <th>距线</th>
-                              <th>该币尺子</th>
-                              <th>倍数</th>
+                              <th>K 线周期</th>
+                              <th>现价距画线</th>
+                              <th>近期典型波动</th>
+                              <th>相当于几倍波动</th>
                               <th>状态</th>
                             </tr>
                           </thead>
@@ -598,25 +617,26 @@ function formatLevelAlerts(row: ScanRow): ReactNode {
 }
 
 function levelStateLabel(state: LevelAlertState): string {
-  if (state === 'alert') return '贴近';
-  if (state === 'watch') return '接近';
-  return '远';
+  if (state === 'alert') return '很近';
+  if (state === 'watch') return '较近';
+  return '还远';
 }
 
-// 结构 column: the 1D coarse screen's own measures — 盘得够久(窗口天数)/ 收住了(区间)/
-// 不在趋势中(净漂移)/ 位置(现价在全序列中的位置, 0 = 绝对底部). Every row in the
-// table passed the screen, so this is what put the row here; the pool-relative
-// cuts and the absolute position floor behind it are printed in the title.
+// 日线表现 column: keep the original coarse-screen values, but label them by
+// what the user can read (recent amplitude / direction-free change / position).
+// The title preserves this scan's actual cuts without changing their semantics.
 function formatCoarse(row: ScanRow, windowDays: number | undefined): ReactNode {
   const coarse = row.coarse;
   if (!coarse) return '—';
-  const window = windowDays === undefined ? '' : `${windowDays}天 `;
+  const window = windowDays ?? DEFAULT_COARSE_PARAMS.windowDays;
   const title =
-    `日线粗筛: 区间 ≤ ${formatPercent(coarse.rangePctThreshold)} 且 净漂移 ≤ ${formatPercent(coarse.netPctThreshold)}(本次池内分位重算)` +
-    ` 且 全序列位置 ≥ ${formatPercent(COARSE_POS_RANGE_FLOOR)}(绝对下限)`;
+    `本次参考门槛: ${window} 日振幅 ≤ ${formatPercent(coarse.rangePctThreshold)}，${window} 日变动 ≤ ${formatPercent(coarse.netPctThreshold)}（随当前候选池重算）` +
+    `，历史价格位置 ≥ ${formatPercent(COARSE_POS_RANGE_FLOOR)}`;
   return (
     <span className="coin-scan-coarse" title={title}>
-      {`${window}区间${formatPercent(coarse.rangePct)} 净${formatPercent(coarse.netPct)} 位${formatPercent(coarse.posRange)}`}
+      <span>{`${window} 日振幅 ${formatPercent(coarse.rangePct)}`}</span>
+      <span>{`${window} 日变动 ${formatPercent(coarse.netPct)}`}</span>
+      <span>{`历史价格位置 ${formatPercent(coarse.posRange)}`}</span>
     </span>
   );
 }

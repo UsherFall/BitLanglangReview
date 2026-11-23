@@ -1759,6 +1759,16 @@ label,
   grid-template-columns: 1fr;
 }
 
+.coin-scan-help {
+  display: grid;
+  gap: 7px;
+  line-height: 1.55;
+}
+
+.coin-scan-help p {
+  margin: 0;
+}
+
 .coin-scan-scope-row {
   display: grid;
   gap: 4px;
@@ -1804,6 +1814,29 @@ label,
   color: #8b949e;
   margin: 4px 0 0;
   white-space: normal;
+}
+
+.coin-scan-metric-help summary {
+  width: max-content;
+  color: #a5b4c4;
+  cursor: pointer;
+}
+
+.coin-scan-metric-help-body {
+  display: grid;
+  gap: 6px;
+  max-width: 1040px;
+  margin-top: 8px;
+  line-height: 1.6;
+}
+
+.coin-scan-metric-help-body p {
+  margin: 0;
+}
+
+.coin-scan-metric-help-body strong {
+  color: #c9d1d9;
+  font-weight: 500;
 }
 
 /* 「显示更多 / 收起」：跟在表头那行文字后面，必须一眼看到 ——
@@ -1876,9 +1909,12 @@ label,
   opacity: 0.45;
 }
 
-/* 结构列(日线粗筛的度量:盘整窗口 / 区间 / 净漂移):次要信息,比价格弱一档。 */
+/* 日线表现:保留原粗筛数值,用完整指标名逐项展示,比价格弱一档。 */
 .coin-scan-coarse {
+  display: grid;
+  gap: 2px;
   color: #8b949e;
+  font-size: 12px;
 }
 
 /* 「已画」徽标(10/26):币列名称旁,标记这一行有 scan 板手画线 —— 距线列数字的出处。
@@ -1915,7 +1951,7 @@ label,
   font-weight: 600;
 }
 
-/* 贴近 = 该看了;接近 = 还差一点;远 = 不在范围内。 */
+/* 很近 = 该看了;较近 = 还差一点;还远 = 不在范围内。 */
 .coin-scan-level.alert .coin-scan-level-dist {
   color: #f85149;
 }
@@ -1937,6 +1973,14 @@ label,
   padding: 0 !important;
   background: #0b1017;
   text-align: left;
+}
+
+.coin-scan-detail-note {
+  margin: 0;
+  padding: 8px 10px 2px;
+  color: #8b949e;
+  font-size: 12px;
+  white-space: normal;
 }
 
 .coin-scan-detail-table {
