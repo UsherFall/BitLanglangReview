@@ -331,3 +331,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: BTC 回放研究与活跃度扫描升级
+<!-- trellis-session: v=2 fp=dc9e96245d6b2b98 -->
+
+**Date**: 2026-11-23
+**Task**: BTC 回放研究与活跃度扫描升级
+**Branch**: `research/btc-2020-05-12-review`
+
+### Summary
+
+复盘 BTC 2020-05-12 与 2020-08-03 回放，拆解收敛类型、活跃度用途及全权益复利风险；升级热度扫描为 Top80 市场温度 + Top120 活跃候选，加入20日相对成交额/波幅、近4h节奏、排序筛选和同源看图，并修复 OKX 实时15m与日界锚点。31项聚焦测试、754项其余测试、三种行情源和真实浏览器交互验证完成；无关历史 research/pool fixture 缺失已单独记录。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97a9f96` | feat(scan): 热度扫描升级为活跃度粗筛 |
+| `08d54ac` | docs(research): 沉淀 BTC 回放与活跃度研究 |
+
+### Status
+
+[OK] **Completed**

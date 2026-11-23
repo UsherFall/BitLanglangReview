@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
-- **Last Active**: 2026-11-14
+- **Total Sessions**: 15
+- **Last Active**: 2026-11-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~333 | Active |
+| `journal-1.md` | ~356 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-11-23 | BTC 回放研究与活跃度扫描升级 | `97a9f96`, `08d54ac` | `research/btc-2020-05-12-review` |
 | 14 | 2026-11-14 | 结束复盘切周期保留单子开仓定位 | `490f3a3`, `5153d66` | `master` |
 | 13 | 2026-11-14 | 修复回溯复盘100%平仓浮点尘仓 | `ac85732`, `9556fb7` | `fix/replay-duplicate-close` |
 | 12 | 2026-11-10 | 回溯复盘结束与恢复复盘 | `7a24f8e`, `06e803a` | `feat/replay-end-review` |
