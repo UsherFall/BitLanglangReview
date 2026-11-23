@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/index.md","reason":"确定选品 UI 所属层及前端验证要求。"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"遵守 CoinScanPanel 结果区结构、样式复用、可访问性和 workspace 网格约束。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"保持现有领域类型和 API 数据契约，不为文案改动复制类型。"}
+{"file":".trellis/spec/server/coin-scan.md","reason":"核对日线粗筛、位置序列和距线三档的真实含义，确保通俗文案不改变口径。"}

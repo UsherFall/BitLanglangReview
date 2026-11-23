@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/index.md","reason":"检查前端改动范围和整体验证要求。"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"检查结果区顶层结构、现有样式复用及标线监控分支是否保持正确。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"按项目 UI 测试、中文文案查询和完整检查要求验收。"}
+{"file":".trellis/spec/server/coin-scan.md","reason":"核对通俗文案是否忠实于粗筛、位置与距线计算契约。"}
