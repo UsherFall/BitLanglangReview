@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
-- **Last Active**: 2026-11-05
+- **Total Sessions**: 36
+- **Last Active**: 2026-11-23
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1502 | Active |
+| `journal-1.md` | ~1525 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-11-23 | 通俗化主升浪候选指标表达 | `c5976a9`, `123e9d3` | `master` |
 | 35 | 2026-11-05 | Free Replay Dataset 收拢双数据集协议 | `665ad0d`, `f50667b` | `feat/free-replay-dataset` |
 | 34 | 2026-11-05 | 统一复盘行情源与 Candle Grid | `9e627a6f45f29a432cb6cc3f24522b77ba2b6233` | `feat/replay-market-context` |
 | 32 | 2026-11-03 | 回溯复盘焦点单整窗替换：消除跨空洞价格跨越与标记挤压 | `3a5e433`, `aa16d80` | `master` |

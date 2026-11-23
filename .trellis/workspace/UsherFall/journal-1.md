@@ -1500,3 +1500,26 @@ R1 三浮层右上堆叠(.chart-float-stack);R2 OtherCoinChart 开单K线淡色�
 
 - 父任务 11-05-architecture-deepening 已 2/2 done（planning），确认是否归档
 - 后续子任务：Session 生命周期、SQLite 原子删除、OtherCoinChart merge 去重等
+
+
+## Session 36: 通俗化主升浪候选指标表达
+<!-- trellis-session: v=2 fp=5c38499d23c5d159 -->
+
+**Date**: 2026-11-23
+**Task**: 通俗化主升浪候选指标表达
+**Branch**: `master`
+
+### Summary
+
+优化选品主升浪候选的首屏说明、结果摘要、日线与画线指标命名，新增可展开指标口径并修正历史位置表述；同步前端/选品规范，完整 746 项测试、TypeScript 与生产构建通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c5976a9` | refactor(scan): 通俗化主升浪候选指标表达 |
+| `123e9d3` | docs(spec): 同步选品指标说明契约 |
+
+### Status
+
+[OK] **Completed**
