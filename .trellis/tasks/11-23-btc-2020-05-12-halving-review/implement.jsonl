@@ -1,0 +1,4 @@
+{"file": "CONTEXT.md", "reason": "统一 Free Replay、Paper Round、Market Data Source、Candle Grid 与时间口径。"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "核对 Paper Round、Review Note、标签与星标的存储和派生语义。"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "核对 Binance K 线、时区、连续性和缓存边界，避免混用交易所数据。"}
+{"file": ".trellis/tasks/11-23-btc-2020-05-12-halving-review/research/aug-activity-review.md", "reason": "说明活跃度字段的研究依据、最近4h节奏提示和低活跃样本的边界。"}

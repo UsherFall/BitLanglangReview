@@ -1,0 +1,5 @@
+{"file": "CONTEXT.md", "reason": "按项目领域语言和数据源契约检查研究报告。"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "检查回合数量、批注归属和收益数据解释是否忠实于存储模型。"}
+{"file": ".trellis/spec/server/market-data.md", "reason": "检查行情来源、时间边界和数据缺口说明。"}
+{"file": ".trellis/tasks/11-23-btc-2020-05-12-halving-review/research/aug-activity-review.md", "reason": "检查实现是否保留活跃度仅作粗筛、非方向预测的边界。"}
+{"file": ".trellis/tasks/11-23-btc-2020-05-12-halving-review/research/heat-upgrade-verification.md", "reason": "记录聚焦/全量测试、三源真实扫描、浏览器交互与环境性测试缺口。"}
