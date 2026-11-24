@@ -354,3 +354,27 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: 画线新增自由画笔
+<!-- trellis-session: v=2 fp=0c0564e07f0bc257 -->
+
+**Date**: 2026-11-24
+**Task**: 画线新增自由画笔
+**Branch**: `master`
+
+### Summary
+
+新增 brush 画线类型：press-drag-release 手势绘制自由轨迹（原始秒级点、磁吸不适用、一次手势一次保存并自动退出），polyline 渲染、可选中/整体拖动/删除，复用现有 /api/drawings 与 SQLite 存储（零迁移零服务端改动）；画笔不参与距线/标线监控。定向 100/100、全量 761/761（level-alert-parity 为预存数据缺失）、tsc 与 git diff --check 通过。规范同步 trade-and-review-model / component-guidelines / coin-scan。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5e39b27` | feat(drawing): 画线新增自由画笔 |
+| `e00af7f` | docs(spec): 记录画笔契约与扫描排除 |
+| `883e2f4` | chore(task): 记录自由画笔任务规划 |
+
+### Status
+
+[OK] **Completed**
