@@ -1,0 +1,10 @@
+{"file":".trellis/spec/frontend/index.md","reason":"质量检查需覆盖共享 React 画线层及前端验证要求。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"检查 pointerId、草稿 ref/state、capture 清理及 StrictMode 下的交互状态边界。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"检查是否存在重复画线状态或绕过 SQLite 的持久化。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"检查跨周期回归、真实浏览器手测需求与 jsdom 不能覆盖的 pointer 行为。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"检查 brush 类型、API payload 与时间单位是否复用共享契约。"}
+{"file":".trellis/spec/domain/trade-and-review-model.md","reason":"核对新 kind 与旧画线、board、Instrument 级领域语言一致。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"核对 brush 多点 JSON 存取未破坏 DrawingStore 边界。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 domain 到 UI、SQLite 与扫描排除的跨层数据流和单位。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查是否复用共享画线所有者而没有复制交互或扫描规则。"}
+{"file":".trellis/tasks/11-24-freehand-brush/research/freehand-integration.md","reason":"检查实现是否解决研究记录的 pointer/click、时间归整、拖动与测试兼容风险。"}

@@ -1,0 +1,10 @@
+{"file":".trellis/spec/frontend/index.md","reason":"前端画线改动需遵循 React、图表边界与验证要求。"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"画笔手势需要正确划分 ref 中的可变集成交互状态与 state 中的可见草稿。"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"画笔应复用现有 hook state 与 SQLite 持久化，不能引入另一份画线状态。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"实现需覆盖跨周期画线、jsdom pointer 限制及完整 UI 验证。"}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"新增 brush 必须复用 domain ChartDrawing 契约并保留秒/毫秒边界。"}
+{"file":".trellis/spec/domain/trade-and-review-model.md","reason":"扩展 ChartDrawingKind 时需保持旧 kind、board 与 Instrument 级画线语义。"}
+{"file":".trellis/spec/server/persistence-and-imports.md","reason":"多点画笔需沿用 DrawingStore 的点数组 JSON 持久化边界。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"改动跨 domain、UI、API、SQLite 与扫描测试，需要追踪单位和 board 数据流。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"应复用现有画线 hook、坐标转换、拖动和存储所有者，避免平行实现。"}
+{"file":".trellis/tasks/11-24-freehand-brush/research/freehand-integration.md","reason":"研究记录包含 pointer/click 隔离、原始时间渲染、零迁移与测试兼容的具体结论。"}
