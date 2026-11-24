@@ -832,6 +832,43 @@ describe('CoinScanService · 画线板隔离（10/26）', () => {
     store.close();
   });
 
+  it('画笔只作图上标注：不测量、不计数，也不进标线监控', async () => {
+    const store = new DrawingStore(':memory:');
+    store.saveDrawing({
+      tradeId: null,
+      board: 'scan',
+      instrument: BTC,
+      timeframe: '5m',
+      kind: 'brush',
+      points: [
+        { time: 1, price: 100 },
+        { time: 2, price: 105 },
+        { time: 3, price: 95 },
+      ],
+    });
+    const source = poolSource({ [BTC]: { '5m': 'strong', '1D': 'strong' } });
+    const service = new CoinScanService(
+      { listTickers: source.listTickers },
+      { getCandlesticks: source.getCandlesticks },
+      undefined,
+      store,
+    );
+
+    const scan = await service.scanShrink(params);
+    const btc = scan.scanned.find((row) => row.instrument === BTC);
+    expect(btc?.levelAlerts['5m']).toBeNull();
+    expect(btc?.drawnLineCount).toBe(0);
+    expect(btc?.drawnTimeframes).toEqual([]);
+    expect(requestedTimeframes(source, BTC)).toEqual([COARSE_TIMEFRAME]);
+
+    source.getCandlesticks.mockClear();
+    const watch = await service.scanWatch({ method: 'watch' });
+    expect(watch.scanned).toEqual([]);
+    expect(watch.missingInstruments ?? []).toEqual([]);
+    expect(source.getCandlesticks).not.toHaveBeenCalled();
+    store.close();
+  });
+
   it('标线监控的名单也只认 scan 板：复盘板的线不进 watch', async () => {
     const store = new DrawingStore(':memory:');
     store.saveDrawing({

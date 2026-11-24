@@ -224,6 +224,22 @@ describe('linesFromDrawings', () => {
     ];
     expect(linesFromDrawings(legacy, 'BTCUSDT', '1D')).toHaveLength(0);
   });
+
+  it('drops a freehand brush instead of inventing a level from its points', () => {
+    const brush: ChartDrawing[] = [
+      {
+        ...drawings[0],
+        id: 'brush',
+        kind: 'brush',
+        points: [
+          { time: 1, price: 100 },
+          { time: 2, price: 110 },
+          { time: 3, price: 90 },
+        ],
+      },
+    ];
+    expect(linesFromDrawings(brush, 'BTCUSDT', '1D')).toEqual([]);
+  });
 });
 
 describe('scaleStartIndex', () => {

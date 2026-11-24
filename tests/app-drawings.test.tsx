@@ -49,6 +49,9 @@ describe('App drawings', () => {
   beforeEach(() => {
     posted.length = 0;
     Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+    Element.prototype.hasPointerCapture = vi.fn(() => true);
     vi.stubGlobal('fetch', makeFetch());
   });
 
@@ -275,6 +278,120 @@ describe('App drawings', () => {
     await waitFor(() => expect(document.querySelector('.chart-status')).toBe(null));
     expect(getDrawingsCalls()).toBe(before);
     expect(document.querySelectorAll('line.drawing-shape')).toHaveLength(2);
+  });
+
+  it('draws one freehand brush with raw ordered points and disarms after pointer up', async () => {
+    render(<App />);
+
+    await drawingLine();
+    const brushButton = screen.getByTitle('画笔');
+    fireEvent.click(brushButton);
+    expect(brushButton).toHaveClass('selected');
+    const overlay = document.querySelector('svg.drawing-overlay')!;
+
+    fireEvent.pointerDown(overlay, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 40, clientY: 30 });
+    await waitFor(() => {
+      expect(document.querySelector('polyline.drawing-shape')).toHaveAttribute('points', '10,120 20,120 40,120');
+    });
+
+    fireEvent.pointerUp(overlay, { pointerId: 1, clientX: 40, clientY: 30 });
+    // Browsers dispatch a click after pointerup. It must not become a second
+    // drawing action or select the old horizontal line under the stroke.
+    fireEvent.click(overlay, { clientX: 40, clientY: 30 });
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].kind).toBe('brush');
+    expect(posted[0].board).toBe('review');
+    expect(posted[0].points.map((point) => point.time)).toEqual([1716256810, 1716256820, 1716256840]);
+    expect(brushButton).not.toHaveClass('selected');
+
+    // Saved brush points bypass candlestick flooring too: the first two points
+    // share the 10:00 candle but keep their distinct x coordinates.
+    await waitFor(() => {
+      expect(document.querySelector('polyline.drawing-shape')).toHaveAttribute('points', '10,120 20,120 40,120');
+    });
+    expect(document.querySelectorAll('circle.drawing-handle')).toHaveLength(0);
+    expect(deleteButton()).toBeEnabled();
+  });
+
+  it('discards empty, cancelled, or tool-switched brush drafts without saving', async () => {
+    render(<App />);
+
+    await drawingLine();
+    const brushButton = screen.getByTitle('画笔');
+    const overlay = document.querySelector('svg.drawing-overlay')!;
+
+    // A click without movement is not an empty persisted drawing.
+    fireEvent.click(brushButton);
+    fireEvent.pointerDown(overlay, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(overlay, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.click(overlay, { clientX: 10, clientY: 10 });
+    expect(brushButton).not.toHaveClass('selected');
+    expect(posted).toHaveLength(0);
+    expect(document.querySelector('polyline.drawing-shape')).toBeNull();
+
+    // Pointer cancellation drops the visible draft and exits the tool.
+    fireEvent.click(brushButton);
+    fireEvent.pointerDown(overlay, { pointerId: 2, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(overlay, { pointerId: 2, clientX: 20, clientY: 20 });
+    await waitFor(() => expect(document.querySelector('polyline.drawing-shape')).toBeInTheDocument());
+    fireEvent.pointerCancel(overlay, { pointerId: 2, clientX: 20, clientY: 20 });
+    await waitFor(() => expect(document.querySelector('polyline.drawing-shape')).toBeNull());
+    expect(brushButton).not.toHaveClass('selected');
+    expect(posted).toHaveLength(0);
+
+    // Switching tools also abandons the draft instead of drawing a ghost in
+    // the newly selected tool's shape.
+    fireEvent.click(brushButton);
+    fireEvent.pointerDown(overlay, { pointerId: 3, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(overlay, { pointerId: 3, clientX: 20, clientY: 20 });
+    await waitFor(() => expect(document.querySelector('polyline.drawing-shape')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('水平直线'));
+    await waitFor(() => expect(document.querySelector('polyline.drawing-shape')).toBeNull());
+    expect(posted).toHaveLength(0);
+  });
+
+  it('keeps a saved brush across timeframes and supports whole-stroke drag and delete', async () => {
+    const originalPoints = [
+      { time: 1716256810, price: 100 },
+      { time: 1716256820, price: 101 },
+      { time: 1716256840, price: 102 },
+    ];
+    const fetchMock = makeFetch([
+      { ...makeDrawing(), id: 'd-brush', kind: 'brush', timeframe: '5m', points: originalPoints },
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+
+    await waitFor(() => {
+      expect(document.querySelector('polyline.drawing-shape')).toHaveAttribute('points', '10,120 20,120 40,120');
+    });
+    const getDrawingsCalls = () => fetchMock.mock.calls.filter(([url, init]) => String(url).startsWith('/api/drawings') && init === undefined).length;
+    const before = getDrawingsCalls();
+
+    fireEvent.click(screen.getByRole('button', { name: '4H' }));
+    await waitFor(() => expect(document.querySelector('.chart-status')).toBe(null));
+    expect(getDrawingsCalls()).toBe(before);
+    const brush = document.querySelector('polyline.drawing-shape') as SVGPolylineElement;
+    expect(brush).toHaveAttribute('points', '10,120 20,120 40,120');
+
+    fireEvent.click(brush);
+    await waitFor(() => expect(brush).toHaveAttribute('stroke', '#FACC15'));
+    expect(document.querySelectorAll('circle.drawing-handle')).toHaveLength(0);
+
+    const overlay = document.querySelector('svg.drawing-overlay')!;
+    fireEvent.pointerDown(brush, { pointerId: 9, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(overlay, { pointerId: 9, clientX: 30, clientY: 30 });
+    fireEvent.pointerUp(overlay, { pointerId: 9, clientX: 30, clientY: 30 });
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].kind).toBe('brush');
+    expect(posted[0].points.map((point) => point.time)).toEqual(originalPoints.map((point) => point.time + 20));
+    expect(posted[0].points.map((point) => point.price)).toEqual(originalPoints.map((point) => point.price));
+
+    fireEvent.click(deleteButton());
+    await waitFor(() => expect(document.querySelector('polyline.drawing-shape')).toBeNull());
   });
 });
 

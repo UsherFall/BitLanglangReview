@@ -5,8 +5,10 @@ import type { ReviewTimeframe } from './trade';
  * endpoint and `points[1]` the direction point the line extends towards.
  * `'segment'` is no longer creatable — it stays in the union because drawings
  * saved before the swap still exist and must keep rendering.
+ * `'brush'` is one continuous freehand stroke: its ordered points keep the
+ * pointer's raw seconds/prices instead of being floored to a candlestick.
  */
-export type ChartDrawingKind = 'horizontal' | 'segment' | 'ray';
+export type ChartDrawingKind = 'horizontal' | 'segment' | 'ray' | 'brush';
 
 /**
  * The board a drawing belongs to (10/26): which workflow drew it.

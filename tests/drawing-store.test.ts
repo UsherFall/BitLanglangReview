@@ -60,6 +60,30 @@ describe('Drawing Store', () => {
     expect(drawing.tradeId).toBeNull();
     expect(store.listDrawings({ instrument: 'BTC-USDT-SWAP', board: 'review' })[0]?.tradeId).toBeNull();
   });
+
+  it('round-trips every ordered point of a freehand brush', () => {
+    const store = new DrawingStore(':memory:');
+    const points = [
+      { time: 1653381000, price: 29300 },
+      { time: 1653381001, price: 29320 },
+      { time: 1653381002, price: 29280 },
+      { time: 1653381004, price: 29310 },
+    ];
+
+    store.saveDrawing({
+      tradeId: null,
+      instrument: 'BTC-USDT-SWAP',
+      board: 'review',
+      timeframe: '5m',
+      kind: 'brush',
+      points,
+    });
+
+    const [loaded] = store.listDrawings({ instrument: 'BTC-USDT-SWAP', board: 'review' });
+    expect(loaded.kind).toBe('brush');
+    expect(loaded.points).toEqual(points);
+    store.close();
+  });
 });
 
 describe('Drawing Store · 价位基准（10/21）', () => {

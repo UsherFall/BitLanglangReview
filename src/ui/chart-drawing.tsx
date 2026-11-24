@@ -1,4 +1,4 @@
-import { Eraser, Magnet, Minus, MoveUpRight } from 'lucide-react';
+import { Brush, Eraser, Magnet, Minus, MoveUpRight } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts';
 import type { Candlestick } from '../domain/candlestick';
@@ -44,6 +44,12 @@ type DrawingDrag = {
   drawing: ChartDrawing;
   target: DrawingDragTarget;
   startPoint: ChartPoint;
+};
+
+/** The authoritative pointer gesture; React state mirrors only its visible points. */
+type BrushDraft = {
+  pointerId: number;
+  points: ChartPoint[];
 };
 
 /** Everything a drawing point needs in order to snap to the candlestick under the pointer. */
@@ -111,7 +117,7 @@ export type ChartDrawings = {
   drawings: ChartDrawing[];
   selectedDrawingId: string;
   setSelectedDrawingId: (id: string) => void;
-  /** The tool row (水平线 / 射线 / 删除). `null` when the chart is read-only. */
+  /** The tool row (水平线 / 射线 / 画笔 / 删除). `null` when the chart is read-only. */
   toolbar: ReactNode;
   /** The SVG overlay that hosts the drawn shapes. */
   overlay: ReactNode;
@@ -136,11 +142,14 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
   const enabled = options.enabled ?? true;
   const overlayRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DrawingDrag | null>(null);
+  const brushDraftRef = useRef<BrushDraft | null>(null);
+  const suppressBrushClickRef = useRef(false);
   const [drawingTool, setDrawingTool] = useState<ChartDrawingKind | null>(null);
   const [drawings, setDrawings] = useState<ChartDrawing[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState('');
   const [draftPoint, setDraftPoint] = useState<ChartPoint | null>(null);
   const [draftEndPoint, setDraftEndPoint] = useState<ChartPoint | null>(null);
+  const [brushDraftPoints, setBrushDraftPoints] = useState<ChartPoint[]>([]);
   const [overlayVersion, setOverlayVersion] = useState(0);
   const [magnetMode, setMagnetMode] = useState<MagnetMode>('weak');
 
@@ -171,6 +180,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
   // set (and keeps the selection/draft intact — a still-visible line may
   // stay selected across the switch).
   useEffect(() => {
+    clearBrushDraft();
     setSelectedDrawingId('');
     setDraftPoint(null);
     setDraftEndPoint(null);
@@ -222,12 +232,64 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     setSelectedDrawingId('');
   }
 
+  function releaseBrushCapture(pointerId: number) {
+    const overlay = overlayRef.current;
+    if (overlay?.hasPointerCapture?.(pointerId)) overlay.releasePointerCapture(pointerId);
+  }
+
+  function clearBrushDraft() {
+    const pointerId = brushDraftRef.current?.pointerId;
+    if (pointerId !== undefined) releaseBrushCapture(pointerId);
+    brushDraftRef.current = null;
+    setBrushDraftPoints([]);
+    suppressBrushClickRef.current = false;
+  }
+
+  /** Append without reading React state, so a fast move/up sequence cannot lose points. */
+  function appendBrushPoint(point: ChartPoint) {
+    const draft = brushDraftRef.current;
+    if (!draft) return;
+    const previous = draft.points.at(-1);
+    if (previous?.time === point.time && previous.price === point.price) return;
+    const points = [...draft.points, point];
+    brushDraftRef.current = { ...draft, points };
+    setBrushDraftPoints(points);
+  }
+
+  /** Brush owns the whole press-drag-release gesture, even when it starts over an old shape. */
+  function handleOverlayPointerDownCapture(event: React.PointerEvent<SVGSVGElement>) {
+    // A new pointerdown always follows the previous gesture's click (if one was
+    // ever dispatched), so clearing here cannot swallow a pending click — it
+    // only stops a stale flag from eating the NEXT genuine one.
+    suppressBrushClickRef.current = false;
+    if (drawingTool !== 'brush' || event.button !== 0 || brushDraftRef.current) return;
+    const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
+    if (!point) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedDrawingId('');
+    setDraftPoint(null);
+    setDraftEndPoint(null);
+    brushDraftRef.current = { pointerId: event.pointerId, points: [point] };
+    setBrushDraftPoints([point]);
+    overlayRef.current?.setPointerCapture(event.pointerId);
+  }
+
+  /** A completed pointer gesture is followed by a click; never reinterpret it as another tool action. */
+  function handleOverlayClickCapture(event: React.MouseEvent<SVGSVGElement>) {
+    if (!suppressBrushClickRef.current) return;
+    suppressBrushClickRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   /**
    * Picking a tool abandons any half-drawn point. Without this the leftover
    * draft keeps rendering — in the NEW tool's shape, since the preview follows
    * the active tool — as a line the user never drew and cannot click away.
    */
   function selectDrawingTool(tool: ChartDrawingKind | null) {
+    clearBrushDraft();
     setDrawingTool(tool);
     setDraftPoint(null);
     setDraftEndPoint(null);
@@ -239,6 +301,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
    * close" step was friction, so the tool does not stay armed after a save.
    */
   function handleOverlayClick(event: React.MouseEvent<SVGSVGElement>) {
+    if (drawingTool === 'brush') return;
     if (!drawingTool) {
       setSelectedDrawingId('');
       return;
@@ -275,6 +338,15 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
   }
 
   function handleOverlayPointerMove(event: React.PointerEvent<SVGSVGElement>) {
+    const brush = brushDraftRef.current;
+    if (brush) {
+      if (brush.pointerId !== event.pointerId) return;
+      const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
+      if (!point) return;
+      event.preventDefault();
+      appendBrushPoint(point);
+      return;
+    }
     const drag = dragRef.current;
     const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
     const rawPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
@@ -291,6 +363,23 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
   }
 
   function handleOverlayPointerUp(event: React.PointerEvent<SVGSVGElement>) {
+    const brush = brushDraftRef.current;
+    if (brush) {
+      if (brush.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      const point = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, null);
+      if (point) appendBrushPoint(point);
+      const points = brushDraftRef.current?.points ?? brush.points;
+      releaseBrushCapture(brush.pointerId);
+      brushDraftRef.current = null;
+      setBrushDraftPoints([]);
+      suppressBrushClickRef.current = true;
+      setDrawingTool(null);
+      if (points.length >= 2) {
+        void saveDrawing({ tradeId, instrument, board, timeframe, kind: 'brush', points, ...referenceBar() });
+      }
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
     const snappedPoint = pointFromPointer(event, chartApiRef.current, seriesRef.current, overlayRef.current, drawingSnap);
@@ -302,6 +391,18 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     const updated = moveDrawing(drag.drawing, drag.target, drag.startPoint, point);
     setDrawings((current) => current.map((drawing) => (drawing.id === updated.id ? updated : drawing)));
     void saveDrawing(updated);
+  }
+
+  function handleOverlayPointerCancel(event: React.PointerEvent<SVGSVGElement>) {
+    const brush = brushDraftRef.current;
+    if (!brush) {
+      handleOverlayPointerUp(event);
+      return;
+    }
+    if (brush.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    clearBrushDraft();
+    setDrawingTool(null);
   }
 
   useEffect(() => {
@@ -318,6 +419,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
     <div className="drawing-toolbar">
       <button className={drawingTool === 'horizontal' ? 'selected' : ''} title="水平直线" onClick={() => selectDrawingTool(drawingTool === 'horizontal' ? null : 'horizontal')}><Minus size={16} /></button>
       <button className={drawingTool === 'ray' ? 'selected' : ''} title="射线" onClick={() => selectDrawingTool(drawingTool === 'ray' ? null : 'ray')}><MoveUpRight size={16} /></button>
+      <button className={drawingTool === 'brush' ? 'selected' : ''} title="画笔" onClick={() => selectDrawingTool(drawingTool === 'brush' ? null : 'brush')}><Brush size={16} /></button>
       <button title="删除选中画线" disabled={!selectedDrawingId} onClick={deleteSelectedDrawing}><Eraser size={16} /></button>
       <button type="button" className={`magnet-mode${magnetMode !== 'off' ? ' selected' : ''}`} title={MAGNET_MODE_HINTS[magnetMode]} aria-label="磁吸模式" aria-pressed={magnetMode !== 'off'} onClick={() => setMagnetMode((current) => nextMagnetMode(current))}><Magnet size={16} />{MAGNET_MODE_LABELS[magnetMode]}</button>
       {options.toolbarExtra}
@@ -329,9 +431,11 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
       ref={overlayRef}
       className={`drawing-overlay ${drawingTool ? 'drawing' : ''}`}
       onClick={handleOverlayClick}
+      onClickCapture={handleOverlayClickCapture}
+      onPointerDownCapture={handleOverlayPointerDownCapture}
       onPointerMove={handleOverlayPointerMove}
       onPointerUp={handleOverlayPointerUp}
-      onPointerCancel={handleOverlayPointerUp}
+      onPointerCancel={handleOverlayPointerCancel}
     >
       {selectedDrawingId && !drawingTool && <rect width="100%" height="100%" fill="transparent" className="drawing-deselect-target" onClick={(event) => { event.stopPropagation(); setSelectedDrawingId(''); }} />}
       <DrawingOverlay
@@ -339,6 +443,7 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
         selectedDrawingId={selectedDrawingId}
         draftPoint={draftPoint}
         draftEndPoint={draftEndPoint}
+        brushDraftPoints={brushDraftPoints}
         draftKind={drawingTool}
         chart={chartApiRef.current}
         series={seriesRef.current}
@@ -367,11 +472,12 @@ export function useChartDrawings(options: ChartDrawingsOptions): ChartDrawings {
   };
 }
 
-function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint, draftKind, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
+function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint, brushDraftPoints, draftKind, chart, series, timeframe, candles, version, onSelect, onPointerDown }: {
   drawings: ChartDrawing[];
   selectedDrawingId: string;
   draftPoint: ChartPoint | null;
   draftEndPoint: ChartPoint | null;
+  brushDraftPoints: ChartPoint[];
   draftKind: ChartDrawingKind | null;
   chart: IChartApi | null;
   series: ISeriesApi<'Candlestick'> | null;
@@ -385,10 +491,15 @@ function DrawingOverlay({ drawings, selectedDrawingId, draftPoint, draftEndPoint
   // shapes are positioned in pixels, so a pan/zoom must re-place them).
   void version;
   if (!chart || !series) return null;
+  const draftPoints = draftKind === 'brush'
+    ? brushDraftPoints
+    : draftPoint
+      ? [draftPoint, draftEndPoint ?? draftPoint]
+      : [];
   return (
     <>
       {drawings.map((drawing) => <DrawingShape key={drawing.id} drawing={drawing} selected={drawing.id === selectedDrawingId} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={onSelect} onPointerDown={onPointerDown} />)}
-      {draftPoint && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', board: 'review', timeframe, kind: draftKind ?? 'segment', points: [draftPoint, draftEndPoint ?? draftPoint], createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
+      {draftPoints.length > 0 && <DrawingShape drawing={{ id: 'draft', tradeId: '', instrument: '', board: 'review', timeframe, kind: draftKind ?? 'segment', points: draftPoints, createdAt: '', updatedAt: '' }} selected={false} chart={chart} series={series} timeframe={timeframe} candles={candles} onSelect={() => {}} onPointerDown={() => {}} />}
     </>
   );
 }
@@ -407,8 +518,23 @@ function DrawingShape({ drawing, selected, chart, series, timeframe, candles, on
       </g>
     );
   }
-  const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series, timeframe, candles));
+  const points = drawing.points.map((point) => pointToScreen(drawing.id === 'draft' || drawing.kind === 'brush' ? point : { ...point, time: timeframeTimeForPoint(point.time, timeframe, candles) }, chart, series, timeframe, candles));
   if (points.some((point) => !point)) return null;
+  if (drawing.kind === 'brush') {
+    return (
+      <polyline
+        points={points.map((point) => `${point!.x},${point!.y}`).join(' ')}
+        fill="none"
+        stroke={color}
+        strokeWidth={width}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="drawing-shape"
+        onClick={(event) => { event.stopPropagation(); onSelect(drawing.id); }}
+        onPointerDown={(event) => onPointerDown(event, drawing, 'body')}
+      />
+    );
+  }
   // A ray keeps its two handles on the real points (`'start'` = endpoint,
   // `'end'` = direction point) and only the drawn line runs past `'end'`.
   const start = points[0]!;

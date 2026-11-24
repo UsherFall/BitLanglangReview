@@ -94,6 +94,32 @@ describe('App drawing magnet snap', () => {
     expect(drawing.points.map((point) => point.price)).not.toContain(185);
   });
 
+  it('keeps freehand brush points raw while the magnet is weak', async () => {
+    render(<App />);
+
+    const overlay = await drawingOverlay();
+    const brushButton = screen.getByTitle('画笔');
+    fireEvent.click(brushButton);
+
+    fireEvent.pointerDown(overlay, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(overlay, { pointerId: 1, clientX: 30, clientY: 30 });
+    fireEvent.pointerUp(overlay, { pointerId: 1, clientX: 30, clientY: 30 });
+    fireEvent.click(overlay, { clientX: 30, clientY: 30 });
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    expect(posted[0].kind).toBe('brush');
+    expect(posted[0].points).toEqual([
+      { time: FIRST_BAR_SECONDS + 10, price: 195 },
+      { time: FIRST_BAR_SECONDS + 20, price: 190 },
+      { time: FIRST_BAR_SECONDS + 30, price: 185 },
+    ]);
+    for (const point of posted[0].points) {
+      expect([FIRST_BAR_OHLC.open, FIRST_BAR_OHLC.high, FIRST_BAR_OHLC.low, FIRST_BAR_OHLC.close]).not.toContain(point.price);
+    }
+    expect(brushButton).not.toHaveClass('selected');
+  });
+
   it('AC9 defaults to weak magnet and cycles weak → strong → off → weak', async () => {
     render(<App />);
 
