@@ -528,6 +528,12 @@ Decisions:
 3. **「已画」徽标.** Rows carry `drawnLineCount` / `drawnTimeframes` (derived from the drawn-line set, independent of measurement success — a closed-market marked row keeps its badge with `—` distances, distinguishable from "never marked"); the results table renders a `.coin-scan-drawn` badge next to the coin name.
 4. **Legacy classification.** The `board` column migration defaults every pre-10/26 row to `'review'` and re-homes `trade_id IS NULL AND created_at >= '2026-10-21' AND instrument NOT LIKE '%-USDT-SWAP'` rows to `'scan'` — verified against the real DB to match exactly the two drawer lines (`JUPUSDT` / `ASTERUSDT`); the assumption (no native-symbol free-replay line after 10/21) is documented in the task PRD (R4).
 
+### 画笔（brush）永远不是监控线 (11/24)
+
+Trigger: the freehand brush (`kind: 'brush'`, one ordered raw pointer track) became a creatable drawing kind. Decision (user, 11/24): the brush is chart annotation ONLY.
+
+Contract: `linesFromDrawings` still accepts exactly `horizontal` / `ray`, so a brush never becomes a `LevelLine`; `loadLinesByTimeframe` therefore never builds it an instrument bucket, and a scan-board brush produces no 距线, no `drawnLineCount` / `drawnTimeframes`, no 标线监控 row, and NO line-timeframe candle request (an instrument with only a brush stays out of the watch list exactly like an unmarked one). Pinned by `tests/level-alert.test.ts` (brush → `[]`) and `tests/coin-scan-service.test.ts` (scan + watch both see nothing). Do NOT "help" the scan by inventing a representative price from a stroke — a freehand track has no single defensible level, and a fabricated number would be the algorithm-made reading the 10/26 split exists to prevent.
+
 ## Convergence criterion research (10/19) — position, not "quieter than before"
 Trigger: CFX came out #1 in the live scan while the user read it as "fake breakout, fell back, never held" (no re-test). Recomputing confirmed it: after the 10/09–10/10 spike (+55%) the price bled back down and BOTH detectors still passed it — `detectConvergence` (score 0.716) and `detectBoxBrace` (box height only 0.36 of a "preceding move" that is exactly the two spike bars).
 
