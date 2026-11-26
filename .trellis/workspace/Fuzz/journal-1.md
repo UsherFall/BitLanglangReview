@@ -378,3 +378,27 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: 修复回溯切周期开仓前视图
+<!-- trellis-session: v=2 fp=74a8f50a6260d035 -->
+
+**Date**: 2026-11-26
+**Task**: 修复回溯切周期开仓前视图
+**Branch**: `master`
+
+### Summary
+
+修复回溯复盘 active/ended 切周期时保留焦点单与剪刀开仓前视图，复用 Focus 重取定位链路；补充跨周期回归，762 项可运行测试通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1a689c3` | fix(replay): 切周期保留焦点单开仓前视图 |
+| `877a9d1` | docs(spec): 同步回溯切周期焦点契约 |
+| `e9e3b11` | docs(task): 记录回溯切周期焦点修复 |
+
+### Status
+
+[OK] **Completed**
