@@ -35,7 +35,7 @@ useFreeReplaySessionLifecycle(options: {
 };
 ```
 
-`setTimeframe` is the Trade Review path. Replay UI calls `switchTimeframe`, which remaps the data anchor/start/current cursors and clears Focus while **active**; **ended** keeps Focus so the chart can re-anchor the selected order's entry in the new period. `setPaperTrading` remains for existing trading commands but is a freeze-aware Dispatch: while `reviewStatus === 'ended'` it does not even execute the supplied functional update. Internal start/restore/delete/reveal transitions use the private raw Paper setter. No pending ref, tombstone, timer or generic `setFreeReplay` is public.
+`setTimeframe` is the Trade Review path. Replay UI calls `switchTimeframe`, which remaps the data anchor/start/current cursors and preserves Focus in both **active** and **ended** states (11/26). With a selected order, the unchanged token plus new `rangeKey` lets the chart refetch/re-anchor that order's entry in the target period; without Focus, the normal Cursor window and right-edge anchor remain. `setPaperTrading` remains for existing trading commands but is a freeze-aware Dispatch: while `reviewStatus === 'ended'` it does not even execute the supplied functional update. Internal start/restore/delete/reveal transitions use the private raw Paper setter. No pending ref, tombstone, timer or generic `setFreeReplay` is public.
 
 ## Contracts
 
@@ -44,7 +44,7 @@ useFreeReplaySessionLifecycle(options: {
 3. **Restore.** Flush outgoing pending first. Missing source uses `LEGACY_REPLAY_CANDLE_SOURCE`; `dataAnchorTime` is the saved cursor as ISO; timeframe and normalized Paper Trading state restore with one `onResetView`. Missing `reviewStatus` means `active`; a different saved session may restore `ended`. If the current session is already `ended`, a SAME-key restore returns after the outgoing flush and is otherwise a complete no-op, so stale history/library payloads cannot resume it or roll back its cursor/Paper/Focus. The library's own later Focus command still runs.
 4. **Start.** Existing key delegates to restore. Fresh start clears the key's tombstone, sets `reviewStatus='active'`, resets Paper Trading and calls `onResetView` once.
 5. **Delete.** Mark the key and cancel matching pending before DELETE. Successful DELETE calls `onSessionDeleted`, removes the row and closes only a matching active Replay. Closing that Replay also resets `reviewStatus='active'`. A stale PUT checks the tombstone after parsing and cannot reinsert the row. Fresh start legitimately clears the tombstone.
-6. **Cursor commands.** Reveal reads Cursor candles only, processes the newly revealed candle into Paper Trading and calls future retry when no advance exists. Rewind is a no-op while Paper Trading is active. BOTH reveal and rewind return before Focus clearing, cursor math, future retry or fill processing while `reviewStatus === 'ended'`. Timeframe switch remains view-only and allowed while ended: it preserves exact `progressTime` and uses existing pure cursor helpers. Active switches call `onClearFocus` and return to the Cursor view; ended switches do NOT clear Focus, allowing the existing `rangeKey:token` chart path to refetch/re-anchor the selected order without changing Paper Trading.
+6. **Cursor commands.** Reveal reads Cursor candles only, processes the newly revealed candle into Paper Trading and calls future retry when no advance exists. Rewind is a no-op while Paper Trading is active. BOTH reveal and rewind return before Focus clearing, cursor math, future retry or fill processing while `reviewStatus === 'ended'`. Timeframe switch is view-only in both states: it preserves exact `progressTime`, Paper Trading and Focus, and never calls `onClearFocus`. An existing Focus follows the `rangeKey:token` chart path to refetch/re-anchor the selected order; no Focus keeps the normal Cursor initialization. The chart-local pre-entry scissors state therefore survives a same-order timeframe switch without entering the session payload.
 7. **Callbacks.** `onResetView` clears Focus and both chart arrays; `onClearFocus` only clears Focus; `onSessionDeleted` prunes the matching Paper Review prefix and refreshes Paper Library. Latest callback refs prevent callback identities from retriggering mount effects.
 8. **End/resume.** `endReview` / `resumeReview` require an active Replay and change only `reviewStatus`, never `freeReplay`, Paper Trading, Focus, chart arrays or future-retry state. They also patch the matching history row's status in place without changing `updatedAt` or order, so a trailing PUT that has not yet returned cannot leave a stale row that bypasses the freeze. `paperTrading.active` is independent and must remain unchanged.
 
@@ -62,9 +62,9 @@ useFreeReplaySessionLifecycle(options: {
 | Rewind with active Paper Trading | No cursor or Focus change |
 | Reveal/rewind while ended | No cursor, Paper, Focus, future-retry or fill change |
 | Paper Dispatch while ended | No state change and no functional-updater execution |
-| Active timeframe switch | Clear Focus and anchor the Cursor right edge after target-period data lands |
-| Ended timeframe switch with Focus | Preserve Focus; fetch the selected order's target-period entry window and re-anchor; exact `progressTime` / Paper unchanged |
-| Ended timeframe switch without Focus | Keep the normal Cursor-window initialization and right-edge anchor |
+| Active timeframe switch with Focus | Preserve Focus and chart-local scissors state; fetch/re-anchor the selected order's target-period entry window; exact `progressTime` / Paper unchanged |
+| Any timeframe switch without Focus | Keep the normal Cursor-window initialization and right-edge anchor |
+| Ended timeframe switch with Focus | Same Focus behavior as active; `reviewStatus='ended'` and Paper stay frozen |
 | Ended same-key restore | Complete no-op after outgoing flush; no resume or scene rollback |
 | Legacy payload without reviewStatus | Restore as active |
 | Trade Review timeframe selector | Change shared timeframe without Replay cursor remapping |
@@ -96,7 +96,7 @@ useFreeReplaySessionLifecycle(options: {
 6. stale PUT after DELETE + fresh recreate;
 7. reveal/Paper Trading, future retry, rewind guard and timeframe remapping;
 8. end/resume with an open Paper scene, frozen Dispatch/cursor/keyboard commands, status in trailing/mode-exit/pagehide saves, ended restore, legacy-active fallback, same-key no-op and history status freshness across session switches;
-9. ended versus active timeframe Focus branching, plus App-level proof that an ended selected order keeps its row active, fetches the target-period `positionOpenTime` initial window, re-anchors with `entryVisibleRange`, and preserves exact progress/Paper.
+9. active/ended timeframe Focus parity, including the chart-local pre-entry scissors state, plus App-level proof that a selected order in EITHER state keeps its row active, fetches the target-period `positionOpenTime` initial window, re-anchors with `entryVisibleRange`, preserves the strict pre-entry cutoff when enabled, and preserves exact progress/Paper.
 
 `tests/app-free-replay.test.tsx`, `free-replay-panel.test.tsx` and `free-replay-session-store.test.ts` remain integration compatibility gates. Do not replace them with hook-only coverage.
 
@@ -133,9 +133,15 @@ const setPaperTrading: Dispatch<SetStateAction<PaperTradingSession>> = (action) 
 ```
 
 ```ts
-// Wrong: ended viewing loses the order the reviewer was reading.
-callbacksRef.current.onClearFocus();
-
-// Correct: only active replay returns to Cursor on a timeframe switch.
+// Wrong: status-dependent clearing removes the button and its cutoff.
 if (reviewStatus !== 'ended') callbacksRef.current.onClearFocus();
+
+// Correct: timeframe switching never clears Focus; rangeKey drives target-period refetch.
+setTimeframe(nextTimeframe);
+setFreeReplay((current) => current ? {
+  ...current,
+  dataAnchorTime: new Date(current.progressTime * 1000).toISOString(),
+  startCursorTime: freeReplayCursorTimeForStart(current.startTime, nextTimeframe, replayCandleGrid(current)),
+  cursorTime: freeReplayCursorTimeForTimeframeSwitch(current.progressTime, nextTimeframe, replayCandleGrid(current)),
+} : current);
 ```
