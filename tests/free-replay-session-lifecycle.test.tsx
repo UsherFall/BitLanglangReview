@@ -346,8 +346,8 @@ describe('useFreeReplaySessionLifecycle', () => {
     expect(result.current.reviewStatus).toBe('active');
     expect(result.current.paperTrading).toBe(frozenPaper);
     act(() => result.current.switchTimeframe('5m'));
-    // active 保持 11/04 契约：切周期清 Focus 并回光标右缘。
-    expect(callbacks.onClearFocus).toHaveBeenCalledTimes(1);
+    // 11/26：恢复 active 后切周期同样保留 Focus；Paper 更新只在结束后恢复。
+    expect(callbacks.onClearFocus).not.toHaveBeenCalled();
     act(() => result.current.setPaperTrading((current) => ({ ...current, nextId: 999 })));
     expect(result.current.paperTrading.nextId).toBe(999);
   });

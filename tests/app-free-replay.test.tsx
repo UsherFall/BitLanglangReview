@@ -1974,9 +1974,9 @@ describe('App Free Replay', () => {
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledTimes(2));
   });
 
-  // 11/04 R1/R2：切周期清焦点单 → 视口回光标右缘（不再把焦点锚到新周期开仓点）；
-  // 行高亮与剪刀态一并复位。这也是「再点一次行重新归位」的前提。
-  it('clears order focus and anchors to cursor on timeframe switch', async () => {
+  // 11/26：active 切周期保留焦点单，新周期重新取窗并锚定同一开仓点；
+  // 行高亮与剪刀工具保持，未开启隐藏时仍由游标边界防止未来泄漏。
+  it('keeps order focus and anchors to its entry on active timeframe switch', async () => {
     stubFreeReplayFetch({
       onCandles: (url) => {
         const params = new URL(`http://localhost${url}`).searchParams;
@@ -2012,18 +2012,14 @@ describe('App Free Replay', () => {
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
 
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('timeframe=15m')));
-    // 回光标右缘：cursorTime 按新周期重算（进度 10:05 → 15m 填充前一根 = 09:45），
-    // 右侧留 10 根缓冲（getVisibleLogicalRange mock = 160 根）。
-    const switchCursorSec = Date.parse('2024-05-21T09:45:00+08:00') / 1000;
-    await waitFor(() => expect(chartMocks.timeToIndex).toHaveBeenCalledWith(switchCursorSec, true));
-    await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
-    // 焦点锚定（±150 根开仓窗）不再发生
-    expect(chartMocks.setVisibleRange).not.toHaveBeenCalledWith({
+    // 同一焦点单在 15m 下重新定位开仓点，不回游标右缘。
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
       from: openSec - 150 * 900,
       to: openSec + 150 * 900,
-    });
-    expect(screen.getByRole('button', { name: /开 05-21 10:00/ }).className).not.toContain('active');
-    expect(screen.queryByRole('button', { name: /开仓点后的 K 线/ })).not.toBeInTheDocument();
+    }));
+    expect(chartMocks.setVisibleLogicalRange).not.toHaveBeenCalled();
+    expect(row.className).toContain('active');
+    expect(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   // 11/04 AC2：首锚只认本 rangeKey 的数据。旧周期数据还在 series 里时不消费首锚
@@ -2116,11 +2112,15 @@ describe('App Free Replay', () => {
     }));
 
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
-    // 11/04：切周期先清焦点回光标右缘（不再把焦点带到新周期）。
-    await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalled());
-    await waitFor(() => expect(screen.queryByRole('button', { name: /开仓点后的 K 线/ })).not.toBeInTheDocument());
+    // 11/26：切周期保留焦点，先自动完成一次 15m 开仓点重定位。
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 900,
+      to: openSec + 150 * 900,
+    }));
+    expect(row.className).toContain('active');
+    expect(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' })).toBeInTheDocument();
 
-    // 切完周期再点同一行：token 递增，必须在 15m 窗口重新归位
+    // 再次点同一行：token 递增，仍必须在 15m 窗口重新归位。
     chartMocks.setVisibleRange.mockClear();
     fireEvent.click(row);
     await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
@@ -2228,6 +2228,70 @@ describe('App Free Replay', () => {
       Date.parse('2024-05-21T09:55:00+08:00') / 1000,
       Date.parse('2024-05-21T10:00:00+08:00') / 1000,
     ]));
+  });
+
+  it('keeps the focused order and pre-entry view across active timeframe switches', async () => {
+    const candleRequests: string[] = [];
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        candleRequests.push(String(url));
+        const params = new URL(`http://localhost${url}`).searchParams;
+        const candles = params.get('timeframe') === '15m'
+          ? [
+              makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m' }),
+              makeCandle('2024-05-21T10:15:00+08:00', { timeframe: '15m' }),
+            ]
+          : [
+              makeCandle('2024-05-21T09:55:00+08:00', { close: 100 }),
+              makeCandle('2024-05-21T10:00:00+08:00', { close: 110 }),
+              makeCandle('2024-05-21T10:05:00+08:00', { close: 120 }),
+            ];
+        return Response.json({ candles: params.get('mode') === 'earlier' ? [] : candles });
+      },
+    });
+
+    await startReplayAndCloseTrade();
+    fireEvent.click(screen.getByRole('tab', { name: /单子/ }));
+    const row = screen.getByRole('button', { name: /开 05-21 10:00/ });
+    fireEvent.click(row);
+
+    const openMs = Date.parse('2024-05-21T10:00:00+08:00');
+    const openSec = openMs / 1000;
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 300,
+      to: openSec + 150 * 300,
+    }));
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+    ]));
+
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+
+    await waitFor(() => expect(candleRequests.some((url) => {
+      const params = new URL(`http://localhost${url}`).searchParams;
+      return params.get('timeframe') === '15m'
+        && params.get('mode') === 'initial'
+        && params.get('entryTime') === new Date(openMs).toISOString();
+    })).toBe(true));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+    ]));
+    expect(row.className).toContain('active');
+    expect(screen.getByRole('button', { name: '显示开仓点后的 K 线' })).toHaveAttribute('aria-pressed', 'true');
+    expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
+      from: openSec - 150 * 900,
+      to: openSec + 150 * 900,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '5m' }));
+
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+    ]));
+    expect(row.className).toContain('active');
+    expect(screen.getByRole('button', { name: '显示开仓点后的 K 线' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   // 11/03 R2：隐藏态右缘翻页闸 —— 揭示边界换轨到开仓点后，焦点窗口右缘
@@ -2679,20 +2743,23 @@ describe('App Free Replay', () => {
     }));
   });
 
-  // 11/04 R2：焦点单不跨周期 —— 切周期清焦点，活动数据集回到游标窗口，视口回
-  // 光标右缘（不再取开仓点窗口、不再取 08:00 的旧周期数据）。
-  it('clears the focused order on a timeframe switch and returns to the cursor window', async () => {
+  // 11/26：active 焦点单跨周期存活 —— 新周期重取同一 08:00 开仓点窗口，
+  // 活动数据集保持单一连续 Focus 窗，不回游标、不拼跨窗口价格缝。
+  it('keeps the focused order and loads its target-period window on timeframe switch', async () => {
     stubFreeReplayFetch({
       sessions: seedSessionWithDistantTrade(),
       onCandles: (url) => {
         const params = new URL(`http://localhost${url}`).searchParams;
         if (params.get('timeframe') === '5m') {
-          // 只回游标附近的 5m 窗口：开仓点（08:00）的焦点窗口绝不应被取。
-          return new Response(JSON.stringify({ candles: [
+          if (params.get('mode') === 'initial' && params.get('entryTime') === new Date(distantOpenMs).toISOString()) {
+            return Response.json({ candles: ['07:40', '07:45', '07:50', '07:55', '08:00', '08:05']
+              .map((clock) => makeCandle(`2024-05-21T${clock}:00+08:00`)) });
+          }
+          return Response.json({ candles: [
             makeCandle('2024-05-21T09:50:00+08:00'),
             makeCandle('2024-05-21T09:55:00+08:00'),
             makeCandle('2024-05-21T10:00:00+08:00'),
-          ] }));
+          ] });
         }
         return distantTradeCandleStub(url);
       },
@@ -2704,22 +2771,27 @@ describe('App Free Replay', () => {
     chartMocks.timeToIndex.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '5m' }));
 
-    // 新周期数据落地后回光标右缘（timeToIndex=150，visibleBars=160 → {0,160}）。
-    await waitFor(() => expect(chartMocks.setVisibleLogicalRange).toHaveBeenCalledWith({ from: 0, to: 160 }));
-    // 焦点锚定（08:00 开仓点 ±150 根 5m）不再发生。
     const openSec = distantOpenMs / 1000;
-    expect(chartMocks.setVisibleRange).not.toHaveBeenCalledWith({
+    await waitFor(() => expect(chartMocks.setVisibleRange).toHaveBeenCalledWith({
       from: openSec - 150 * 300,
       to: openSec + 150 * 300,
-    });
-    expect(row.className).not.toContain('active');
-    expect(screen.queryByRole('button', { name: /开仓点后的 K 线/ })).not.toBeInTheDocument();
-    // 渲染数据是单一 5m 游标窗口：无跨周期/跨窗口缝。
+    }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['07:40', '07:45', '07:50', '07:55', '08:00', '08:05']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+    expect(chartMocks.setVisibleLogicalRange).not.toHaveBeenCalled();
+    expect(row.className).toContain('active');
+    expect(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' })).toHaveAttribute('aria-pressed', 'false');
+    // 渲染数据仍是单一 5m Focus 窗口：无跨周期/跨窗口缝。
     const times = lastSetDataRealTimes();
-    expect(times.length).toBeGreaterThan(1);
     for (let index = 1; index < times.length; index += 1) {
       expect(times[index] - times[index - 1]).toBe(300);
     }
+
+    // 切周期后才开启隐藏也应立即使用同一严格开仓点 cutoff。
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual(['07:40', '07:45', '07:50', '07:55']
+      .map((clock) => Date.parse(`2024-05-21T${clock}:00+08:00`) / 1000)));
+    expect(screen.getByRole('button', { name: '显示开仓点后的 K 线' })).toHaveAttribute('aria-pressed', 'true');
   });
 
   // 10/30：开平仓提交/点持仓行后视口跳回光标（光标锚定，与初始同款），
@@ -3116,7 +3188,7 @@ describe('App Free Replay', () => {
     expect(screen.getByRole('button', { name: '重置模拟交易' })).toBeEnabled();
   });
 
-  it('keeps the focused order anchored to its entry across timeframe switches after ending review', async () => {
+  it('keeps the focused order and pre-entry view across timeframe switches after ending review', async () => {
     stubFreeReplayFetch({
       onCandles: (url) => {
         const timeframe = new URL(url, 'http://localhost').searchParams.get('timeframe');
@@ -3148,6 +3220,10 @@ describe('App Free Replay', () => {
       from: openSec - 150 * 300,
       to: openSec + 150 * 300,
     }));
+    fireEvent.click(screen.getByRole('button', { name: '隐藏开仓点后的 K 线' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:55:00+08:00') / 1000,
+    ]));
 
     chartMocks.setVisibleRange.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '15m' }));
@@ -3170,6 +3246,10 @@ describe('App Free Replay', () => {
       to: openSec + 150 * 900,
     }));
     expect(row.className).toContain('active');
+    expect(screen.getByRole('button', { name: '显示开仓点后的 K 线' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2024-05-21T09:45:00+08:00') / 1000,
+    ]));
     expect(screen.getByText('已结束 · 仅可查看')).toBeInTheDocument();
 
     const latest = sessionPutBodies().at(-1)!;

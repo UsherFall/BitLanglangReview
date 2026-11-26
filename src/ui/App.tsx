@@ -1800,8 +1800,8 @@ function FreeReplayChart({ replay, timeframe, paperPoints, focusPoints, futureRe
   // 保证窗内连续）→【替换】活动数据集 → 锚到开仓点（entryVisibleRange）。不再
   // merge 进游标窗口，同一渲染数据里永远只有一个连续窗口，结构上不可能拼出
   // 跨空洞的价格缝。每个 rangeKey+token 只定位一次，之后用户可自由平移缩放；
-  // active 切周期清 orderFocus 回光标右缘（11/04）；ended 纯查看态保留焦点
-  //（11/14），同一 token 随 rangeKey 变化在新周期重取开仓点窗口并重新定位。
+  // active / ended 切周期都保留焦点（11/26），同一 token 随 rangeKey 变化在新周期
+  // 重取开仓点窗口并重新定位；剪刀隐藏态也随同一 Focus 保留。
   // 取窗失败/空则贴游标数据集最早边缘，不逐页
   // 追、不循环。只揭示到 cursorTime 由渲染层 visibleCandlesForFreeReplay 保证。
   useEffect(() => {
