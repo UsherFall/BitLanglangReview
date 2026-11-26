@@ -1,0 +1,6 @@
+{"file":".trellis/spec/frontend/index.md","reason":"核对 Free Replay 前端改动范围和完整验证入口"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"检查会话、Focus、剪刀状态和 Candlestick Dataset 的所有权未混杂"}
+{"file":".trellis/spec/frontend/free-replay-session-lifecycle.md","reason":"检查进行中与已结束切周期统一保留 Focus 后，进度和 Paper 冻结语义仍成立"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"检查焦点跨周期重取/定位、剪刀 cutoff、换单/退出复位和无未来泄漏"}
+{"file":".trellis/spec/frontend/free-replay-dataset.md","reason":"检查未绕过 Dataset 单一数据属主，旧周期响应和焦点窗口隔离不被破坏"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"执行 lifecycle、App Free Replay、全量测试、TypeScript 和 diff 格式检查"}

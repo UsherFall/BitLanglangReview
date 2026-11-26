@@ -1,0 +1,6 @@
+{"file":".trellis/spec/frontend/index.md","reason":"定位 Free Replay 前端职责、相关规范入口和验证要求"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"保持 lifecycle 管会话命令、App 管 Focus、图表管本地剪刀状态的所有权边界"}
+{"file":".trellis/spec/frontend/free-replay-session-lifecycle.md","reason":"修改 switchTimeframe 的 Focus 清理行为，并保持进度、Paper 与 ended 冻结契约"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"复用 rangeKey:token 焦点重取/重定位链路，保持剪刀严格边界、换单和退出复位规则"}
+{"file":".trellis/spec/frontend/free-replay-dataset.md","reason":"确认跨周期 Focus 由现有 Dataset 链路处理，不引入第二份窗口状态或修改过滤管线"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"补充 lifecycle 与 App 集成回归，验证未来 K 线不泄漏及 StrictMode 兼容性"}
