@@ -29,6 +29,8 @@ useFreeReplaySessionLifecycle(options: {
   start(next: FreeReplayStart): void;
   restore(payload: FreeReplaySessionPayload): void;
   remove(instrument: string, startTime: string): Promise<void>;
+  revealPending: boolean;
+  executionError: string;
   revealNext(): void;
   rewind(): void;
   switchTimeframe(next: ReviewTimeframe): void;
@@ -36,6 +38,8 @@ useFreeReplaySessionLifecycle(options: {
 ```
 
 `setTimeframe` is the Trade Review path. Replay UI calls `switchTimeframe`, which remaps the data anchor/start/current cursors and preserves Focus in both **active** and **ended** states (11/26). With a selected order, the unchanged token plus new `rangeKey` lets the chart refetch/re-anchor that order's entry in the target period; without Focus, the normal Cursor window and right-edge anchor remain. `setPaperTrading` remains for existing trading commands but is a freeze-aware Dispatch: while `reviewStatus === 'ended'` it does not even execute the supplied functional update. Internal start/restore/delete/reveal transitions use the private raw Paper setter. No pending ref, tombstone, timer or generic `setFreeReplay` is public.
+
+**Transitional execution (11/27):** `revealPending` / `executionError` are temporary UI state, never session payload fields. When a newly revealed coarse candle opens before the current `progressTime` and automatic orders exist, the hook calls `free-replay-order-execution.ts` for same-source/grid execution-only child candles. It does not change Replay/Paper/Focus until the exact new interval is loaded; success commits Paper + Replay together and clears Focus, while failure leaves them untouched and exposes a retryable error. A monotonic operation token plus latest-active ref rejects late completion after scene changes, Paper edits, mode exit or unmount. Ordinary reveals remain synchronous.
 
 ## Contracts
 
@@ -59,6 +63,9 @@ useFreeReplaySessionLifecycle(options: {
 | DELETE network failure | Remove the new tombstone and propagate the error |
 | Fresh start after DELETE | Clear tombstone and allow a new PUT |
 | Reveal with no next candle | Keep cursor/progress and request future retry |
+| Transitional reveal loading | Pending guard blocks duplicate commands; no cursor/Paper/Focus change yet |
+| Child data failed/incomplete | Retryable error; no coarse-OHLC fallback or partial commit |
+| Late child response after scene/Paper/mode change or unmount | Silent discard, no error/fill/cursor write |
 | Rewind with active Paper Trading | No cursor or Focus change |
 | Reveal/rewind while ended | No cursor, Paper, Focus, future-retry or fill change |
 | Paper Dispatch while ended | No state change and no functional-updater execution |
@@ -71,11 +78,13 @@ useFreeReplaySessionLifecycle(options: {
 
 ## Good / Base / Bad Cases
 
+- **Good:** a coarse transition with automatic orders loads exact child candles; pre-progress lows/highs are excluded, while a real post-progress stop fills at the child close.
 - **Good:** direct `renderHook` test resolves a DELETE before an older PUT; history stays deleted, then fresh start permits recreation.
 - **Good:** restoring B while A's debounce is pending PUTs A before applying B.
 - **Good:** ending with a position, entry/exit limits and stops freezes the exact scene; arrows, button clicks and direct Dispatches cannot change it, while order Focus and timeframe viewing still work.
 - **Good:** ending A updates A's history row before its trailing PUT resolves; restoring B and then that latest A row keeps A ended.
 - **Base:** restoring a session still auto-saves its restored state later, matching existing behavior.
+- **Base:** an ordinary full-candle reveal remains synchronous and performs no execution-child request.
 - **Bad:** using `paperTrading.active=false` as the ended flag — that field means Paper Trading has not started and has different rewind semantics.
 - **Bad:** a second React state copy of `freeReplay` or `reviewStatus` in App “for convenience”.
 - **Bad:** disabling only the previous/next buttons while Arrow keys or `setPaperTrading` stay live.
@@ -83,6 +92,7 @@ useFreeReplaySessionLifecycle(options: {
 - **Bad:** moving `cursorCandles` ownership out of Dataset or passing Focus candles to reveal.
 - **Bad:** exposing `pendingSaveRef` / `deletedSessionKeysRef` so App can patch lifecycle internals.
 - **Bad:** clearing Paper Library inside the hook; that state belongs to App's callback boundary.
+- **Bad:** falling back to the transitional coarse candle when child loading fails or has a gap; this recreates the pre-progress false-fill bug.
 
 ## Tests Required
 
@@ -97,6 +107,7 @@ useFreeReplaySessionLifecycle(options: {
 7. reveal/Paper Trading, future retry, rewind guard and timeframe remapping;
 8. end/resume with an open Paper scene, frozen Dispatch/cursor/keyboard commands, status in trailing/mode-exit/pagehide saves, ended restore, legacy-active fallback, same-key no-op and history status freshness across session switches;
 9. active/ended timeframe Focus parity, including the chart-local pre-entry scissors state, plus App-level proof that a selected order in EITHER state keeps its row active, fetches the target-period `positionOpenTime` initial window, re-anchors with `entryVisibleRange`, preserves the strict pre-entry cutoff when enabled, and preserves exact progress/Paper.
+10. transitional execution: real 15m→1H pre-progress low does not stop; a post-progress low still stops at the child close; pending dedupe, incomplete-data retry, duplicate/late responses, scene/Paper/mode invalidation and unmount; ordinary reveal performs no execution fetch.
 
 `tests/app-free-replay.test.tsx`, `free-replay-panel.test.tsx` and `free-replay-session-store.test.ts` remain integration compatibility gates. Do not replace them with hook-only coverage.
 
@@ -131,6 +142,19 @@ const setPaperTrading: Dispatch<SetStateAction<PaperTradingSession>> = (action) 
   setPaperTradingState(action);
 };
 ```
+
+```ts
+// Wrong: the coarse candle's pre-progress low can fill an existing stop.
+processRevealedCandle(paper, revealedCoarse, nextReplay.progressTime);
+
+// Correct: automatic orders in a transitional candle execute only exact new child bars.
+if (hasAutomaticOrders(paper) && needsPartialExecution(revealedCoarse, replay.progressTime)) {
+  const children = await loadPartialExecutionCandles(input);
+  const nextPaper = processExecutionCandles(paper, children);
+  // Commit only while the operation token is still current.
+}
+```
+
 
 ```ts
 // Wrong: status-dependent clearing removes the button and its cutoff.

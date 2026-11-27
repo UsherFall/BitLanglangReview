@@ -4,7 +4,7 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import type { FreeReplaySession, FreeReplaySessionPayload, FreeReplayStart } from '../src/ui/FreeReplayPanel';
-import { initialPaperTradingSession, placeEntryLimit, startPaperTrading } from '../src/ui/free-replay-paper-trading';
+import { initialPaperTradingSession, openMarket, placeEntryLimit, placeStopLoss, startPaperTrading } from '../src/ui/free-replay-paper-trading';
 import {
   useFreeReplaySessionLifecycle,
   type FreeReplaySessionLifecycleOptions,
@@ -61,6 +61,7 @@ function makeCandle(iso: string): Candlestick {
 }
 
 type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>;
+type ExecutionResponder = (params: URLSearchParams) => Promise<Response>;
 
 function putCalls(fetchMock: FetchMock) {
   return fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
@@ -70,9 +71,13 @@ function putBodies(fetchMock: FetchMock): FreeReplaySessionPayload[] {
   return putCalls(fetchMock).map(([, init]) => JSON.parse(String(init?.body)) as FreeReplaySessionPayload);
 }
 
-function stubSessionFetch(sessions: FreeReplaySession[] = []): FetchMock {
+function stubSessionFetch(sessions: FreeReplaySession[] = [], executionCandles: Candlestick[] = [], executionResponder?: ExecutionResponder): FetchMock {
   const fetchMock: FetchMock = vi.fn(async (input, init) => {
     const url = String(input);
+    if (url.startsWith('/api/candles')) {
+      const params = new URL(url, 'http://local').searchParams;
+      return executionResponder ? executionResponder(params) : Response.json({ candles: executionCandles });
+    }
     if (!url.startsWith('/api/free-replay/sessions')) throw new Error(`Unexpected fetch: ${url}`);
     if (init?.method === 'PUT') {
       const payload = JSON.parse(String(init.body)) as FreeReplaySessionPayload;
@@ -85,8 +90,8 @@ function stubSessionFetch(sessions: FreeReplaySession[] = []): FetchMock {
   return fetchMock;
 }
 
-function setup(options: { sessions?: FreeReplaySession[]; cursorCandles?: Candlestick[] } = {}) {
-  const fetchMock = stubSessionFetch(options.sessions ?? []);
+function setup(options: { sessions?: FreeReplaySession[]; cursorCandles?: Candlestick[]; executionCandles?: Candlestick[]; executionResponder?: ExecutionResponder } = {}) {
+  const fetchMock = stubSessionFetch(options.sessions ?? [], options.executionCandles, options.executionResponder);
   const callbacks = {
     onFutureRetry: vi.fn(),
     onResetView: vi.fn(),
@@ -113,6 +118,61 @@ async function advance(ms: number): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms);
   });
+}
+
+async function settleReveal(): Promise<void> {
+  await act(async () => {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  });
+}
+
+function realPartialStopFixture(postEntryLow = 53099.5) {
+  const entryCandle: Candlestick = {
+    instrument: 'BTCUSDT', timeframe: '15m', timestamp: 1616743800000,
+    open: 52569.5, high: 53289, low: 52569.5, close: 53156.5, volume: 986.251,
+  };
+  const opened = openMarket(
+    startPaperTrading(initialPaperTradingSession(), 1616744700),
+    entryCandle,
+    { direction: 'long', positionRatioPercent: 25, leverage: 10 },
+    1616744700,
+  );
+  const paperTrading = placeStopLoss(opened, opened.position!.legs[0]!.id, 52403, entryCandle.close, 1616744700);
+  const saved = makeSession({
+    startTime: '2021-02-28 12:00',
+    dataAnchorTime: new Date(1616738400000).toISOString(),
+    startCursorTime: 1614483900,
+    startProgressTime: 1614484800,
+    progressTime: 1616744700,
+    cursorTime: 1616738400,
+    timeframe: '1H',
+    paperTrading,
+  });
+  const coarse = (timestamp: number, low: number): Candlestick => ({
+    instrument: 'BTCUSDT', timeframe: '1H', timestamp,
+    open: 52577, high: 53583.5, low, close: 53556.5, volume: 1,
+  });
+  const fine = (timestamp: number, low: number): Candlestick => ({
+    instrument: 'BTCUSDT', timeframe: '15m', timestamp,
+    open: 52577, high: 53583.5, low, close: 53556.5, volume: 1,
+  });
+  return {
+    saved,
+    paperTrading,
+    cursorCandles: [coarse(1616738400000, 52468.5), coarse(1616742000000, 52398.5)],
+    executionCandles: [fine(1616742000000, 52398.5), fine(1616744700000, postEntryLow)],
+  };
+}
+
+function deferredExecutionResponder() {
+  let resolve!: (response: Response) => void;
+  const responder = vi.fn<ExecutionResponder>(() => new Promise<Response>((done) => { resolve = done; }));
+  return {
+    responder,
+    resolve(candles: Candlestick[]) {
+      resolve(Response.json({ candles }));
+    },
+  };
 }
 
 describe('useFreeReplaySessionLifecycle', () => {
@@ -272,7 +332,7 @@ describe('useFreeReplaySessionLifecycle', () => {
       makeCandle('2024-05-21T09:55:00+08:00'),
       makeCandle('2024-05-21T10:00:00+08:00'),
     ];
-    const { result, callbacks } = setup({ cursorCandles: candles });
+    const { result, callbacks, fetchMock } = setup({ cursorCandles: candles });
     act(() => result.current.start(makeStart()));
     act(() => {
       result.current.setPaperTrading((current) => placeEntryLimit(
@@ -287,6 +347,7 @@ describe('useFreeReplaySessionLifecycle', () => {
     expect(result.current.freeReplay?.cursorTime).toBe(candles[1]!.timestamp / 1000);
     expect(result.current.paperTrading.position).not.toBeNull();
     expect(callbacks.onClearFocus).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith('/api/candles'))).toHaveLength(0);
 
     act(() => result.current.revealNext());
     expect(callbacks.onFutureRetry).toHaveBeenCalledTimes(1);
@@ -408,5 +469,142 @@ describe('useFreeReplaySessionLifecycle', () => {
     const latestFirst = result.current.sessions.find((row) => row.instrument === first.instrument)!;
     act(() => result.current.restore(latestFirst));
     expect(result.current.reviewStatus).toBe('ended');
+  });
+
+  it('does not use pre-progress OHLC for a stop after switching from 15m to 1H', async () => {
+    const fixture = realPartialStopFixture();
+    const { result } = setup({
+      sessions: [fixture.saved],
+      cursorCandles: fixture.cursorCandles,
+      executionCandles: fixture.executionCandles,
+    });
+    await settle();
+    act(() => result.current.restore(fixture.saved));
+
+    act(() => result.current.revealNext());
+    await settleReveal();
+
+    expect(result.current.freeReplay?.cursorTime).toBe(1616742000);
+    expect(result.current.freeReplay?.progressTime).toBe(1616745600);
+    expect(result.current.paperTrading.position).not.toBeNull();
+    expect(result.current.paperTrading.trades).toHaveLength(0);
+  });
+
+  it('still fills a real stop inside the newly advanced child segment', async () => {
+    const fixture = realPartialStopFixture(52402);
+    const { result } = setup({
+      sessions: [fixture.saved],
+      cursorCandles: fixture.cursorCandles,
+      executionCandles: fixture.executionCandles,
+    });
+    await settle();
+    act(() => result.current.restore(fixture.saved));
+
+    act(() => result.current.revealNext());
+    await settleReveal();
+
+    expect(result.current.paperTrading.position).toBeNull();
+    expect(result.current.paperTrading.trades).toHaveLength(1);
+    expect(result.current.paperTrading.trades[0]).toMatchObject({ exitPrice: 52403, exitTime: 1616745600000 });
+  });
+
+  it('deduplicates a pending reveal and commits only after its child candles arrive', async () => {
+    const fixture = realPartialStopFixture();
+    const deferred = deferredExecutionResponder();
+    const { result, callbacks } = setup({
+      sessions: [fixture.saved], cursorCandles: fixture.cursorCandles, executionResponder: deferred.responder,
+    });
+    await settle();
+    act(() => result.current.restore(fixture.saved));
+    const originalReplay = result.current.freeReplay;
+    const originalPaper = result.current.paperTrading;
+
+    act(() => result.current.revealNext());
+    expect(result.current.revealPending).toBe(true);
+    expect(result.current.freeReplay).toBe(originalReplay);
+    expect(result.current.paperTrading).toBe(originalPaper);
+    expect(callbacks.onClearFocus).not.toHaveBeenCalled();
+    act(() => result.current.revealNext());
+    expect(deferred.responder).toHaveBeenCalledTimes(1);
+
+    deferred.resolve(fixture.executionCandles);
+    await settleReveal();
+    expect(result.current.revealPending).toBe(false);
+    expect(result.current.freeReplay?.progressTime).toBe(1616745600);
+    expect(result.current.paperTrading.position).not.toBeNull();
+    expect(callbacks.onClearFocus).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the scene unchanged on incomplete data and permits a retry', async () => {
+    const fixture = realPartialStopFixture();
+    let incomplete = true;
+    const executionResponder: ExecutionResponder = async () => Response.json({ candles: incomplete ? [] : fixture.executionCandles });
+    const { result, callbacks } = setup({
+      sessions: [fixture.saved], cursorCandles: fixture.cursorCandles, executionResponder,
+    });
+    await settle();
+    act(() => result.current.restore(fixture.saved));
+    const originalReplay = result.current.freeReplay;
+    const originalPaper = result.current.paperTrading;
+
+    act(() => result.current.revealNext());
+    await settleReveal();
+    expect(result.current.freeReplay).toBe(originalReplay);
+    expect(result.current.paperTrading).toBe(originalPaper);
+    expect(result.current.executionError).toMatch(/不完整.*未推进 K 线/);
+    expect(result.current.revealPending).toBe(false);
+    expect(callbacks.onClearFocus).not.toHaveBeenCalled();
+
+    incomplete = false;
+    act(() => result.current.revealNext());
+    await settleReveal();
+    expect(result.current.executionError).toBe('');
+    expect(result.current.freeReplay?.progressTime).toBe(1616745600);
+    expect(result.current.paperTrading.position).not.toBeNull();
+  });
+
+  const invalidations: Array<[string, (view: ReturnType<typeof setup>) => void]> = [
+    ['timeframe switch', (view) => view.result.current.switchTimeframe('15m')],
+    ['Paper update', (view) => view.result.current.setPaperTrading((current) => ({ ...current, nextId: 999 }))],
+    ['end review', (view) => view.result.current.endReview()],
+    ['session restore', (view) => view.result.current.restore(makeSession({ instrument: 'ETHUSDT', startTime: '2024-05-22 10:00' }))],
+    ['Replay mode exit', (view) => view.rerender({ ...view.initialProps, active: false })],
+  ];
+
+  it.each(invalidations)('discards a late execution response after %s', async (_name, invalidate) => {
+    const fixture = realPartialStopFixture(52402);
+    const deferred = deferredExecutionResponder();
+    const view = setup({
+      sessions: [fixture.saved], cursorCandles: fixture.cursorCandles, executionResponder: deferred.responder,
+    });
+    await settle();
+    act(() => view.result.current.restore(fixture.saved));
+    act(() => view.result.current.revealNext());
+    expect(view.result.current.revealPending).toBe(true);
+
+    act(() => invalidate(view));
+    deferred.resolve(fixture.executionCandles);
+    await settleReveal();
+
+    expect(view.result.current.revealPending).toBe(false);
+    expect(view.result.current.executionError).toBe('');
+    expect(view.result.current.paperTrading.trades.some((trade) => trade.exitPrice === 52403)).toBe(false);
+    expect(view.result.current.freeReplay?.progressTime).not.toBe(1616745600);
+  });
+
+  it('does not commit a deferred execution after unmount', async () => {
+    const fixture = realPartialStopFixture(52402);
+    const deferred = deferredExecutionResponder();
+    const { result, callbacks, unmount } = setup({
+      sessions: [fixture.saved], cursorCandles: fixture.cursorCandles, executionResponder: deferred.responder,
+    });
+    await settle();
+    act(() => result.current.restore(fixture.saved));
+    act(() => result.current.revealNext());
+    unmount();
+
+    deferred.resolve(fixture.executionCandles);
+    await settleReveal();
+    expect(callbacks.onClearFocus).not.toHaveBeenCalled();
   });
 });

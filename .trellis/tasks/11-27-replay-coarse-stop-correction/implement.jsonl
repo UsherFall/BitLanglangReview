@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/free-replay-session-lifecycle.md", "reason": "Replay游标、Paper、ended、autosave与异步状态所有权"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Dataset与生命周期/App状态边界"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "异步hook、ref、effect和清理约定"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Free Replay质量门禁与回归测试要求"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "Paper类型、开放回合和数值契约"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "SQLite会话blob与本地数据修复安全边界"}
+{"file": ".trellis/tasks/11-27-replay-coarse-stop-correction/research/partial-reveal-execution.md", "reason": "真实复现、订单契约摘录、子周期算法、恢复数值与竞态研究"}

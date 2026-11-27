@@ -274,6 +274,8 @@ export function App() {
     reviewStatus,
     endReview,
     resumeReview,
+    revealPending,
+    executionError,
   } = useFreeReplaySessionLifecycle({
     active: reviewMode === 'freeReplay',
     cursorCandles: freeReplayCandles,
@@ -649,7 +651,7 @@ export function App() {
       if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return;
       if (event.key === 'ArrowRight') {
         event.preventDefault();
-        revealNextFreeReplayCandle();
+        if (!revealPending) revealNextFreeReplayCandle();
       }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
@@ -658,7 +660,7 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [reviewMode, freeReplay, freeReplayCandles, timeframe, paperTrading.active, reviewStatus]);
+  }, [reviewMode, freeReplay, freeReplayCandles, timeframe, paperTrading.active, reviewStatus, revealPending]);
 
   useEffect(() => {
     selectedTradeRowRef.current?.scrollIntoView({ block: 'center' });
@@ -837,6 +839,8 @@ export function App() {
             activeReplay={freeReplay}
             canRewind={!paperTrading.active}
             replayEnded={replayEnded}
+            revealPending={revealPending}
+            executionError={executionError}
             onStart={handleFreeReplayStart}
             onReveal={revealNextFreeReplayCandle}
             onRewind={rewindFreeReplayCandle}

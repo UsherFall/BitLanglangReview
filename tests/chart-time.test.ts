@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candlestick } from '../src/domain/candlestick';
 import { reviewTimeframes } from '../src/domain/trade';
-import { formatChartTime, freeReplayCandleCompletionTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
+import { formatChartTime, freeReplayCandleCompletionTime, freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch, freeReplayProgressTimeForStart, isTimeframeBoundary, markerTimeForEvent, timeframeMs, timeframeTimeForPoint } from '../src/ui/chart-time';
 
 describe('Chart Time', () => {
   it('supports 1m as the first review timeframe', () => {
@@ -139,6 +139,16 @@ describe('candle grid', () => {
       const shanghai = markerTimeForEvent('2026-10-04T17:30:00+08:00', timeframe, [], 'shanghai');
       expect({ timeframe, utc, shanghai }).toEqual({ timeframe, utc: shanghai, shanghai });
     }
+  });
+
+  it('detects exact candle opens on the matching daily grid', () => {
+    expect(isTimeframeBoundary(binanceDailyBar, '1D', 'utc')).toBe(true);
+    expect(isTimeframeBoundary(binanceDailyBar, '1D', 'shanghai')).toBe(false);
+    expect(isTimeframeBoundary(okxDailyBar, '1D', 'shanghai')).toBe(true);
+    expect(isTimeframeBoundary(okxDailyBar, '1D', 'utc')).toBe(false);
+    expect(isTimeframeBoundary(binanceDailyBar + 1, '1D', 'utc')).toBe(false);
+    expect(isTimeframeBoundary(1616744700000, '15m', 'shanghai')).toBe(true);
+    expect(isTimeframeBoundary(1616744700000 + 60_000, '15m', 'shanghai')).toBe(false);
   });
 
   it('closes a monthly bar at the next month on the same grid it opened', () => {

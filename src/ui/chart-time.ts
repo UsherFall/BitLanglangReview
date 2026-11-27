@@ -71,6 +71,11 @@ export function freeReplayCandleCompletionTime(cursorTime: number, timeframe: Re
   return Math.floor((cursorTimestamp + timeframeMs(timeframe)) / 1000) as UTCTimestamp;
 }
 
+/** Whether a millisecond timestamp is exactly on this source grid's bar open. */
+export function isTimeframeBoundary(timestamp: number, timeframe: ReviewTimeframe, grid: CandleGrid = 'shanghai'): boolean {
+  return Number.isFinite(timestamp) && floorTimestamp(timestamp, timeframe, grid) === timestamp;
+}
+
 function timeframeTimeForTimestamp(timestamp: number, timeframe: ReviewTimeframe, candles: Candlestick[], grid: CandleGrid): UTCTimestamp {
   const containing = containingCandleTimestamp(timestamp, timeframe, candles);
   if (containing !== null) return Math.floor(containing / 1000) as UTCTimestamp;

@@ -796,6 +796,77 @@ describe('App Free Replay', () => {
     expect(screen.queryByLabelText(/删除仓1止损/)).not.toBeInTheDocument();
   });
 
+  it('replays only the post-progress 15m segment after switching a stopped position to 1H', async () => {
+    const candleRequests: string[] = [];
+    stubFreeReplayFetch({
+      onCandles: (url) => {
+        candleRequests.push(url);
+        const params = new URL(`http://localhost${url}`).searchParams;
+        const timeframe = params.get('timeframe');
+        if (params.get('mode') !== 'initial') return Response.json({ candles: [] });
+        if (timeframe === '1H') {
+          return Response.json({ candles: [
+            makeCandle('2021-03-26T14:00:00+08:00', { timeframe: '1H', open: 52636.5, high: 52741.5, low: 52468.5, close: 52577 }),
+            makeCandle('2021-03-26T15:00:00+08:00', { timeframe: '1H', open: 52577, high: 53583.5, low: 52398.5, close: 53556.5 }),
+          ] });
+        }
+        if (timeframe === '15m') {
+          return Response.json({ candles: [
+            makeCandle('2021-03-26T15:00:00+08:00', { timeframe: '15m', open: 52577, high: 52655, low: 52398.5, close: 52473.5 }),
+            makeCandle('2021-03-26T15:15:00+08:00', { timeframe: '15m', open: 52473.5, high: 52648.5, low: 52453, close: 52569.5 }),
+            makeCandle('2021-03-26T15:30:00+08:00', { timeframe: '15m', open: 52569.5, high: 53289, low: 52569.5, close: 53156.5 }),
+            makeCandle('2021-03-26T15:45:00+08:00', { timeframe: '15m', open: 53156.5, high: 53583.5, low: 53099.5, close: 53556.5 }),
+          ] });
+        }
+        return Response.json({ candles: [
+          makeCandle('2021-03-26T15:35:00+08:00'),
+          makeCandle('2021-03-26T15:40:00+08:00'),
+          makeCandle('2021-03-26T15:45:00+08:00'),
+        ] });
+      },
+    });
+
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: '回溯复盘' }));
+    await waitFor(() => expect(screen.getByLabelText('交易对')).toHaveValue('BTCUSDT'));
+    fireEvent.change(screen.getByLabelText('开始时间'), { target: { value: '2021-03-26 15:45' } });
+    fireEvent.click(screen.getByRole('button', { name: '开始回溯复盘' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '15m' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '15m' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toContain(Date.parse('2021-03-26T15:30:00+08:00') / 1000));
+    fireEvent.click(screen.getByRole('button', { name: '开始模拟交易' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '市价开仓' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '市价开仓' }));
+    fireEvent.change(screen.getByLabelText('仓1 止损价'), { target: { value: '52403' } });
+    fireEvent.click(screen.getByRole('button', { name: '设仓1止损' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '1H' }));
+    await waitFor(() => expect(lastSetDataRealTimes()).toEqual([Date.parse('2021-03-26T14:00:00+08:00') / 1000]));
+    fireEvent.click(screen.getByRole('button', { name: '下一根 K 线' }));
+
+    await waitFor(() => expect(sessionPutBodies().some((body) => body.progressTime === 1616745600)).toBe(true));
+    const saved = [...sessionPutBodies()].reverse().find((body) => body.progressTime === 1616745600);
+    const paper = saved?.paperTrading as { position: unknown; trades: unknown[] };
+    expect(paper.position).not.toBeNull();
+    expect(paper.trades).toHaveLength(0);
+    expect(screen.getByLabelText('仓1 止损价')).toHaveValue('52403');
+
+    const executionRequest = candleRequests.find((url) => {
+      const params = new URL(`http://localhost${url}`).searchParams;
+      return params.get('mode') === 'initial' && params.get('timeframe') === '15m' && params.get('anchor') === '1616744700000';
+    });
+    expect(executionRequest).toBeDefined();
+    const executionParams = new URL(`http://localhost${executionRequest}`).searchParams;
+    expect(executionParams.get('instrument')).toBe('BTCUSDT');
+    expect(executionParams.get('source')).toBe('bitget');
+    expect(executionParams.get('entryTime')).toBe('2021-03-26T07:45:00.000Z');
+    expect(lastSetDataRealTimes()).toEqual([
+      Date.parse('2021-03-26T14:00:00+08:00') / 1000,
+      Date.parse('2021-03-26T15:00:00+08:00') / 1000,
+    ]);
+  });
+
   it('shows Free Replay hover percentage from the latest revealed candle close', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/trades')) return new Response(JSON.stringify({ trades: [], instruments: [], tags: [] }));
@@ -3087,11 +3158,19 @@ describe('App Free Replay', () => {
     });
     stubFreeReplayFetch({
       sessions: [session],
-      onCandles: () => Response.json({ candles: [
-        makeCandle('2024-05-21T09:30:00+08:00', { timeframe: '15m', close: 11600 }),
-        makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m', close: 11630.5 }),
-        makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m', low: 11500, high: 11600, close: 11568 }),
-      ] }),
+      onCandles: (url) => {
+        const timeframe = new URL(`http://localhost${url}`).searchParams.get('timeframe');
+        if (timeframe === '5m') {
+          return Response.json({ candles: [
+            makeCandle('2024-05-21T10:10:00+08:00', { timeframe: '5m', low: 11500, high: 11600, close: 11568 }),
+          ] });
+        }
+        return Response.json({ candles: [
+          makeCandle('2024-05-21T09:30:00+08:00', { timeframe: '15m', close: 11600 }),
+          makeCandle('2024-05-21T09:45:00+08:00', { timeframe: '15m', close: 11630.5 }),
+          makeCandle('2024-05-21T10:00:00+08:00', { timeframe: '15m', low: 11500, high: 11600, close: 11568 }),
+        ] });
+      },
     });
 
     render(<App />);

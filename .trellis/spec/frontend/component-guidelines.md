@@ -234,12 +234,16 @@ Order execution contracts:
 - Entry and exit limit orders trigger only when a newly revealed candlestick contains the limit price: `low <= price <= high`.
 - Stop-loss orders are valid only on the loss side of the open position: long stop loss below entry price, short stop loss above entry price.
 - Stop-loss orders trigger on newly revealed candlesticks with direction-specific checks: long uses `low <= stopPrice`, short uses `high >= stopPrice`.
+- **Only the newly advanced interval may execute orders (11/27)**: a transitional coarse Candlestick that opens before `previousProgressTime` must not reuse its pre-progress OHLC. When automatic entry/exit/stop orders exist, load the SAME session instrument/source's child Candlesticks on the SAME Candle Grid, choose the coarsest child timeframe aligned to both boundaries, and process only `[previousProgressTime,nextProgressTime)` opens through the existing `processRevealedCandle` in child-close order. Execution children never enter the chart Dataset.
+- Child data must be exactly contiguous through `nextProgressTime`; a request failure, gap or non-advancing page leaves Replay/Paper/Focus unchanged and exposes a retryable error. Never fall back to the coarse candle. Ordinary non-transitional reveals stay synchronous and do not fetch execution children.
+- Pending transitional reveals reject duplicate button/keyboard/lifecycle calls. Scene changes, Paper edits, mode exit and unmount invalidate the operation token so late responses cannot commit.
 - If one newly revealed candlestick touches both an exit limit and a stop-loss price, execute the stop loss first because OHLC data does not contain the intrabar touch order.
 
 Required tests when changing this area:
 
 - Unit tests for the order state transition in `tests/free-replay-paper-trading.test.ts`.
-- App-level tests in `tests/app-free-replay.test.tsx` for any visible control or workflow change.
+- Child-boundary/loading/sequential-execution tests in `tests/free-replay-order-execution.test.ts`; lifecycle pending/failure/stale-response coverage in `tests/free-replay-session-lifecycle.test.tsx`.
+- App-level tests in `tests/app-free-replay.test.tsx` for any visible control or workflow change, including the real 15m→1H pre-progress-low regression.
 
 ### Free Replay Order Focus Anchor (焦点单锚定, 10/29)
 

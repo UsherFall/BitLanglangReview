@@ -3,7 +3,9 @@ import type { Candlestick } from '../domain/candlestick';
 import type { ReviewTimeframe } from '../domain/trade';
 import type { FreeReplayReviewStatus, FreeReplaySession, FreeReplaySessionPayload, FreeReplayStart } from '../domain/free-replay-session';
 import { freeReplayCursorTimeForProgress, freeReplayCursorTimeForStart, freeReplayCursorTimeForTimeframeSwitch } from './chart-time';
-import { LEGACY_REPLAY_CANDLE_SOURCE, nextFreeReplayProgress, previousFreeReplayProgress, replayCandleGrid } from './free-replay-chart';
+import { LEGACY_REPLAY_CANDLE_SOURCE, nextFreeReplayProgress, previousFreeReplayProgress, replayCandleGrid, replayCandleSource, replayRequestInstrument } from './free-replay-chart';
+import { chartMarketContext } from './chart-market-context';
+import { hasAutomaticOrders, loadPartialExecutionCandles, needsPartialExecution, processExecutionCandles } from './free-replay-order-execution';
 import {
   currentCursorCandle,
   initialPaperTradingSession,
@@ -46,6 +48,10 @@ export type FreeReplaySessionLifecycleResult = {
   start: (next: FreeReplayStart) => void;
   restore: (payload: FreeReplaySessionPayload) => void;
   remove: (instrument: string, startTime: string) => Promise<void>;
+  /** Transitional coarse candles load execution-only child candles. */
+  revealPending: boolean;
+  /** Loading/incomplete-data failure; the reveal was not committed. */
+  executionError: string;
   revealNext: () => void;
   rewind: () => void;
   switchTimeframe: (next: ReviewTimeframe) => void;
@@ -83,13 +89,28 @@ export function useFreeReplaySessionLifecycle({
   // 11/10 结束/恢复复盘：整个 Replay 的可逆只读状态。不复用 paperTrading.active
   //（它只表示“是否已开始模拟交易”）；无活跃回放时恒为 active。
   const [reviewStatus, setReviewStatus] = useState<FreeReplayReviewStatus>('active');
+  const [revealPending, setRevealPending] = useState(false);
+  const [executionError, setExecutionError] = useState('');
   const [timeframe, setTimeframe] = useState<ReviewTimeframe>('5m');
   const [sessions, setSessions] = useState<FreeReplaySession[]>([]);
   const pendingSaveRef = useRef<FreeReplaySessionPayload | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const deletedSessionKeysRef = useRef<Set<string>>(new Set());
+  const revealOperationSequenceRef = useRef(0);
+  const activeRevealOperationRef = useRef<number | null>(null);
+  const replayActiveRef = useRef(active);
+  replayActiveRef.current = active;
   const callbacksRef = useRef<LifecycleCallbacks>({ onFutureRetry, onResetView, onClearFocus, onSessionDeleted });
   callbacksRef.current = { onFutureRetry, onResetView, onClearFocus, onSessionDeleted };
+
+  useEffect(() => {
+    if (!active) invalidateReveal();
+  }, [active]);
+
+  useEffect(() => () => {
+    revealOperationSequenceRef.current += 1;
+    activeRevealOperationRef.current = null;
+  }, []);
 
   useEffect(() => {
     fetch('/api/free-replay/sessions')
@@ -165,6 +186,53 @@ export function useFreeReplaySessionLifecycle({
     void persistFreeReplaySession(pending);
   }
 
+  /** Invalidate before any scene/Paper command so a late child-candle load is inert. */
+  function invalidateReveal(): void {
+    revealOperationSequenceRef.current += 1;
+    activeRevealOperationRef.current = null;
+    setRevealPending(false);
+    setExecutionError('');
+  }
+
+  function commitReveal(current: FreeReplayStart, nextReplay: { cursorTime: number; progressTime: number }, nextPaper: PaperTradingSession): void {
+    callbacksRef.current.onClearFocus();
+    setPaperTradingState(nextPaper);
+    setFreeReplay({ ...current, ...nextReplay });
+  }
+
+  function revealPartial(current: FreeReplayStart, nextReplay: { cursorTime: number; progressTime: number }): void {
+    const operation = revealOperationSequenceRef.current + 1;
+    revealOperationSequenceRef.current = operation;
+    activeRevealOperationRef.current = operation;
+    setRevealPending(true);
+    setExecutionError('');
+
+    const source = replayCandleSource(current);
+    const market = chartMarketContext(source);
+    const instrument = replayRequestInstrument(current.instrument, market.requestSource);
+    void loadPartialExecutionCandles({
+      instrument,
+      source,
+      previousProgressTime: current.progressTime,
+      nextProgressTime: nextReplay.progressTime,
+      timeframe,
+      grid: market.grid,
+    }).then((candles) => {
+      if (!replayActiveRef.current || activeRevealOperationRef.current !== operation) return;
+      const nextPaper = processExecutionCandles(paperTrading, candles);
+      if (!replayActiveRef.current || activeRevealOperationRef.current !== operation) return;
+      activeRevealOperationRef.current = null;
+      commitReveal(current, nextReplay, nextPaper);
+      setRevealPending(false);
+    }).catch((error: unknown) => {
+      if (!replayActiveRef.current || activeRevealOperationRef.current !== operation) return;
+      activeRevealOperationRef.current = null;
+      setRevealPending(false);
+      const reason = error instanceof Error ? error.message : '细周期成交数据加载失败';
+      setExecutionError(`${reason}；未推进 K 线`);
+    });
+  }
+
   function restore(payload: FreeReplaySessionPayload): void {
     // Do not drop the outgoing Session's final reveal/trading action.
     flushPendingSave();
@@ -177,6 +245,7 @@ export function useFreeReplaySessionLifecycle({
     // ended 下同 key restore 完全 no-op：否则历史行/模拟单库里的旧保存值会
     // 暗中回滚游标或 Paper 现场。模拟单库仍会在 restore 返回后设置 Focus。
     if (sameActiveSession && reviewStatus === 'ended') return;
+    invalidateReveal();
     setFreeReplay({
       instrument: payload.instrument,
       candleSource: payload.candleSource ?? LEGACY_REPLAY_CANDLE_SOURCE,
@@ -200,6 +269,7 @@ export function useFreeReplaySessionLifecycle({
       return;
     }
     deletedSessionKeysRef.current.delete(sessionKey(next.instrument, next.startTime));
+    invalidateReveal();
     setReviewStatus('active');
     setFreeReplay(next);
     setPaperTradingState(initialPaperTradingSession());
@@ -207,6 +277,7 @@ export function useFreeReplaySessionLifecycle({
   }
 
   async function remove(instrument: string, startTime: string): Promise<void> {
+    invalidateReveal();
     const key = sessionKey(instrument, startTime);
     // Mark before DELETE resolves so an in-flight PUT cannot resurrect the row.
     deletedSessionKeysRef.current.add(key);
@@ -252,6 +323,7 @@ export function useFreeReplaySessionLifecycle({
   function applyReviewStatus(next: FreeReplayReviewStatus): void {
     const current = freeReplay;
     if (!current) return;
+    invalidateReveal();
     setReviewStatus(next);
     setSessions((rows) => rows.map((row) => (
       row.instrument === current.instrument && row.startTime === current.startTime
@@ -261,24 +333,35 @@ export function useFreeReplaySessionLifecycle({
   }
 
   function revealNext(): void {
-    if (!freeReplay) return;
-    // 11/10：结束复盘后步进冻结 —— 守卫在清焦点/游标计算/future retry 之前，
-    // 按钮、键盘与直接调用同归于静默，不触发成交处理。
-    if (reviewStatus === 'ended') return;
-    callbacksRef.current.onClearFocus();
+    if (!freeReplay || reviewStatus === 'ended' || activeRevealOperationRef.current !== null) return;
+    invalidateReveal();
     const nextReplay = nextFreeReplayProgress(cursorCandles, freeReplay.cursorTime, freeReplay.progressTime, timeframe);
-    if (nextReplay.cursorTime !== freeReplay.cursorTime) {
-      const revealedCandle = currentCursorCandle(cursorCandles, nextReplay.cursorTime);
-      if (revealedCandle) setPaperTradingState((current) => processRevealedCandle(current, revealedCandle, nextReplay.progressTime));
-    } else {
+    if (nextReplay.cursorTime === freeReplay.cursorTime) {
+      callbacksRef.current.onClearFocus();
       callbacksRef.current.onFutureRetry();
+      return;
     }
-    setFreeReplay({ ...freeReplay, ...nextReplay });
+    const revealedCandle = currentCursorCandle(cursorCandles, nextReplay.cursorTime);
+    if (revealedCandle && hasAutomaticOrders(paperTrading) && needsPartialExecution(revealedCandle, freeReplay.progressTime)) {
+      revealPartial(freeReplay, nextReplay);
+      return;
+    }
+    const nextPaper = revealedCandle
+      ? processRevealedCandle(paperTrading, revealedCandle, nextReplay.progressTime)
+      : paperTrading;
+    commitReveal(freeReplay, nextReplay, nextPaper);
   }
 
   function rewind(): void {
     // 11/10：结束后回退同样冻结（与模拟交易锁叠加，两者都只锁游标不清焦点）。
-    if (!freeReplay || reviewStatus === 'ended' || paperTrading.active) return;
+    if (!freeReplay || reviewStatus === 'ended') return;
+    // A pending coarse transition has not committed; rewind simply cancels it.
+    if (activeRevealOperationRef.current !== null) {
+      invalidateReveal();
+      return;
+    }
+    if (paperTrading.active) return;
+    invalidateReveal();
     callbacksRef.current.onClearFocus();
     const progressTime = Math.max(previousFreeReplayProgress(freeReplay.cursorTime), freeReplay.startProgressTime);
     setFreeReplay({
@@ -289,6 +372,7 @@ export function useFreeReplaySessionLifecycle({
   }
 
   function switchTimeframe(nextTimeframe: ReviewTimeframe): void {
+    invalidateReveal();
     setTimeframe(nextTimeframe);
     // 11/26：active / ended 都保留当前焦点单。同一 token 配上新的 rangeKey，
     // 图表会重新获取目标周期的开仓点窗口并定位；剪刀隐藏态也随 Focus 保留。
@@ -305,6 +389,7 @@ export function useFreeReplaySessionLifecycle({
   // 而非散在各个回调里，未来新增的交易命令同样被覆盖。
   const setPaperTrading: Dispatch<SetStateAction<PaperTradingSession>> = (action) => {
     if (reviewStatus === 'ended') return;
+    invalidateReveal();
     setPaperTradingState(action);
   };
 
@@ -315,6 +400,8 @@ export function useFreeReplaySessionLifecycle({
     reviewStatus,
     endReview,
     resumeReview,
+    revealPending,
+    executionError,
     timeframe,
     setTimeframe,
     sessions,

@@ -26,6 +26,8 @@ export function FreeReplayPanel({
   onRewind,
   canRewind = true,
   replayEnded = false,
+  revealPending = false,
+  executionError = '',
   sessions,
   activeReplay,
   onRestore,
@@ -50,6 +52,10 @@ export function FreeReplayPanel({
   canRewind?: boolean;
   /** 11/10 结束复盘：冻结上一根/下一根，恢复后解除。 */
   replayEnded?: boolean;
+  /** A transitional reveal commits only after its execution child candles load. */
+  revealPending?: boolean;
+  /** Failed/incomplete execution data; no cursor or Paper change was committed. */
+  executionError?: string;
   sessions?: FreeReplaySession[];
   activeReplay?: FreeReplayStart | null;
   onRestore?: (session: FreeReplaySession) => void;
@@ -205,7 +211,12 @@ export function FreeReplayPanel({
         >
           上一根 K 线
         </button>
-        <button type="button" disabled={replayEnded} title={replayEnded ? '结束复盘后不能调整 K 线进度' : undefined} onClick={onReveal}>下一根 K 线</button>
+        <button
+          type="button"
+          disabled={replayEnded || revealPending}
+          title={replayEnded ? '结束复盘后不能调整 K 线进度' : revealPending ? '正在加载细周期成交数据' : undefined}
+          onClick={onReveal}
+        >下一根 K 线</button>
       </div>
       <div className="free-replay-history" data-testid="free-replay-history">
         <button type="button" className="history-header" aria-expanded={!historyCollapsed} onClick={() => setHistoryCollapsed((current) => !current)}>
@@ -353,7 +364,11 @@ export function FreeReplayPanel({
           </div>
         )}
       </div>
-      {status && <p className="panel-status">{status}</p>}
+      {(status || revealPending || executionError) && (
+        <p className="panel-status" role={executionError ? 'alert' : undefined}>
+          {executionError || (revealPending ? '加载细周期成交数据，完成前不会推进 K 线' : status)}
+        </p>
+      )}
     </div>
   );
 }

@@ -118,6 +118,18 @@ describe('FreeReplayPanel', () => {
     expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
   });
 
+  it('locks repeated reveal while execution candles load and exposes a retryable failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ instruments: ['BTCUSDT'] }))));
+    const { rerender } = render(<FreeReplayPanel timeframe="5m" revealPending />);
+
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeDisabled();
+    expect(screen.getByText('加载细周期成交数据，完成前不会推进 K 线')).toBeInTheDocument();
+
+    rerender(<FreeReplayPanel timeframe="5m" executionError="细周期成交数据不完整；未推进 K 线" />);
+    expect(screen.getByRole('button', { name: '下一根 K 线' })).toBeEnabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('未推进 K 线');
+  });
+
   // 11/04：回顾页首页并列的「模拟单库」—— 跨会话聚合已完结回合。
   const round = {
     id: 'paper:BTCUSDT:2024-05-21 10:07:position-1',

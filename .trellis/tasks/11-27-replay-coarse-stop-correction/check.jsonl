@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/free-replay-session-lifecycle.md", "reason": "复核异步reveal、ended、autosave与Focus兼容"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "执行Free Replay和全量质量门禁"}
+{"file": ".trellis/spec/domain/trade-and-review-model.md", "reason": "复核Paper Round派生和开放回合排除"}
+{"file": ".trellis/spec/server/persistence-and-imports.md", "reason": "复核SQLite备份、事务与其他数据不变"}
+{"file": ".trellis/tasks/11-27-replay-coarse-stop-correction/research/partial-reveal-execution.md", "reason": "对照真实数据、订单契约、精确恢复值和风险验收"}
