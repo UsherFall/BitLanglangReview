@@ -402,3 +402,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: 修复跨周期误触止损并恢复合并持仓
+<!-- trellis-session: v=2 fp=0e1f11b28034d314 -->
+
+**Date**: 2026-11-27
+**Task**: 修复跨周期误触止损并恢复合并持仓
+**Branch**: `fix/replay-coarse-stop-correction`
+
+### Summary
+
+复现 BTC 2021-02-28 会话 position-31 的15m→1H误损：粗K线52398.5低点在开仓前。新增同源/grid细周期新片段精确执行、完整性失败不推进及异步迟到响应防护，保留普通同步步进和现有订单状态机。193项相关测试、App 70/70、tsc/diff/context通过；原始全量788个可运行测试通过，level-alert缺pool为既有环境问题。真实SQLite经副本演练、备份和事务校验后恢复为一个10x多仓（数量0.27049727768827403、止损52403），删除fill-35/36；备份data/review.bak-20261127T080407.728757Z-position-31.sqlite，生产Paper Round派生不显示开放回合。子代理因spawn pi ENOENT不可用，主会话完成复核。spec与任务文档已同步。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `956d654` | fix(replay): 修复跨周期误触止损并恢复合并持仓 |
+
+### Status
+
+[OK] **Completed**

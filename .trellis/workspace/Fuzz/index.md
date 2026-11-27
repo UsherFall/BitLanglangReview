@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
-- **Last Active**: 2026-11-26
+- **Total Sessions**: 18
+- **Last Active**: 2026-11-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~404 | Active |
+| `journal-1.md` | ~426 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-11-27 | 修复跨周期误触止损并恢复合并持仓 | `956d654` | `fix/replay-coarse-stop-correction` |
 | 17 | 2026-11-26 | 修复回溯切周期开仓前视图 | `1a689c3`, `877a9d1`, `e9e3b11` | `master` |
 | 16 | 2026-11-24 | 画线新增自由画笔 | `5e39b27`, `e00af7f`, `883e2f4` | `master` |
 | 15 | 2026-11-23 | BTC 回放研究与活跃度扫描升级 | `97a9f96`, `08d54ac` | `research/btc-2020-05-12-review` |
